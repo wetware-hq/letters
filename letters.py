@@ -1730,6 +1730,18 @@ def _v_med_ok(part, plain):
     return all(_freq_present(tok, plain, written) for tok, written in note_freqs(part))
 
 
+WRONG_SECTION = "Refused: {what} on line {lid} of the notes is in the wrong section of this letter. Nothing was written."
+SECTION_ND = 'Refused: the {sec} section says "not documented", but line {lid} of the notes has one. Nothing was written.'
+
+
+def _section_says_nd(md, heads, empty):
+    for head in heads:
+        m = re.search(rf"^## {re.escape(head)}\n(.*?)(?=^## |^---|\Z)", md, re.S | re.M)
+        if m and empty in m.group(1):
+            return True
+    return False
+
+
 def verify_letter(md, text, audience="gp", include=(), collect=None):
     """Post-write check on the finished letter against the notes alone. Medicine: drug (generic ok), every dose,
     every frequency (or its signed plain words) and any maximum, in a current-medicines line citing that note line.
@@ -1745,6 +1757,13 @@ def verify_letter(md, text, audience="gp", include=(), collect=None):
     cut = _v_cut_words(text, audience, include)
     is_cut = lambda s: any(r.search(s) for r in cut)
     notes = read_notes(text)
+    nd = {"med": _section_says_nd(md, MED_SECTIONS, EMPTY["meds"]),
+          "allergy": _section_says_nd(md, ALLERGY_SECTIONS, EMPTY["allergies"])}
+    for lid, kind, body in notes:                # a section may not say "not documented" when the notes have one
+        if kind == "med" and nd["med"]:
+            fail(SECTION_ND.format(sec="medicines", lid=lid)); nd["med"] = False
+        elif kind == "allergy" and nd["allergy"]:
+            fail(SECTION_ND.format(sec="allergies", lid=lid)); nd["allergy"] = False
     later = {}                                   # drug key -> number of later medicine or stop lines naming it
     for lid, kind, body in notes:
         if kind in ("med", "stop"):
@@ -1761,7 +1780,8 @@ def verify_letter(md, text, audience="gp", include=(), collect=None):
                 if ok == "max":
                     fail(MAX_MISSING.format(lid=lid))
                 elif not ok:
-                    fail(MED_MISSING.format(lid=lid))
+                    fail(WRONG_SECTION.format(what="a medicine", lid=lid) if _v_med_ok(part, anywhere) is True
+                         else MED_MISSING.format(lid=lid))
                 reason = _v_reason(part)
                 if reason and cut and (is_cut(reason) or is_cut(part)) and _norm(reason) in anywhere:
                     fail(LEAK_REFUSED.format(lid=lid))
@@ -1770,9 +1790,12 @@ def verify_letter(md, text, audience="gp", include=(), collect=None):
             if not _drug_present(body, in_meds) or not STOP_RX.search(in_meds):
                 fail(MED_MISSING.format(lid=lid))
         elif kind == "allergy":
+            in_all = " ".join(t for s, t in cites if s in ALLERGY_SECTIONS)
+            has = lambda a, r, where: _norm(a) in where and (not r or _norm(r) in where)
             for allergen, reaction in _v_allergies(body):
-                if _norm(allergen) not in anywhere or (reaction and _norm(reaction) not in anywhere):
-                    fail(ALLERGY_MISSING.format(lid=lid)); break
+                if not has(allergen, reaction, in_all):
+                    fail(WRONG_SECTION.format(what="an allergy", lid=lid) if has(allergen, reaction, anywhere)
+                         else ALLERGY_MISSING.format(lid=lid)); break
         elif kind == "result":
             if is_cut(body):
                 continue

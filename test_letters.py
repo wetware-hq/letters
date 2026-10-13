@@ -1981,9 +1981,9 @@ def test_r8_guard_medicine_missing_entirely_refuses():
 
 def test_r8_guard_allergy_reaction_dropped_refuses():
     notes = "Patient: SYNTH-9803\nReactions on file: trimethoprim - itchy rash\n1937-04-02 review.\n"
-    _guard(notes, ["- trimethoprim - itchy rash [L2]"])
+    _guard(notes, ["## Allergies", "", "- trimethoprim - itchy rash [L2]"])
     with pytest.raises(L.Refused, match=re.escape(L.ALLERGY_MISSING.format(lid="L2"))):
-        _guard(notes, ["- trimethoprim [L2]"])
+        _guard(notes, ["## Allergies", "", "- trimethoprim [L2]"])
 
 
 def test_r8_guard_stop_line_needs_drug_and_stop_word():
@@ -2137,12 +2137,12 @@ def _ck(notes, md, audience="gp", include=()):
 
 def test_r9_checker_refuses_merged_medicine_lines():
     """Two bulleted medicine lines merged into one fake change: the first medicine is only in the change line."""
-    md = _letter([("Background", ["1 Feb 1937: lipid clinic, LDL 1937-01-28 3.4 mmol/L. [L3]",
-                                  "Sensitivities: zorbamycin (nausea + vomiting) [L2]"]),
+    md = _letter([("Background", ["1 Feb 1937: lipid clinic, LDL 1937-01-28 3.4 mmol/L. [L3]"]),
+                  ("Allergies", ["zorbamycin: nausea + vomiting [L2]"]),
                   ("Medicine changes", ["Changed on 1 Feb 1937: from * alphastatin 2 mg nocte. Now: * betamibe 10 mg "
                                         "daily. Reason for change: not documented. [L5, L6]"]),
                   ("Current medicines", ["* betamibe 10 mg daily (for cholesterol) [L5, L6]"])])
-    assert _ck(CK_BLOCK, md) == [L.MED_MISSING.format(lid="L5")]
+    assert _ck(CK_BLOCK, md) == [L.WRONG_SECTION.format(what="a medicine", lid="L5")]   # only in the change line
     good = md.replace("- * betamibe 10 mg daily (for cholesterol) [L5, L6]",
                       "- alphastatin 2 mg nocte (for cholesterol) [L5]\n- betamibe 10 mg daily [L6]")
     assert _ck(CK_BLOCK, good) == []
@@ -2174,7 +2174,8 @@ def test_r9_checker_refuses_block_medicine_outside_medicines():
     notes = "SYNTH-9904 :: F :: 45\n1937-07-02 seen for tiredness.\nRegular meds \u2014\n  combined pill daily\n"
     bad = _letter([("Background", ["2 Jul 1937: combined pill daily [L4]"]),
                    ("Current medicines", ["Current medicines not documented."])])
-    assert _ck(notes, bad) == [L.MED_MISSING.format(lid="L4")]
+    assert _ck(notes, bad) == [L.SECTION_ND.format(sec="medicines", lid="L4"),
+                               L.WRONG_SECTION.format(what="a medicine", lid="L4")]
     assert _ck(notes, _letter([("Current medicines", ["combined pill daily [L4]"])])) == []
 
 
@@ -2195,10 +2196,10 @@ def test_r9_checker_refuses_cut_sentence_left_in():
     bad = _letter([("Medicine changes", ["Changed on 2 Jun 1937: from clozapine 200 mg nocte. Now: Clozapine bloods "
                                          "due weekly per clinic.. Reason for change: not documented. [L4, L5]"]),
                    ("Current medicines", ["Clozapine bloods due weekly per clinic., reason not documented [L4, L5]"])])
-    assert _ck(notes, bad) == [L.MED_MISSING.format(lid="L4"), L.LINKED_REFUSED.format(lid="L5")]
+    assert _ck(notes, bad) == [L.WRONG_SECTION.format(what="a medicine", lid="L4"), L.LINKED_REFUSED.format(lid="L5")]
     good = _letter([("Current medicines", ["clozapine 200 mg nocte [L4]"])])
     assert _ck(notes, good) == []
-    assert _ck(notes, bad.replace("Changed", "Changed"), include=["psychiatric history"]) == [L.MED_MISSING.format(lid="L4")]
+    assert _ck(notes, bad.replace("Changed", "Changed"), include=["psychiatric history"]) == [L.WRONG_SECTION.format(what="a medicine", lid="L4")]
 
 
 def test_r9_checker_raises_first_refusal_when_not_collecting():
@@ -2268,3 +2269,49 @@ def test_r9_block_line_without_dose_is_a_medicine():
 def test_r9_same_drug_rewritten_is_still_a_change():
     md = make_letter(F("chest_pain.txt"), "referral", "Cardiology")
     assert "from ramipril 2.5 mg daily. Now: ramipril 5 mg daily" in md
+
+
+# ---------- round 9: per-section check ----------
+SEC_NOTES = "SYNTH-9921 :: F :: 81\nSensitivities: zorvadol - hallucinations\n1937-05-14 falls review.\nMed: alphavit 1000 mg daily\n"
+
+
+def test_r9_allergy_in_wrong_section_refused_exact_wording():
+    md = _letter([("Background", ["Sensitivities: zorvadol - hallucinations [L2]"]),
+                  ("Current medicines", ["alphavit 1000 mg daily [L4]"]), ("Allergies", ["penicillin: rash [L9]"])])
+    assert _ck(SEC_NOTES, md) == ["Refused: an allergy on line L2 of the notes is in the wrong section of this letter. "
+                                  "Nothing was written."]
+
+
+def test_r9_medicine_in_wrong_section_refused_exact_wording():
+    md = _letter([("Background", ["alphavit 1000 mg daily [L4]"]), ("Allergies", ["zorvadol: hallucinations [L2]"])])
+    assert _ck(SEC_NOTES, md) == ["Refused: a medicine on line L4 of the notes is in the wrong section of this letter. "
+                                  "Nothing was written."]
+
+
+def test_r9_allergies_not_documented_contradiction_exact_wording():
+    md = _letter([("Background", ["Sensitivities: zorvadol - hallucinations [L2]"]),
+                  ("Current medicines", ["alphavit 1000 mg daily [L4]"]), ("Allergies", ["Allergies not documented."])])
+    with pytest.raises(Refused) as e:
+        L.verify_letter(md, SEC_NOTES)
+    assert str(e.value) == ('Refused: the allergies section says "not documented", but line L2 of the notes has one. '
+                            'Nothing was written.')
+
+
+def test_r9_medicines_not_documented_contradiction_exact_wording():
+    md = _letter([("Current medicines", ["Current medicines not documented."]), ("Allergies", ["zorvadol: hallucinations [L2]"])])
+    with pytest.raises(Refused) as e:
+        L.verify_letter(md, SEC_NOTES)
+    assert str(e.value) == ('Refused: the medicines section says "not documented", but line L4 of the notes has one. '
+                            'Nothing was written.')
+
+
+def test_r9_nil_allergy_with_not_documented_refused():
+    notes = "SYNTH-9922 :: F :: 49\nSensitivities: none\n1937-03-30 review.\n"
+    md = _letter([("Allergies", ["Allergies not documented."])])
+    assert _ck(notes, md) == [L.SECTION_ND.format(sec="allergies", lid="L2")]
+
+
+def test_r9_patient_sections_checked_too():
+    md = _letter([("Your health so far", ["Sensitivities: zorvadol - hallucinations [L2]"]),
+                  ("Your medicines now", ["alphavit 1000 mg once a day [L4]"]), ("Allergies", ["Allergies not documented."])])
+    assert L.SECTION_ND.format(sec="allergies", lid="L2") in _ck(SEC_NOTES, md, audience="patient")
