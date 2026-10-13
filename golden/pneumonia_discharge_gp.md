@@ -43,8 +43,8 @@ Discharged on 4 Jun 1937. Actions are numbered at the end.
 
 ## Results still to come
 
-- blood cultures, sent on 1 Jun 1937. Who follows up: not documented. [L9]
-- sputum culture, sent on 4 Jun 1937. Who follows up: not documented. [L18]
+- blood cultures, sent on an undocumented date. Who follows up: not documented. [L9]
+- sputum culture, sent on an undocumented date. Who follows up: not documented. [L18]
 
 ## Actions
 

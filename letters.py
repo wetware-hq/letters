@@ -134,6 +134,7 @@ def sensitive_cat(s):
     return None
 
 
+_EMPTY_FIELDS = set()   # template list fields left empty (set per letter by build_from_template)
 _INCLUDE = set()     # items the brief asked to include ('include: <item name>'); set by build() for one letter
 
 
@@ -562,11 +563,14 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                     sr = STOP_REASON.match(drug)
                     if sr:
                         drug, reason = sr.group("d").strip(" ,;-"), (sr.group("r") or sr.group("r2")).strip(" .")
+                sd = ISO.search(drug)
+                sdate = sd.group(0) if sd else d                 # the line's own date first, else its dated entry
+                drug = re.sub(r"\s+", " ", ISO.sub(" ", drug)).strip(" ,;-") if sd else drug
                 k = _mkey(drug)
                 old = st["meds"].pop(k, None)
                 st["stopped"][k] = d
                 st["med_changes"].append({"what": ("stopped", old["drug"] if old else drug), "reason": reason,
-                                          "date": d, "ids": (old["ids"] if old else []) + ids})
+                                          "date": sdate, "ids": (old["ids"] if old else []) + ids})
             elif kind == "allergy":
                 st["allergies"].append((body, ids))
             elif kind == "result":
@@ -584,11 +588,14 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 h = st["results"].setdefault(k, {"name": name, "values": []})
                 h["values"].append((d, r.group("val"), r.group("unit"), r.group("note").strip(), lid))
             elif kind == "pending":
+                sm = re.search(r";\s*sent:\s*(1937-\d{2}-\d{2})", body)
+                sent = sm.group(1) if sm else None
+                body = re.sub(r";\s*sent:\s*1937-\d{2}-\d{2}", "", body)
                 parts = re.split(r";\s*(?:follow-up|who|f/u)\s*:\s*", body, flags=re.I)
                 test, who = (parts[0].strip(), parts[1].strip()) if len(parts) > 1 else split_owner(parts[0])
                 k = test.lower()
                 if k not in st["results"]:
-                    st["pending"][k] = (test, who, d, ids)
+                    st["pending"][k] = (test, who, sent, ids)   # only a sent date written on the line itself
             elif kind == "admission":
                 st["admission"].append((body, ids))
                 st["admit"] = st["admit"] or d
@@ -717,6 +724,11 @@ def section_items(name, st, audience="specialist"):
     if name == "followup":
         out = []
         for b, i in st["followup"]:
+            if " || " in b:                                   # template: '- action, owner'
+                a, w = b.split(" || ", 1)
+                t = WHEN.search(a)
+                out.append(f"Who: {w or ND}. When: {t.group(0) if t else ND}. Action: {a}" + tag(i))
+                continue
             dm = re.match(r"^(?P<a>.+?)\s[-\u2013\u2014]+\s(?P<w>.+)$", b)
             w = dm.group("w").strip(" .") if dm and (WHO.search(dm.group("w")) or OWNER_ROLE.search(dm.group("w"))) else None
             if not w:
@@ -745,7 +757,9 @@ def render_section(name, st, audience):
     else:
         body = [f"- {x}" for x in items]
     if not body:
-        if name in EMPTY:
+        if name in _EMPTY_FIELDS:
+            body = [f"- {NONE_RECORDED}"]
+        elif name in EMPTY:
             body = [f"- {EMPTY[name]}"]
         else:
             return None
@@ -976,7 +990,7 @@ def check(md, sources, letter_type):
         if section in ("Results", "Your test results") and DIRECTION.search(text):
             problems.append(f"Refused: direction word in results at {at}. Give values with dates.")
         if not cited:
-            if text.strip() in EMPTY.values():
+            if text.strip() in EMPTY.values() or text.strip() == NONE_RECORDED:
                 continue
             problems.append(f"Refused: unsourced sentence at {at}.")
             continue
@@ -1526,7 +1540,7 @@ def refuse_missing_required(md, text, pending_ids=None):
             need = [r for _, r in (split_reaction(p) for p in re.split(r"[,;](?![^()]*\))", body))
                     if r and not NO_REACTION.match(r)]
         elif kind == "pending" and (pending_ids is None or lid in pending_ids):
-            parts = re.split(r";\s*(?:follow-up|who|f/u)\s*:\s*", body, flags=re.I)
+            parts = re.split(r";\s*(?:follow-up|who|f/u)\s*:\s*", re.sub(r";\s*sent:\s*\S+", "", body), flags=re.I)
             who = parts[1].strip() if len(parts) > 1 else split_owner(parts[0])[1]
             need = [who] if who else []
         for x in need:
@@ -1866,6 +1880,161 @@ def refuse_missing_medicines(md, text, audience="gp", include=()):
     return verify_letter(md, text, audience, include)
 
 
+# ---------- fixed notes template (round 10) ----------
+# Fields start a line, in this order. List fields take one item per line starting with '- '.
+TEMPLATE_FIELDS = ("Patient", "Date", "Recipients", "Question", "Problems", "History", "Medicines", "Allergies",
+                   "Results", "Pending", "Actions")
+TEMPLATE_REQUIRED = TEMPLATE_FIELDS             # every heading must be there; a list may be empty
+TEMPLATE_LISTS = ("Problems", "Medicines", "Allergies", "Results", "Pending", "Actions")
+TEMPLATE_REFUSED = "Refused: line L{n} of the notes doesn't follow the template. Nothing was written."
+FIELD_RX = re.compile(r"^(?P<f>[A-Za-z]+)\s*:\s*(?P<v>.*)$")
+NKA_RX = re.compile(r"^(?:no known(?: drug)? allergies|nkda|nil known(?: allergies)?)\.?$", re.I)
+
+
+def from_template(text):
+    """Validate notes against the fixed template and turn each field into the tagged line the reader uses.
+    Line numbers never move. The Recipients line is blanked: it never reaches the letter.
+    Refuses on a missing required field, an unknown or out-of-order field, or a list item without '- '."""
+    lines = text.splitlines()
+    out, pos, field, seen = [], -1, None, []
+    def bad(n):
+        raise Refused(TEMPLATE_REFUSED.format(n=n))
+    for n, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line:
+            out.append(""); continue
+        if line.startswith("- "):
+            if field not in TEMPLATE_LISTS:
+                bad(n)
+            item = line[2:].strip()
+            if not item:
+                bad(n)
+            conv = _template_item(field, item)
+            if conv is None:
+                bad(n)
+            out.append(conv); continue
+        m = FIELD_RX.match(line)
+        f = m.group("f").capitalize() if m else None
+        if f not in TEMPLATE_FIELDS:
+            bad(n)
+        i = TEMPLATE_FIELDS.index(f)
+        if i <= pos:
+            bad(n)
+        for req in TEMPLATE_REQUIRED:                        # a required field may not be skipped
+            if TEMPLATE_FIELDS.index(req) < i and req not in seen:
+                bad(n)
+        pos, field, v = i, f, m.group("v").strip()
+        seen.append(f)
+        if f in TEMPLATE_LISTS:
+            if v and not (f == "Allergies" and NKA_RX.match(v)):
+                bad(n)
+            out.append("Allergy: nil known" if v else f"#field {f}"); continue
+        if f == "Patient":
+            if not SYNTH.fullmatch(v):
+                bad(n)
+            out.append(f"Patient: {v}")
+        elif f == "Date":
+            if not re.fullmatch(r"1937-\d{2}-\d{2}", v):
+                bad(n)
+            out.append(v)
+        elif f == "Recipients":
+            if not v:
+                bad(n)
+            if RECIPIENT_SPLIT.search(v):
+                raise Refused(RECIPIENTS_REFUSED.format(n=n))
+            out.append("#")                                   # the only place a recipient may appear; never in the letter
+        elif f == "Question":
+            if not v:
+                bad(n)
+            out.append("#" if v.lower().strip(" .") == "none" else f"Question: {v}")
+        elif f == "History":
+            out.append(f"History: {v}" if v else "#")
+    missing = [r for r in TEMPLATE_REQUIRED if r not in seen]
+    if missing:
+        bad(len(lines) + 1 if lines else 1)
+    return "\n".join(out) + "\n"
+
+
+TEMPLATE_SECTIONS = {"Problems": ("problems",), "Medicines": ("meds",), "Allergies": ("allergies",),
+                     "Results": ("results",), "Pending": ("pending",), "Actions": ("followup",)}
+NONE_RECORDED = "none recorded."
+
+
+def empty_template_sections(converted):
+    """Sections whose template list field has a heading and no items: the letter says 'none recorded'."""
+    lines = converted.splitlines()
+    out = set()
+    for i, l in enumerate(lines):
+        if l.startswith("#field "):
+            nxt = next((x for x in lines[i + 1:] if x.strip()), "")
+            if nxt.startswith("#") or not nxt or nxt.startswith("1937-"):
+                out.update(TEMPLATE_SECTIONS[l.split(" ", 1)[1]])
+    return out
+
+
+RECIPIENTS_REFUSED = ("Refused: line L{n} lists more than one recipient. Write a separate letter for each reader. "
+                      "Nothing was written.")
+RECIPIENT_SPLIT = re.compile(r"[,;&/+]|\band\b|\balso\b|\bplus\b", re.I)
+
+# The medicine-line grammar lives here only (the reason marker may still change):
+# '- drug dose frequency [route] [max X in 24 hours | max X per <period>] [for N days] [reason: <why>]
+#    [; stopped|ceased|withheld <date> - <stop reason>]'. Parts in this order; anything else doesn't fit.
+MED_REASON_MARK = "reason:"
+_FREQS = r"(?:once daily|twice daily|three times daily|four times daily|daily|bd|tds|qid|nocte|mane|prn|weekly|od)"
+MED_ITEM = re.compile(
+    r"^(?P<drug>[A-Za-z][\w/-]*(?:\s+(?!\d)[A-Za-z][\w/-]*)*?)"
+    r"(?:\s+(?P<dose>\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?\s?(?:mg|mcg|micrograms?|g|mL|ml|units?|IU|%|puffs?|tablets?|drops?)?"
+    r"(?:\s+(?:one|two)\s+puffs?)?))?"
+    r"\s+(?P<freq>" + _FREQS + r"(?:\s+and\s+" + _FREQS + r")?)"
+    r"(?:\s+(?P<route>oral|IV|PO|SC|IM|inhaled|topical|sublingual|PR|intravenous|subcutaneous|by mouth))?"
+    r"(?:\s+(?P<max>max(?:imum)?\s+\d+(?:\.\d+)?\s?(?:mg|mcg|g|mL|tablets?|doses?|puffs?)?\s+(?:in\s+24\s+hours|per\s+[a-z]+)))?"
+    r"(?:\s+(?P<dur>for\s+\d+\s+(?:more\s+)?days?))?"
+    r"(?:\s+" + re.escape(MED_REASON_MARK) + r"\s*(?P<reason>(?:(?!\bmax(?:imum)?\s+\d|\bfor\s+\d+\s+(?:more\s+)?days?\b)[^;])+?))?"
+    r"(?:\s*;\s*(?P<stop>stopped|ceased|withheld)\s+(?P<sdate>1937-\d{2}-\d{2})(?:\s+-\s+(?P<sreason>.+?))?)?\s*$", re.I)
+
+
+def med_item(item):
+    """Parsed template medicine line as a dict, or None when the parts don't fit the grammar in order."""
+    m = MED_ITEM.match(item)
+    return m.groupdict() if m else None
+
+
+def _template_item(field, item):
+    if field == "Problems":
+        return f"Problem: {item}"
+    if field == "Medicines":
+        m = med_item(item)
+        if m is None:
+            return None
+        core = " ".join(x for x in (m["drug"], m["dose"], m["freq"], m["route"], m["max"], m["dur"]) if x)
+        if m["stop"]:
+            return f"Stop: {core} {m['sdate']}" + (f" (reason: {m['sreason']})" if m["sreason"] else "")
+        return f"Med: {core}" + (f" (for {m['reason']})" if m["reason"] else "")
+    if field == "Allergies":
+        return "Allergy: nil known" if NKA_RX.match(item) else f"Allergy: {item}"
+    if field == "Results":
+        return f"Result: {item}"
+    if field == "Pending":
+        parts = [p.strip() for p in item.split(",")]
+        test = parts[0]
+        sent = next((ISO.search(p).group(0) for p in parts[1:] if ISO.search(p)), None)
+        who = ", ".join(p for p in parts[1:] if not re.match(r"^sent\b", p, re.I))
+        return f"Pending: {test}" + (f"; sent: {sent}" if sent else "") + (f"; who: {who}" if who else "")
+    if field == "Actions":
+        a, _, who = item.rpartition(",")
+        return f"Plan: {a.strip()} || {who.strip()}" if a.strip() else f"Plan: {item}"
+    return item
+
+
+def build_from_template(text, *a, **k):
+    conv = from_template(text)
+    _EMPTY_FIELDS.clear(); _EMPTY_FIELDS.update(empty_template_sections(conv))
+    try:
+        return build(conv, *a, **k)
+    finally:
+        _EMPTY_FIELDS.clear()
+
+
 # ---------- held-out harness ----------
 def heldout(path):
     """Run every *.txt in an external folder. Print counts only, never note contents."""
@@ -1987,6 +2156,12 @@ def main(argv=None):
         ap.error("notes, --type and --to are required")
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
     tpl = open(a.template, encoding="utf-8").read() if a.template else None
+    try:
+        text = from_template(text)
+        _EMPTY_FIELDS.update(empty_template_sections(text))
+    except Refused as e:
+        print(str(e), file=sys.stderr)
+        return 2
     try:
         refuse_copies(text, tpl, brief_copy, is_patient_letter(a.to, a.audience))
     except Refused as e:

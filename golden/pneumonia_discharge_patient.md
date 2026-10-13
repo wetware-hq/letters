@@ -43,8 +43,8 @@ This letter explains your care and what happens next.
 
 ## Tests we are still waiting on
 
-- blood cultures, sent on 1 Jun 1937. Who follows up: not documented. [L9]
-- sputum culture, sent on 4 Jun 1937. Who follows up: not documented. [L18]
+- blood cultures, sent on an undocumented date. Who follows up: not documented. [L9]
+- sputum culture, sent on an undocumented date. Who follows up: not documented. [L18]
 
 ## What happens next
 

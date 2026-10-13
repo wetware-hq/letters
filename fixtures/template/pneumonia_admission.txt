@@ -1,0 +1,21 @@
+Patient: SYNTH-2002
+Date: 1937-06-04
+Recipients: General practice
+Question: none
+Problems:
+- community-acquired pneumonia, right lower lobe, with SOB
+History: Fever and productive cough. Improved on antibiotics into a vein, switched to tablets on day 3.
+Medicines:
+- amoxicillin 1 g tds for 4 more days
+- metformin 500 mg bd; stopped 1937-06-03 - not eating
+Allergies:
+- No known allergies
+Results:
+- CRP 180 mg/L 1937-06-01
+- CRP 90 mg/L 1937-06-03
+- CRP 40 mg/L 1937-06-04
+Pending:
+- sputum culture, sent 1937-06-04, ward team
+Actions:
+- review in 1 week, GP
+- repeat chest X-ray in 6 weeks, GP

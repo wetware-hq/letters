@@ -37,7 +37,7 @@ Update on 1 Sep 1937. Actions are numbered at the end.
 
 ## Results still to come
 
-- urine albumin-creatinine ratio, sent on 1 Sep 1937. Who follows up: not documented. [L9]
+- urine albumin-creatinine ratio, sent on an undocumented date. Who follows up: not documented. [L9]
 
 ## Actions
 

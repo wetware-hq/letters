@@ -1,0 +1,18 @@
+Patient: SYNTH-3003
+Date: 1937-09-01
+Recipients: General practice
+Question: Please recheck kidney function in 3 months.
+Problems:
+- CKD stage 3
+History: type 2 diabetes
+Medicines:
+- empagliflozin 10 mg daily
+Allergies:
+- No known allergies
+Results:
+- eGFR 52 mL/min 1937-08-01
+- eGFR 48 mL/min 1937-09-01
+Pending:
+- urine albumin-creatinine ratio, sent 1937-09-01, GP
+Actions:
+- recheck eGFR in 3 months, GP

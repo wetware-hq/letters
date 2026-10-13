@@ -93,12 +93,11 @@ Every message gives line numbers only, never note text. The dropped list prints 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pytest -q
-python letters.py fixtures/chest_pain.txt --brief "referral to cardiology"
-python letters.py fixtures/podiatry_referral.txt --brief "referral to podiatry" \
+python letters.py fixtures/template/chest_pain.txt --brief "referral to cardiology"
+python letters.py fixtures/template/podiatry_referral.txt --brief "referral to podiatry" \
   --template templates/minimal.md --brand brands/example-clinic --out out/
-python letters.py fixtures/pneumonia_admission.txt --brief "discharge to GP" \
-  --resolve "SOB=shortness of breath" --resolve "ED=emergency department" --resolve "IV=intravenous" \
-  --resolve "PO=by mouth" --resolve "CAP=community-acquired pneumonia" --resolve "GP=general practitioner" \
+python letters.py fixtures/template/pneumonia_admission.txt --brief "discharge to GP" \
+  --resolve "SOB=shortness of breath" --resolve "GP=general practitioner" \
   --final   # refused while any flag is open
 python letters.py --heldout ../heldout-notes   # folder outside this repo; prints counts only
 ```

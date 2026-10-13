@@ -1,0 +1,20 @@
+Patient: SYNTH-1001
+Date: 1937-03-16
+Recipients: Cardiology clinic
+Question: Is this stable angina, and does she need angiography?
+Problems:
+- exertional chest pain
+History: hypertension, ex-smoker. Three weeks of exertional chest tightness, settles with rest.
+Medicines:
+- aspirin 100 mg daily
+- ramipril 5 mg daily
+- atorvastatin 40 mg nocte
+Allergies:
+- penicillin: rash
+Results:
+- LDL 4.1 mmol/L 1937-03-02
+- LDL 3.2 mmol/L 1937-03-16
+Pending:
+- exercise ECG, sent 1937-03-02, cardiology
+Actions:
+- review after exercise test, cardiology

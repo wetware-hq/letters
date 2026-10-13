@@ -1,0 +1,17 @@
+Patient: SYNTH-4004
+Date: 1937-02-10
+Recipients: Podiatry clinic
+Question: Please assess the left forefoot callus and advise on offloading.
+Problems:
+- left forefoot callus
+History: type 2 diabetes, bipolar disorder. Painful callus left forefoot, poor historian.
+Medicines:
+- lithium 400 mg nocte reason: bipolar disorder
+- metformin 500 mg bd
+Allergies:
+- codeine
+Results:
+- HbA1c 7.9 % 1937-02-10
+Pending:
+Actions:
+- review in 4 weeks, GP
