@@ -2340,7 +2340,8 @@ def main(argv=None):
     include = []
     if a.brief is not None:
         blines = [l.strip() for l in re.split(r"\n|[.;]\s*(?=include\s*:)", a.brief, flags=re.I) if l.strip()]
-        include = [m.group(1).strip() for m in (re.match(r"^include\s*:\s*(.+?)\s*\.?$", l, re.I) for l in blines) if m]
+        include = [x.strip() for m in (re.match(r"^include\s*:\s*(.+?)\s*\.?$", l, re.I) for l in blines) if m
+                   for x in re.split(r"\s*,\s*|\s+and\s+", m.group(1)) if x.strip()]   # signed 'Include:' line; a list is fine
         rest = [l for l in blines if not re.match(r"^include\s*:", l, re.I)]
         if len(rest) > 1 or any(i.lower() not in {c.lower() for c in SENSITIVE} for i in include):
             print(BRIEF_REFUSED, file=sys.stderr)

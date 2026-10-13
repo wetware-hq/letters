@@ -2967,3 +2967,24 @@ def test_r11_dose_limit_other_period_kept_as_written(tmp_path, mx, brief):
     assert mx in md and "in 24 hours" not in md
     lid = line_of(text, "paracetamol")
     assert not any(lid in l for l in r.stderr.splitlines()), r.stderr
+
+
+@pytest.mark.parametrize("brief,items", [
+    ("referral to podiatry\nInclude: psychiatric history", ["psychiatric history"]),
+    ("referral to podiatry. Include: psychiatric history", ["psychiatric history"]),
+    ("referral to podiatry\nInclude: psychiatric history, HIV status", ["psychiatric history", "HIV status"]),
+    ("referral to podiatry\nInclude: psychiatric history\ninclude: HIV status", ["psychiatric history", "HIV status"]),
+])
+def test_r11_brief_include_line_accepted(tmp_path, brief, items):
+    r, out = _run_t(tmp_path, (pathlib.Path(L.__file__).parent / "fixtures/template/podiatry_referral.txt").read_text(),
+                    "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    for i in items:
+        assert f"Included by the brief: {i}." in r.stderr
+    assert "bipolar" in (out / "letter.md").read_text()
+
+
+def test_r11_brief_include_unknown_item_still_refused(tmp_path):
+    r, out = _run_t(tmp_path, (pathlib.Path(L.__file__).parent / "fixtures/template/podiatry_referral.txt").read_text(),
+                    "--brief", "referral to podiatry\nInclude: alcohol history")
+    assert r.returncode == 2 and r.stderr.strip() == L.BRIEF_REFUSED
