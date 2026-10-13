@@ -1286,12 +1286,12 @@ OWNER_MSG = "Flag: the pending test on line L3 has follow-up wording. Check who 
 
 
 @pytest.mark.parametrize("line", ["penicillin rash and swelling 1930", "penicillin severe", "penicillin V tablets"])
-def test_allergy_extra_wording_flagged_not_not_documented(line):
+def test_allergy_extra_wording_flagged_and_no_reaction_wording(line):   # round 10 item 8: both
     text = "Patient: SYNTH-4601\n1937-06-03 Clinic review.\nAllergy: " + line + "\nFollow-up: review in 2 weeks\n"
     flags = []
     md, _ = build(text, "gp-update", "GP", flags=flags)
     al = section(md, "Allergies")
-    assert "not documented" not in al and L.ALLERGY_FLAG in al and ALLERGY_MSG in flags
+    assert f"{line}: reaction not documented {L.ALLERGY_FLAG}" in al and ALLERGY_MSG in flags
 
 
 @pytest.mark.parametrize("line", ["echo to be arranged", "ferritin chasing", "urine culture will follow", "echo - next week"])
@@ -2831,3 +2831,19 @@ def test_r10_include_record_always_printed_and_to_is_the_reader(tmp_path, brief)
 def test_r10_brief_text_never_goes_into_to(tmp_path):
     r, out = _run_t(tmp_path, PSY_T, "--brief", "update to GP. Please be kind")
     assert r.returncode == 2 and r.stderr.strip() == BRIEF_MSG and not out.exists()
+
+
+# ---------- round 10 item 8: allergy with no reaction, multi-word allergen ----------
+@pytest.mark.parametrize("aud,wording", [(None, "reaction not documented"), ("patient", L.ALLERGY_NO_REACTION_PATIENT)])
+def test_r10_multiword_allergen_no_reaction_gets_flag_and_wording(aud, wording):
+    t = tpl(question="Is it the joint?", allergies=["sulfa drugs"])
+    flags = []
+    md, _ = L.build_from_template(t, "gp-update", "Patient" if aud else "GP", audience=aud, flags=flags)
+    al = section(md, "Allergies")
+    assert al.startswith(f"- sulfa drugs: {wording} {L.ALLERGY_FLAG}")
+    assert any("extra wording" in f for f in flags)
+
+
+def test_r10_single_word_allergen_no_reaction_wording_only():
+    md, _ = L.build_from_template(tpl(question="ok?", allergies=["codeine"]), "gp-update", "GP")
+    assert section(md, "Allergies").startswith("- codeine: reaction not documented [L") and L.ALLERGY_FLAG not in md

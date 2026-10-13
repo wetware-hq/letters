@@ -719,7 +719,7 @@ def section_items(name, st, audience="specialist"):
                 elif len(part.split()) <= 1:              # nothing follows the drug name
                     out.append(f"{part.strip()}: {no_react}" + tag(i))
                 else:                                      # trailing words not confidently parsed: keep, flag
-                    out.append(f"{part.strip()} {ALLERGY_FLAG}" + tag(i))
+                    out.append(f"{part.strip()}: {no_react} {ALLERGY_FLAG}" + tag(i))   # as written, both
         return out
     if name == "pending":
         out = []
