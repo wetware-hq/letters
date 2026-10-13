@@ -2847,3 +2847,16 @@ def test_r10_multiword_allergen_no_reaction_gets_flag_and_wording(aud, wording):
 def test_r10_single_word_allergen_no_reaction_wording_only():
     md, _ = L.build_from_template(tpl(question="ok?", allergies=["codeine"]), "gp-update", "GP")
     assert section(md, "Allergies").startswith("- codeine: reaction not documented [L") and L.ALLERGY_FLAG not in md
+
+
+# ---------- round 10 item 9: under --final the refusal count equals the flags printed ----------
+@pytest.mark.parametrize("brief", ["update to GP", "letter to the patient", "referral to cardiology"])
+def test_r10_final_count_equals_flags_printed(tmp_path, brief):
+    t = tpl(question="none", problems=["ACS query", "MS"], history="HIV", allergies=["sulfa drugs"],
+            meds=["zorbaline 5 mg prn reason: knee pain", "abacavir 600 mg daily reason: HIV", "ramipril 5 mg od"])
+    r, out = _run_t(tmp_path, t, "--brief", brief, "--final")
+    assert r.returncode == 3 and not out.exists()
+    lines = r.stderr.splitlines()
+    shown = [l for l in lines if l.startswith("Flag: ")]
+    m = re.search(r"--final refused: (\d+) flag", r.stderr)
+    assert m and int(m.group(1)) == len(shown) > 0

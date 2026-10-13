@@ -1739,10 +1739,43 @@ def _drug_present(body, plain):
 RESULT_MISSING = "Refused: a result on line {lid} of the notes is missing from this letter. Nothing was written."
 
 
-def finalise(md):
-    """Remove [Lx]/[Rx] source tags only. Refused while any abbreviation flag is open.
+REASON_NOTICE = "Flag: the reason for the medicine on line {lid} has no signed plain words. Check it."
+OPEN_NOTICE = "Flag: line {lid} has an open flag. Check it."
+
+
+def printed_flags(flags, md):
+    """The flag lines printed beside a letter: one per distinct notice, plus one for any flag in the letter that no
+    notice names (so every flag in the letter is printed). --final counts exactly these lines."""
+    out = list(dict.fromkeys(line_only_flag(f) for f in flags))
+    named = {i for f in out for i in re.findall(r"\b[LR]\d+\b", f)}
+    for line in md.split("\n"):
+        found = FLAG_ANY.findall(line)
+        if not found:
+            continue
+        ids = [i for i in _line_ids(line)]
+        if not ids:
+            if not out:                                    # a header flag always has its notice; keep fail-safe
+                out.append("Flag: this letter has an open flag. Check it.")
+            continue
+        for fl in found:
+            if fl.strip() == REASON_FLAG:
+                notice = REASON_NOTICE.format(lid=ids[-1])
+            elif ids[-1] in named or any(i in named for i in ids):
+                continue
+            else:
+                notice = OPEN_NOTICE.format(lid=ids[-1])
+            if notice not in out:
+                out.append(notice)
+    return out
+
+
+def finalise(md, n=None):
+    """Remove [Lx]/[Rx] source tags only. Refused while any flag is open; n is the number of flag lines printed.
     The draft mark and draft footer stay until the signing clinician removes them."""
-    n = len(FLAG_ANY.findall(md))
+    if FLAG_ANY.search(md):
+        n = n or len(FLAG_ANY.findall(md))
+    else:
+        n = 0
     if n:
         raise Refused(FINAL_REFUSED.format(n=n))
     return re.sub(r" \[[LR]\d+(?:, [LR]\d+)*\]", "", md)
@@ -2327,7 +2360,8 @@ def main(argv=None):
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
-    for f in dict.fromkeys(line_only_flag(f) for f in flags):
+    shown = printed_flags(flags, md)
+    for f in shown:
         print(f, file=sys.stderr)
     if dropped:
         cut = list(dict.fromkeys(i for d in dropped for i in re.findall(r"\b[LR]\d+\b", d.split(":")[0])))
@@ -2340,7 +2374,7 @@ def main(argv=None):
     dropped.clear()
     if a.final:
         try:
-            md = finalise(md)
+            md = finalise(md, len(shown))
         except Refused as e:
             print(str(e), file=sys.stderr)
             return 3
