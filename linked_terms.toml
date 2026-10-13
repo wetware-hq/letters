@@ -1,22 +1,45 @@
-# Linked terms for items this tool may cut from a letter.
+# Linked terms for items this tool may cut from a letter. Version 2.
 # Reviewed by clinician; needs fresh sign-off for any change.
-# Physician sign-off recorded 2026-10-13. Frozen: checksum in LINKED_TERMS.SHA256.
+# Version 2 awaiting Physician sign-off; not frozen yet (LINKED_TERMS.SHA256 still holds the version 1 checksum).
 #
 # For each cut category (names match SENSITIVE in letters.py), checked ONLY when that item is on the
 # letter's dropped list, and never for letters addressed to the patient:
 #   terms      - refuse-level: if any appears in the written letter, the letter is refused (line id only).
-#   flag_terms - flag-only (multi-meaning words): never refuse; each line using one gets an open flag.
-#   medicines  - stay on the medicine list but get an open flag that blocks --final.
+#   flag_terms - flag-only (multi-meaning words or shared medicines): never refuse; each line using one is flagged.
+#   medicines  - may appear only on their own medication line (flagged there); anywhere else the letter is refused.
+#   brands     - brand name = generic medicine; same rule as medicines.
 
 [items."HIV status"]
 terms = ["HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "VL", "viral load", "CD4", "RVD",
-         "antiretroviral"]
-flag_terms = ["undetectable", "ART", "ritonavir", "lamivudine"]
-medicines = ["dolutegravir", "tenofovir", "emtricitabine", "zidovudine", "abacavir", "bictegravir", "raltegravir",
-             "rilpivirine", "darunavir", "efavirenz", "nevirapine", "cobicistat"]
+         "antiretroviral", "S100 prescriber"]
+flag_terms = ["undetectable", "ART", "ritonavir", "lamivudine", "Truvada", "Descovy", "tenofovir", "S100"]
+medicines = ["dolutegravir", "emtricitabine", "zidovudine", "abacavir", "bictegravir", "raltegravir", "rilpivirine",
+             "darunavir", "efavirenz", "nevirapine", "cobicistat"]
+
+[items."HIV status".brands]
+Biktarvy = "bictegravir"
+Triumeq = "dolutegravir"
+Dovato = "dolutegravir"
+Genvoya = "cobicistat"
 
 [items."psychiatric history"]
 terms = ["lithium level", "serum lithium", "clozapine level", "clozapine monitoring", "ANC monitoring",
-         "lithium toxicity", "Li level", "clozapine clinic", "schizophrenia", "schizoaffective"]
+         "lithium toxicity", "Li level", "Li+", "clozapine clinic", "clozapine registry", "CPMS", "schizophrenia",
+         "schizoaffective"]
 flag_terms = ["ANC", "bipolar", "psychosis"]
 medicines = ["lithium", "clozapine"]
+
+[items."psychiatric history".brands]
+Clozaril = "clozapine"
+Clopine = "clozapine"
+Lithicarb = "lithium"
+Quilonum = "lithium"
+
+[items."PrEP"]
+terms = ["PrEP", "pre-exposure prophylaxis"]
+flag_terms = ["sexual health clinic"]
+medicines = ["tenofovir/emtricitabine", "tenofovir", "emtricitabine"]
+
+[items."PrEP".brands]
+Truvada = "tenofovir/emtricitabine"
+Descovy = "tenofovir/emtricitabine"
