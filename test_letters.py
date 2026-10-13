@@ -819,3 +819,44 @@ def test_final_refused_while_drug_flag_open():
     md, _ = _one("Med: ramipril 5 mg daily")
     with pytest.raises(Refused, match="1 flag"):
         L.finalise(md)
+
+
+# ---------- patient letters: each medicine with its reason ----------
+def _pmeds(text, to="Patient", aud="patient"):
+    md = make_letter(text, "gp-update", to, audience=aud)
+    return md, section(md, "Your medicines now" if aud == "patient" else "Current medicines")
+
+
+def test_patient_medicine_reason_from_cited_line_flagged_without_signed_plain_words():
+    text = "Patient: SYNTH-3801\n1937-05-01 Clinic review.\nMed: metformin 500 mg bd (for type 2 diabetes)"
+    md, meds = _pmeds(text)
+    assert f"- metformin 500 mg twice a day (bd), for type 2 diabetes {L.REASON_FLAG} [L3]" in meds
+    with pytest.raises(Refused, match="flag"):
+        L.finalise(md)
+
+
+def test_patient_medicine_reason_signed_entry_gets_plain_words_unflagged():
+    text = "Patient: SYNTH-3802\n1937-05-01 Clinic review.\nMed: metformin 500 mg bd (for CKD)"
+    _, meds = _pmeds(text)
+    assert "- metformin 500 mg twice a day (bd), for long-term kidney disease (CKD) [L3]" in meds
+    assert "[flag" not in meds
+
+
+def test_patient_medicine_without_reason_says_reason_not_documented():
+    _, meds = _pmeds(F("ckd_update.txt"))
+    assert f"empagliflozin {L.DRUG_FLAG} 10 mg once a day, reason not documented [L6]" in meds
+
+
+def test_patient_keeps_sensitive_indication_other_audiences_cut():
+    pmd, pmeds = _pmeds(F("podiatry_referral.txt"))
+    assert f"lithium 400 mg nocte {L.FLAG}, for bipolar disorder {L.REASON_FLAG} [L6]" in pmeds
+    for to, aud in (("General practice", "gp"), ("Podiatry", "specialist")):
+        md, dropped = build(F("podiatry_referral.txt"), "gp-update", to, audience=aud)
+        assert "bipolar" not in md and any("indication for lithium cut" in d for d in dropped)
+
+
+def test_patient_reason_checker_refuses_invented_reason():
+    text = "Patient: SYNTH-3803\n1937-05-01 Clinic review.\nMed: metformin 500 mg bd (for type 2 diabetes)"
+    md, _ = build(text, "gp-update", "Patient", audience="patient")
+    with pytest.raises(Refused, match="word not in cited lines"):
+        check(md.replace("for type 2 diabetes", "for heart failure"), parse(text)[1], "gp-update")

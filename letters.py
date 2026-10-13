@@ -158,7 +158,7 @@ def _pkey(s):
     return HEDGE.sub("", s.strip()).lower()
 
 
-def cumsum(entries, to="", dropped=None):
+def cumsum(entries, to="", dropped=None, keep_indications=False):
     dropped = [] if dropped is None else dropped
     st = {"problems": OrderedDict(), "resolved": OrderedDict(), "ruledout": OrderedDict(), "history": [],
           "meds": OrderedDict(), "stopped": OrderedDict(), "med_changes": [], "allergies": [],
@@ -207,7 +207,7 @@ def cumsum(entries, to="", dropped=None):
                 reason = val.strip() if val and kw.startswith("reason") else None
                 if ind:
                     cat = sensitive_cat(ind)
-                    if cat and not relevant(cat, to):
+                    if cat and not relevant(cat, to) and not keep_indications:
                         dropped.append(f"{lid}: indication for {_mkey(drug)} cut ({cat}, not relevant to {to})")
                         ind = None
                 k = _mkey(drug)
@@ -300,7 +300,22 @@ def dt(d):
     return f" on {fdate(d)}" if d else ""
 
 
-def section_items(name, st):
+REASON_FLAG = "[flag: reason, plain words not confirmed]"
+REASON_ND = "reason not documented"
+
+
+def _patient_reason(ind):
+    """Patient letters: the reason as written; flagged unless every word is a signed single-meaning entry."""
+    if not ind:
+        return REASON_ND
+    single = load_single_meaning()
+    toks = tokens(ind)
+    if toks and all(t in single for t in toks) and not re.sub(r"[A-Za-z0-9]+|\s|[,/-]", "", ind):
+        return f"for {ind}"
+    return f"for {ind} {REASON_FLAG}"
+
+
+def section_items(name, st, audience="specialist"):
     """Return (items, numbered, table) where each item already ends with its source ids."""
     if name == "question":
         return [b + tag(i) for b, i in st["question"]]
@@ -323,6 +338,8 @@ def section_items(name, st):
             vals = ", ".join(f"{v} {u}{dt(d)}" + (f" ({n})" if n else "") for d, v, u, n, _ in r["values"])
             rows.append((r["name"], vals, [x[4] for x in r["values"]]))
         return rows
+    if name == "meds" and audience == "patient":
+        return [f"{m['drug']}, {_patient_reason(m['ind'])}" + tag(m["ids"]) for m in st["meds"].values()]
     if name == "meds":
         return [m["drug"] + (f" (for {m['ind']})" if m["ind"] else "") + tag(m["ids"]) for m in st["meds"].values()]
     if name == "med_changes":
@@ -361,7 +378,7 @@ EMPTY = {"pending": "No results pending at time of writing.", "allergies": f"All
 
 def render_section(name, st, audience):
     head = HEADINGS[audience][name]
-    items = section_items(name, st)
+    items = section_items(name, st, audience)
     body = []
     if name == "results" and len(items) >= 3:
         body = ["| Test | Results |", "|---|---|"] + [f"| {n} | {v}{tag(i)} |" for n, v, i in items]
@@ -729,7 +746,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     for ab, (rid, full) in resolved.items():
         sources[rid] = (f"{ab} = {full}", None)
     dropped = []
-    st = cumsum(entries, to, dropped)
+    st = cumsum(entries, to, dropped, keep_indications=(audience == "patient"))
     if letter_type == "referral" and not st["question"]:
         raise Refused("Referral refused: the notes have no 'Question:' line. A referral must open with its question.")
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,

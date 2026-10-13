@@ -31,7 +31,7 @@ This letter explains your care and what happens next.
 
 ## Your medicines now
 
-- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] three times a day for 4 more days [L7, L15]
+- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] three times a day for 4 more days, reason not documented [L7, L15]
 
 ## Allergies
 
