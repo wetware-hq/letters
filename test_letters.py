@@ -400,7 +400,7 @@ def test_fixtures_synthetic_1937():
 def test_no_internal_names_or_paths():
     for p in HERE.rglob("*"):
         if p.is_file() and ".git" not in p.parts and p.suffix in (".py", ".md", ".txt", ".toml") \
-                and p.name != "test_letters.py":
+                and p.name != "test_letters.py" and p != HERE / "wordlists" / "english.txt":  # third-party dictionary
             s = p.read_text()
             for bad in ("/workspace", "/home/", "BIO ", "telegram", "patient-store"):
                 assert bad not in s, (p, bad)
@@ -439,7 +439,7 @@ def test_rewritten_label_not_earned_by_cited_line_refused():
 
 # ---------- --final: source tags only ----------
 CHEST_RESOLVE = ["--resolve", "GP=general practitioner", "--resolve", "LDL=low-density lipoprotein cholesterol",
-                 "--resolve", "nocte=at night", "--resolve", "ECG=electrocardiogram"]
+                 "--resolve", "nocte=at night", "--resolve", "ramipril=ramipril", "--resolve", "atorvastatin=atorvastatin"]
 
 
 def _cli(*extra):
@@ -607,7 +607,7 @@ def test_iv_route_still_flagged():
 def test_units_not_flagged():
     md, flags = _one("Med: ramipril 5 mg daily\nMed: lactulose 10 mL twice a day\nResult: potassium 4.1 mmol/L\n"
                      "Result: CRP 12 mg/L\nResult: weight 70 kg")
-    assert flags == []
+    assert set(flags) == {"ramipril", "lactulose"}     # drug names flagged (acceptable); no unit flagged
     for u in ("5 mg", "10 mL", "4.1 mmol/L", "12 mg/L", "70 kg"):
         assert u in md
     assert all(not L.abbreviations(u) for u in ("mg", "mL", "mmol/L", "mg/L", "kg"))
@@ -644,3 +644,43 @@ def test_case_variants_and_iv_stay_flagged(ab):
     flags = []
     md, _ = build(SM_NOTE.format(ab=ab), "gp-update", "General practice", flags=flags)
     assert f"- {ab} {L.FLAG} noted [L3]" in md and [f.split()[0] for f in flags] == [ab]
+
+
+# ---------- fail-safe flagging ----------
+@pytest.mark.parametrize("tok", ["Ecg", "Crp", "nbm", "cx", "PEG", "MAP", "mane", "nocte", "stat"])
+def test_failsafe_token_flagged_not_expanded(tok):
+    md, flags = _one(f"Problem: review {tok} today")
+    assert f"review {tok} {L.FLAG} today" in md and flags == [tok]
+    for ab, (clinical, plain) in SM_EXPECTED.items():
+        if ab.lower() == tok.lower():
+            assert clinical not in md and plain not in md
+
+
+def test_sentence_start_capitalised_word_clean():
+    md, flags = _one("Problem: Persistent cough after viral illness")
+    assert flags == [] and "Persistent cough after viral illness [L3]" in md
+
+
+def test_sentence_start_capitalised_nonword_flagged():
+    md, flags = _one("Problem: Nbm overnight")
+    assert flags == ["Nbm"]
+
+
+def test_failsafe_units_and_stage_clean():
+    md, flags = _one("Problem: chronic kidney disease stage IV\nResult: potassium 4.1 mmol/L\nResult: weight 70 kg\n"
+                     "Result: albumin 30 mg/L")
+    assert flags == []
+
+
+def test_shorthand_and_wordlist_files_documented():
+    assert "pending clinician review" in (HERE / "shorthand.txt").read_text().lower()
+    readme = (HERE / "wordlists" / "README.md").read_text()
+    assert "SCOWL" in readme and "Licence" in readme and (HERE / "wordlists" / "SCOWL-COPYRIGHT").exists()
+    assert {"mane", "nocte", "stat", "prn", "od"} <= L.SHORTHAND
+
+
+def test_resolve_as_written_closes_flag_without_expansion():
+    text = "Patient: SYNTH-3301\n1937-05-01 Clinic review.\nMed: ramipril 5 mg daily\nFollow-up: review in 2 weeks"
+    md, _ = build(text, "gp-update", "General practice", resolve=["ramipril=ramipril"])
+    assert "- ramipril 5 mg daily [L3, R1]" in md and L.FLAG not in md
+

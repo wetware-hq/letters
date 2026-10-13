@@ -1,0 +1,44 @@
+# Prescribing and clinical shorthand that is ALWAYS flagged, in any case, even if it is also an English word.
+# Pending clinician review. Exact single-meaning entries (single_meaning.toml) still expand; variants are flagged.
+# One entry per line.
+mane
+nocte
+stat
+prn
+od
+om
+qd
+qds
+qid
+qam
+qpm
+qhs
+hs
+bid
+tid
+b.d.
+b.i.d.
+t.d.s.
+t.i.d.
+q.d.s.
+q.i.d.
+o.d.
+o.m.
+o.n.
+p.r.n.
+q4h
+q6h
+q8h
+po
+pr
+sc
+sl
+im
+ng
+neb
+nbm
+c/o
+o/e
+sob
+hx
+pt

@@ -1,0 +1,33 @@
+# Small medical word list for letters. Written for this project; released under the repo licence.
+# Lowercase whole words only, one per line. Abbreviations and prescribing shorthand do NOT belong here.
+# Drug names are deliberately absent: they get flagged, and that is acceptable.
+afebrile
+anaphylaxis
+angina
+angiography
+arrhythmia
+bradycardia
+cellulitis
+creatinine
+dyspnoea
+erythema
+exertional
+ferritin
+glomerular
+glycated
+haematuria
+haemoptysis
+hyperkalaemia
+hypoglycaemia
+hypokalaemia
+ischaemia
+ischaemic
+lipoprotein
+myocardial
+neuropathy
+oedema
+orthopnoea
+pleural
+syncope
+tachycardia
+troponin

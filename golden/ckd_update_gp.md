@@ -29,7 +29,7 @@ Update on 1 Sep 1937. Actions are numbered at the end.
 
 ## Current medicines
 
-- empagliflozin 10 mg daily [L6]
+- empagliflozin [flag: abbreviation, meaning not confirmed] 10 mg daily [L6]
 
 ## Allergies
 

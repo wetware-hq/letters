@@ -383,17 +383,22 @@ def render_section(name, st, audience):
 # An abbreviation means different things in different specialties (MS, PE, CP, RA...). Default: keep it as
 # written and flag it. Expand only from the reviewed single-meaning list (ships empty) or a clinician --resolve.
 FLAG = "[flag: abbreviation, meaning not confirmed]"
-# Known shorthand is matched in any case (sob, SOB); otherwise a token with 2+ capitals (NSTEMIx, T2DM, eGFR).
-# Units (mg, mL, mmol/L, mg/L, kg) have at most one capital and are never matched.
-# A Roman numeral after stage/grade/class/type/phase/NYHA is a number, not an abbreviation (stage IV).
-_ROMAN_CTX = "|".join(rf"(?<=(?i:{w}) )" for w in ("stage", "grade", "class", "type", "types", "phase", "NYHA"))
-ABBR_RE = re.compile(r"(?<![\w/-])(?!(?:" + _ROMAN_CTX + r")[IVX]+(?![\w/-]))"
-                     r"(?:(?i:c/o|o/e|sob|hx|pt|bd|tds|qds|qid|nocte|mane|prn|od)|Hb|"
-                     r"(?=[A-Za-z0-9]*[A-Z][A-Za-z0-9]*[A-Z])[A-Za-z][A-Za-z0-9]{1,6})(?![\w/-])")
+# Fail-safe: a token is flagged unless it is clearly an ordinary word, a unit, or an exact reviewed entry.
+TOKEN = re.compile(r"(?<![A-Za-z0-9.'])(?:c/o|o/e|(?:[A-Za-z]\.){2,}|"
+                   r"(?:mmol|micromol|mcg|mg|g|kg|mL|mU|IU|units?)/(?:L|dL|min|kg|day|h)\b|"
+                   r"[A-Za-z][A-Za-z0-9]*(?:'[a-z]+)?)")
+UNITS = {"mg", "mcg", "g", "kg", "mL", "L", "dL", "mmol", "micromol", "min", "mU", "h", "units", "unit"}
+ROMAN_CTX = {"stage", "grade", "class", "type", "types", "phase", "nyha"}
 SINGLE_MEANING_FILE = HERE / "single_meaning.toml"
+SHORTHAND_FILE = HERE / "shorthand.txt"
+WORDLISTS = [HERE / "wordlists" / "english.txt", HERE / "wordlists" / "medical.txt"]
 # Plain-language swaps for patients: ordinary words only, never abbreviations.
 PLAIN = [(r"\boral\b", "tablets"), (r"\bhypertension\b", "high blood pressure"), (r"\bexertional\b", "when active"),
          (r"\bdaily\b", "once a day")]
+
+
+def _lines(p):
+    return {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")}
 
 
 def load_single_meaning(path=None):
@@ -403,8 +408,49 @@ def load_single_meaning(path=None):
     return dict(tomllib.loads(p.read_text(encoding="utf-8")).get("abbreviations", {}))
 
 
+SHORTHAND = {w.lower() for w in _lines(SHORTHAND_FILE)}
+WORDS = set().union(*(_lines(p) for p in WORDLISTS)) | {m.lower() for m in MONTHS}
+
+
+def tokens(s):
+    return [m.group(0) for m in TOKEN.finditer(s)]
+
+
+def needs_flag(tok, prev="", exact=()):
+    """True if tok must be flagged. exact: abbreviations that may expand as written (reviewed list, resolutions)."""
+    if tok in exact:
+        return False
+    low = tok.lower()
+    if "/" in tok and tok not in ("c/o", "o/e"):
+        return False                                        # slash unit, e.g. mmol/L
+    if tok in UNITS:
+        return False
+    if re.fullmatch(r"[IVX]+", tok) and prev.lower() in ROMAN_CTX:
+        return False                                        # stage IV
+    if low in SHORTHAND or "." in tok or "/" in tok:
+        return True
+    if any(low == e.lower() for e in exact):
+        return True                                         # case variant of a reviewed entry (Ecg, BD)
+    if len(tok) >= 2 and (tok.isupper() or any(c.isupper() for c in tok[1:])):
+        return True                                         # PEG, MAP, NSTEMIx, eGFR-like
+    if len(tok) == 1:
+        return False
+    return low not in WORDS     # nbm, cx (and Nbm at sentence start); drug names too (acceptable)
+
+
+def flagged_tokens(s, exact=()):
+    out, prev = [], ""
+    for m in TOKEN.finditer(s):
+        if needs_flag(m.group(0), prev, exact):
+            out.append(m.group(0))
+        prev = m.group(0)
+    return out
+
+
 def abbreviations(s):
-    return [m.group(0) for m in ABBR_RE.finditer(s)]
+    """Tokens in s that are flagged or are exact reviewed entries."""
+    single = load_single_meaning()
+    return [t for t in tokens(s) if t in single] + flagged_tokens(s, tuple(single))
 
 
 def resolution_sources(resolve, text):
@@ -416,7 +462,7 @@ def resolution_sources(resolve, text):
         ab, full = (x.strip() for x in item.split("=", 1))
         if not ab or not full:
             raise ValueError(f'--resolve must look like "MS=multiple sclerosis", got: {item}')
-        if ab not in abbreviations(text):
+        if ab not in tokens(text):
             raise ValueError(f"--resolve {ab}: that abbreviation is not in the notes")
         out[ab] = (f"R{i}", full)
     return out
@@ -438,23 +484,29 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
         if audience == "patient":
             for pat, rep in PLAIN:
                 text = re.sub(pat, rep, text)
-        extra = []
+        extra, prev = [], [""]
+        exact = tuple(resolved) + tuple(single)
         def sub(m):
-            ab = m.group(0)
+            ab, before = m.group(0), prev[0]
+            prev[0] = ab
             if ab in resolved:
                 rid, full = resolved[ab]
                 if rid not in extra:
                     extra.append(rid)
+                if full == ab:
+                    return ab                                # confirmed as written (e.g. a drug name)
             elif ab in single:
                 full = single[ab]["patient" if audience == "patient" else "clinical"]
-            else:
+            elif needs_flag(ab, before, exact):
                 flags.append(f"{ab}{ids.strip(' |') and ' ' + ids.strip(' |')}")
                 return f"{ab} {FLAG}"
+            else:
+                return ab
             if ab in seen:
                 return ab
             seen.add(ab)
             return f"{full} ({ab})"
-        text = ABBR_RE.sub(sub, text)
+        text = TOKEN.sub(sub, text)
         if extra and ids:
             ids = re.sub(r"\]", ", " + ", ".join(extra) + "]", ids, count=1)
         out.append(text + ids)
@@ -490,7 +542,7 @@ def _source_words(src, single=None):
     words = {w.lower() for w in WORD.findall(src)}
     single = load_single_meaning() if single is None else single
     for ab, full in single.items():                    # reviewed list, abbreviation must be in the cited lines
-        if ab in abbreviations(src):
+        if ab in tokens(src):
             words |= _words(full["clinical"]) | _words(full["patient"])
     for pat, rep in PLAIN:
         if re.search(pat, src):
@@ -532,12 +584,20 @@ def check(md, sources, letter_type):
             problems.append(f"cites unknown line: {ids.strip()}")
             continue
         src = " ".join(sources[c][0] + " " + (sources[c][1] or "") for c in cited)
-        res = {sources[c][0].split(" = ", 1)[0] for c in cited if c.startswith("R")}
+        res = {sources[c][0].split(" = ", 1)[0]: sources[c][0].split(" = ", 1)[1] for c in cited if c.startswith("R")}
         single = load_single_meaning()
-        for m in ABBR_RE.finditer(text):
-            ab, flagged = m.group(0), text[m.end():].startswith(" " + FLAG)
-            if not (flagged or ab in res or ab in single):
+        scan = text
+        forms = [(f, ab) for ab, d in single.items() for f in (d["clinical"], d["patient"])] + \
+                [(f, ab) for ab, f in res.items()]
+        for f, ab in sorted(forms, key=lambda x: -len(x[0])):
+            scan = scan.replace(f"{f} ({ab})", ab).replace(f, ab)
+        exact = tuple(res) + tuple(single)
+        prev = ""
+        for m in TOKEN.finditer(scan):
+            ab = m.group(0)
+            if needs_flag(ab, prev, exact) and not scan[m.end():].startswith(" " + FLAG):
                 problems.append(f"abbreviation not flagged or resolved: {ab}")
+            prev = ab
         text = text.replace(" " + FLAG, "")
         for m in OUTDATE.finditer(text):
             iso = f"1937-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
