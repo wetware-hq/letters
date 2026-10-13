@@ -2369,6 +2369,53 @@ def line_only_flag(f):
     return f"Flag: an abbreviation {where} has no confirmed meaning. Confirm it with --resolve."
 
 
+def read_brief(brief):
+    """The brief as (type, reader, include items, copy text or None). Refuses with BRIEF_REFUSED.
+    Shared by the letter command and the standalone template checker."""
+    blines = [l.strip() for l in re.split(r"\n|[.;]\s*(?=include\s*:)", brief, flags=re.I) if l.strip()]
+    include = [x.strip() for m in (re.match(r"^include\s*:\s*(.+?)\s*\.?$", l, re.I) for l in blines) if m
+               for x in re.split(r"\s*,\s*|\s+and\s+", m.group(1)) if x.strip()]   # signed 'Include:' line; a list is fine
+    rest = [l for l in blines if not re.match(r"^include\s*:", l, re.I)]
+    if len(rest) > 1 or any(i.lower() not in {c.lower() for c in SENSITIVE} for i in include):
+        raise Refused(BRIEF_REFUSED)
+    brief_text = rest[0] if rest else ""
+    cut = re.search(r"[,;]?\s*(?:\b(?:cc|copy|copies|copied)\b|c\.c\.).*$", brief_text, re.I)
+    brief_copy = cut.group(0) if cut else None
+    core = brief_text[:cut.start()] if cut else brief_text
+    kind, reader = parse_brief(core)
+    if not kind:
+        raise Refused(BRIEF_REFUSED)
+    return kind, reader, include, brief_copy
+
+
+TEMPLATE_OK = "Template check passed."
+
+
+def check_template_main(argv=None):
+    """Standalone template check: the same pre-template checks and the same from_template() the letter command
+    uses. Exit 0 on pass, 2 on fail (signed wording with the line number). Writes nothing."""
+    ap = argparse.ArgumentParser(prog="python -m check_template",
+                                 description="Check synthetic notes against the fixed template. Writes nothing.")
+    ap.add_argument("notes", help="notes text file, or - for stdin")
+    ap.add_argument("--brief", help="file holding the brief")
+    ap.add_argument("--not-copy", action="append", default=[], metavar="L<n>")
+    a = ap.parse_args(argv)
+    llm_guard()
+    try:
+        text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
+        brief_copy, patient = None, False
+        if a.brief:
+            kind, reader, _, brief_copy = read_brief(open(a.brief, encoding="utf-8").read())
+            patient = is_patient_letter(reader, None)
+        pre_template_checks(text, None, brief_copy, patient, [x.strip() for x in a.not_copy])
+        from_template(text)
+    except Refused as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    print(TEMPLATE_OK)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Synthetic notes + brief -> Markdown letter. Nothing else is stored.")
     ap.add_argument("notes", nargs="?", help="notes text file, or - for stdin")
@@ -2395,20 +2442,10 @@ def main(argv=None):
     brief_copy = None
     include = []
     if a.brief is not None:
-        blines = [l.strip() for l in re.split(r"\n|[.;]\s*(?=include\s*:)", a.brief, flags=re.I) if l.strip()]
-        include = [x.strip() for m in (re.match(r"^include\s*:\s*(.+?)\s*\.?$", l, re.I) for l in blines) if m
-                   for x in re.split(r"\s*,\s*|\s+and\s+", m.group(1)) if x.strip()]   # signed 'Include:' line; a list is fine
-        rest = [l for l in blines if not re.match(r"^include\s*:", l, re.I)]
-        if len(rest) > 1 or any(i.lower() not in {c.lower() for c in SENSITIVE} for i in include):
-            print(BRIEF_REFUSED, file=sys.stderr)
-            return 2
-        brief_text = rest[0] if rest else ""
-        cut = re.search(r"[,;]?\s*(?:\b(?:cc|copy|copies|copied)\b|c\.c\.).*$", brief_text, re.I)
-        brief_copy = cut.group(0) if cut else None
-        core = brief_text[:cut.start()] if cut else brief_text
-        kind, reader = parse_brief(core)
-        if not kind:
-            print(BRIEF_REFUSED, file=sys.stderr)
+        try:
+            kind, reader, include, brief_copy = read_brief(a.brief)
+        except Refused as e:
+            print(str(e), file=sys.stderr)
             return 2
         a.type = a.type or kind
         a.to = a.to or reader

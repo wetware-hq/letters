@@ -149,3 +149,7 @@ Anything else is refused, naming the first line that doesn't fit.
 a copy request but isn't one, rerun with `--not-copy L<n>` (one line per flag). It prints
 "Line L<n> marked as not a copy request" beside the cut list and still never sends a copy. It can't be used on a line
 that names someone to send the letter to. Don't edit clinical notes to get past a check.
+
+## Checking notes against the template
+
+`python -m check_template <notes> [--brief brief.txt] [--not-copy L<n>]` (run from this folder) checks notes without writing a letter. It is not a second implementation: it runs the same copy, send and recipient checks and the same template parser (`from_template`) that every letter uses, in the same order. Exit 0 prints "Template check passed."; exit 2 prints the signed refusal with the line number. Nothing is written.

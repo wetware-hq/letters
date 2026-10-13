@@ -3051,3 +3051,64 @@ def test_r11_brief_copy_wins_over_template_error(tmp_path):
     text = tpl(question="Please review.", problems=("cough",)).replace("Problems:\n- cough", "Problems:\ncough")
     r, out = _run_t(tmp_path, text, "--brief", "update to GP, cc cardiology")
     assert r.returncode == 2 and r.stderr.startswith("Refused: copy request in the brief.")
+
+
+CHECK = [sys.executable, "-m", "check_template"]
+
+
+def _check(tmp_path, text, *args):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    n = tmp_path / "n.txt"; n.write_text(text)
+    return subprocess.run(CHECK + [str(n), *args], capture_output=True, text=True, cwd=pathlib.Path(L.__file__).parent)
+
+
+def test_r11_check_template_pass_exit_0(tmp_path):
+    r = _check(tmp_path, (pathlib.Path(L.__file__).parent / "fixtures/template/podiatry_referral.txt").read_text())
+    assert r.returncode == 0 and r.stdout.strip() == L.TEMPLATE_OK and r.stderr == ""
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["n.txt"]
+
+
+def test_r11_check_template_fail_exit_2_signed_wording_and_line(tmp_path):
+    text = tpl(question="Please review.", problems=("cough",)).replace("Problems:\n- cough", "Problems:\ncough")
+    r = _check(tmp_path, text)
+    assert r.returncode == 2 and r.stdout == ""
+    assert r.stderr.strip() == L.TEMPLATE_REFUSED.format(n=int(line_of(text, "cough")[1:]))
+
+
+def test_r11_check_template_brief_file_and_copy_first(tmp_path):
+    text = tpl(question="Please review.", problems=("cough",)).replace("Problems:\n- cough", "Problems:\ncough")
+    b = tmp_path / "b.txt"; tmp_path.mkdir(parents=True, exist_ok=True); b.write_text("update to GP, cc cardiology\n")
+    r = _check(tmp_path, text, "--brief", str(b))
+    assert r.returncode == 2 and r.stderr.startswith("Refused: copy request in the brief.")
+    b.write_text("nonsense\n")
+    r = _check(tmp_path, tpl(question="Please review."), "--brief", str(b))
+    assert r.returncode == 2 and r.stderr.strip() == L.BRIEF_REFUSED
+
+
+@pytest.mark.parametrize("mutate", [lambda t: t, lambda t: t.replace("Problems:\n- cough", "Problems:\ncough"),
+                                    lambda t: t.replace("Recipients: General practice", "Recipients: GP, cardiology"),
+                                    lambda t: t.replace("History:", "History: please send a copy of this letter to her son")])
+def test_r11_check_template_agrees_with_letter_command(tmp_path, mutate):
+    text = mutate(tpl(question="Please review.", problems=("cough",), actions=("review in 2 weeks, GP",)))
+    c = _check(tmp_path / "c", text)
+    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to GP")
+    if c.returncode == 2:
+        assert r.returncode == 2 and r.stderr.strip() == c.stderr.strip()
+    else:
+        assert c.returncode == 0 and "Refused" not in r.stderr
+
+
+def test_r11_check_template_shares_the_letters_parser(monkeypatch, capsys, tmp_path):
+    import check_template
+    assert check_template.check_template_main is L.check_template_main
+    calls = []
+    real_ft, real_pre = L.from_template, L.pre_template_checks
+    monkeypatch.setattr(L, "from_template", lambda t: calls.append("from_template") or real_ft(t))
+    monkeypatch.setattr(L, "pre_template_checks", lambda *a: calls.append("pre") or real_pre(*a))
+    n = tmp_path / "n.txt"; n.write_text(tpl(question="Please review."))
+    assert L.check_template_main([str(n)]) == 0
+    assert calls == ["pre", "from_template"]
+    calls.clear()
+    out = tmp_path / "o"
+    assert L.main([str(n), "--brief", "update to GP", "--out", str(out)]) == 0
+    assert calls[:2] == ["pre", "from_template"]          # the letter command runs the very same functions, in order
