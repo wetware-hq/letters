@@ -859,15 +859,6 @@ def reason_start(text):
     return m.end() if m else None
 
 
-def reason_flag(tok, exact=()):
-    """Inside a medicine reason, ordinary English is kept as written: flag only shorthand with no signed plain
-    words, dotted shorthand, acronyms and case variants of reviewed entries."""
-    if tok in exact or tok.lower() in drug_names():
-        return False
-    return no_plain_words(tok) or "." in tok or any(tok.lower() == e.lower() for e in exact) or \
-        (len(tok) >= 2 and (tok.isupper() or any(c.isupper() for c in tok[1:])))
-
-
 def needs_flag(tok, prev="", exact=()):
     """True if tok must be flagged. exact: abbreviations that may expand as written (reviewed list, resolutions)."""
     if tok in exact or tok in TOOL_WORDS:
@@ -951,7 +942,8 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
         def sub(m):
             ab, before = m.group(0), prev[0]
             prev[0] = ab
-            if rs is not None and m.start() >= rs and ab not in resolved and ab not in single and not reason_flag(ab, exact):
+            in_reason = rs is not None and m.start() >= rs   # a reason: never the misspelling flag; abbreviations
+            if in_reason and ab not in resolved and ab not in single and not needs_flag(ab, before, exact):
                 return ab                                    # ordinary English reason: kept as written, no flag
             if ab in resolved:
                 rid, full = resolved[ab]
@@ -962,7 +954,7 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             elif ab in single:
                 full = single[ab]["patient" if audience == "patient" else "clinical"]
             elif needs_flag(ab, before, exact):
-                label = DRUG_FLAG if med and (ab.islower() or (ab.istitle() and len(ab) > 3)) and ab.lower() not in SHORTHAND \
+                label = DRUG_FLAG if med and not in_reason and (ab.islower() or (ab.istitle() and len(ab) > 3)) and ab.lower() not in SHORTHAND \
                     and ab.lower() not in WORDS else FLAG
                 note = " (drug name, check spelling)" if label == DRUG_FLAG else ""
                 flags.append(f"{ab}{note}{ids.strip(' |') and ' ' + ids.strip(' |')}")
@@ -1067,11 +1059,8 @@ def check(md, sources, letter_type):
             scan = scan.replace(f"{f} ({ab})", ab).replace(f, ab)
         exact = tuple(res) + tuple(single)
         prev = ""
-        rs = reason_start(scan)
         for m in TOKEN.finditer(scan):
             ab = m.group(0)
-            if rs is not None and m.start() >= rs and not reason_flag(ab, exact):
-                prev = ab; continue
             if needs_flag(ab, prev, exact) and not FLAG_ANY.match(scan, m.end()):
                 problems.append(f"Refused: abbreviation not flagged or resolved at {at}.")
             prev = ab

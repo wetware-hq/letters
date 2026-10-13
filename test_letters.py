@@ -2991,7 +2991,7 @@ def test_r11_brief_include_unknown_item_still_refused(tmp_path):
 
 
 
-@pytest.mark.parametrize("reason", ["high blood pressure", "type 2 diabetes", "heart failure", "reflux"])
+@pytest.mark.parametrize("reason", ["high blood pressure", "type 2 diabetes", "heart failure", "chest infection"])
 def test_r11_ordinary_english_reason_kept_no_flag(tmp_path, reason):
     text = tpl(question="none", problems=("review",), meds=(f"amlodipine 5 mg daily reason: {reason}",),
                actions=("review in 2 weeks, GP",))
@@ -3157,3 +3157,26 @@ def test_r11f_brief_include_on_first_line_or_three_lines_refused():
     for brief in ("Include: psychiatric history\nreferral to podiatry\nupdate to GP", "referral to podiatry\nupdate to GP"):
         with pytest.raises(L.Refused):
             L.read_brief(brief)
+
+
+
+@pytest.mark.parametrize("ab", ["MS", "PE", "CP", "RA", "BD", "IV"])
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11f_multi_meaning_shorthand_flagged_inside_medicine_reason(tmp_path, ab, brief):
+    text = tpl(question="Please review.", problems=("review",), meds=(f"amlodipine 5 mg daily reason: {ab}",),
+               actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path / ab, text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert f"{ab} {L.FLAG}" in md
+    assert any("abbreviation on line " + line_of(text, "amlodipine") in l for l in r.stderr.splitlines())
+
+
+def test_r11f_unknown_word_in_reason_flagged_single_meaning_exempt(tmp_path):
+    text = tpl(question="Please review.", problems=("review",),
+               meds=("amlodipine 5 mg daily reason: cx", "metformin 500 mg bd reason: CKD"),
+               actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    md = (out / "letter.md").read_text()
+    assert f"cx {L.FLAG}" in md and L.DRUG_FLAG not in md            # abbreviation flag, never the misspelling flag
+    assert "chronic kidney disease (CKD)" in md and f"CKD {L.FLAG}" not in md
