@@ -3180,3 +3180,55 @@ def test_r11f_unknown_word_in_reason_flagged_single_meaning_exempt(tmp_path):
     md = (out / "letter.md").read_text()
     assert f"cx {L.FLAG}" in md and L.DRUG_FLAG not in md            # abbreviation flag, never the misspelling flag
     assert "chronic kidney disease (CKD)" in md and f"CKD {L.FLAG}" not in md
+
+
+R11F_GENERICS = ["prednisone", "frusemide", "glyceryl trinitrate", "dabigatran", "ticagrelor", "prasugrel", "clopidogrel",
+                 "insulin glargine", "insulin detemir", "insulin aspart", "insulin lispro", "insulin isophane",
+                 "semaglutide", "dulaglutide", "liraglutide", "empagliflozin", "dapagliflozin", "sitagliptin", "gliclazide",
+                 "tapentadol", "buprenorphine", "fentanyl", "hydromorphone", "methadone", "tramadol", "pregabalin",
+                 "gabapentin", "duloxetine", "venlafaxine", "desvenlafaxine", "mirtazapine", "escitalopram", "citalopram",
+                 "fluoxetine", "quetiapine", "olanzapine", "risperidone", "aripiprazole", "lithium", "sodium valproate",
+                 "lamotrigine", "levetiracetam", "carbamazepine", "spironolactone", "eplerenone", "sacubitril/valsartan",
+                 "bisoprolol", "metoprolol", "carvedilol", "candesartan", "irbesartan", "telmisartan", "rosuvastatin",
+                 "ezetimibe", "rivaroxaban", "enoxaparin", "pantoprazole", "esomeprazole", "ondansetron", "metoclopramide"]
+
+
+def test_r11f_sixty_generics_recognised_once():
+    assert len(R11F_GENERICS) == 60
+    lines = [l.strip().lower() for l in (pathlib.Path(L.__file__).parent / "drugs.txt").read_text().splitlines()
+             if l.strip() and not l.startswith("#")]
+    for g in R11F_GENERICS:
+        assert lines.count(g) == 1, g                                     # present, never duplicated
+        assert all(not L.needs_flag(w) for w in re.split(r"[\s/]+", g)), g
+
+
+@pytest.mark.parametrize("drug", ["frusemide", "glyceryl trinitrate", "insulin glargine", "sacubitril/valsartan",
+                                  "tapentadol", "ezetimibe", "furosemide"])
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11f_generics_kept_as_written_no_flag(tmp_path, drug, brief):
+    text = tpl(question="Please review.", problems=("review",), meds=(f"{drug} 10 mg daily",),
+               actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path / re.sub(r"\W", "_", drug), text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert f"{drug} 10 mg" in md                                           # exactly as the notes wrote it
+    assert ("frusemide" in md) == (drug == "frusemide") and ("furosemide" in md) == (drug == "furosemide")
+    lid = line_of(text, drug)
+    assert not any(lid in l for l in r.stderr.splitlines()), r.stderr
+
+
+@pytest.mark.parametrize("part", ["sacubitril", "valsartan"])
+def test_r11f_combination_needs_both_parts(part):
+    notes = "Patient: SYNTH-7301\n1937-04-05 Clinic.\nMed: sacubitril/valsartan 49/51 mg bd\nPlan: review in 4 weeks\n"
+    md = make_letter(notes, "gp-update", "GP")
+    assert "sacubitril/valsartan 49/51 mg" in md
+    L.verify_letter(md, notes)
+    with pytest.raises(L.Refused):
+        L.verify_letter(md.replace("sacubitril/valsartan", part), notes)
+
+
+@pytest.mark.parametrize("audience", [None, "patient"])
+def test_r11f_entresto_combination_brand_refused(audience):
+    with pytest.raises(L.Refused) as e:
+        make_letter(COMBO_NOTES.format(line="Med: Entresto 49/51 mg bd"), "gp-update", "GP", audience=audience)
+    assert str(e.value) == COMBO_MSG.format(n=4)

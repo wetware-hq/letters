@@ -330,6 +330,16 @@ def drug_names():
     return _DRUGS
 
 
+def drug_words():
+    """Single words of multi-word medicine names (insulin glargine, glyceryl trinitrate): never flagged."""
+    if not _DRUG_WORDS:
+        _DRUG_WORDS.update(w for n in drug_names() for w in re.split(r"[\s/]+", n) if len(w) > 3)
+    return _DRUG_WORDS
+
+
+_DRUG_WORDS = set()
+
+
 def drugs_in(s):
     """Recognised medicine names in s, longest first, as [(as written, generic)]."""
     out, low = [], s.lower()
@@ -864,8 +874,8 @@ def needs_flag(tok, prev="", exact=()):
     if tok in exact or tok in TOOL_WORDS:
         return False
     low = tok.lower()
-    if low in drug_names():
-        return False                                        # recognised medicine or brand
+    if low in drug_names() or low in drug_words():
+        return False                                        # recognised medicine or brand (or part of one)
     if "/" in tok and tok not in ("c/o", "o/e"):
         return False                                        # slash unit, e.g. mmol/L
     if tok in UNITS:
@@ -1303,7 +1313,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
 
 
 # Temporary (13 Oct 2026): combination medicines can't be fully listed yet, so any letter naming one is refused.
-COMBO_BRANDS = ("biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy")
+COMBO_BRANDS = ("biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy", "entresto")
 COMBO_RX = re.compile(r"(?<![a-z0-9])(?:" + "|".join(COMBO_BRANDS) + r")(?![a-z0-9])", re.I)
 COMBO_REFUSED = "Refused: line {lid} has a combination medicine that letters can't fully list yet. Nothing was written."
 

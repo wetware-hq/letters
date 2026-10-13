@@ -107,3 +107,33 @@ Ventolin=salbutamol
 Zoloft=sertraline
 esomeprazole
 Augmentin=amoxicillin/clavulanate
+# Round 11 follow-up (13 Oct 2026): Physician's queued generics. frusemide and glyceryl trinitrate are kept as written
+# (no swap to furosemide; GTN is a signed single-meaning entry). sacubitril/valsartan is one combination item.
+prednisone
+frusemide
+glyceryl trinitrate
+dabigatran
+ticagrelor
+prasugrel
+insulin glargine
+insulin detemir
+insulin aspart
+insulin lispro
+insulin isophane
+semaglutide
+dulaglutide
+liraglutide
+tapentadol
+buprenorphine
+fentanyl
+hydromorphone
+methadone
+duloxetine
+desvenlafaxine
+aripiprazole
+lithium
+eplerenone
+sacubitril/valsartan
+carvedilol
+telmisartan
+ezetimibe
