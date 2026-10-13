@@ -2769,3 +2769,40 @@ def test_r10_no_question_flag_fires_in_every_letter(tmp_path, brief):
     assert any(l.startswith("Flag: this") and "no clear question" in l for l in r.stderr.splitlines())
     r, out = _run_t(tmp_path / "f", tpl(question="none", problems=["asthma"]), "--brief", brief, "--final")
     assert r.returncode == 3 and not out.exists()
+
+
+# ---------- round 10 item 6: reasons; a kept stop reason still goes through the cut rules ----------
+@pytest.mark.parametrize("line", ["Ceased: zorbaline 5 mg daily due to schizophrenia relapse",
+                                  "Ceased: zorbaline 5 mg daily because of schizophrenia relapse",
+                                  "Ceased: zorbaline 5 mg daily owing to schizophrenia relapse",
+                                  "Ceased: zorbaline 5 mg daily - schizophrenia relapse"])
+def test_r10_cut_stop_reason_each_trigger_word_non_patient(line):
+    flags = []
+    t = f"SYNTH-9301\n1937-06-01 review.\n{line}\nQuestion: is she well?\n"
+    md, _ = build(t, "gp-update", "GP", flags=flags)
+    ch = section(md, "Medicine changes")
+    assert "Reason for change: reason not included." in ch and L.MED_FLAG in ch
+    assert "schizophrenia" not in md.lower() and "not documented" not in ch
+    pmd, _ = build(t, "gp-update", "Patient", audience="patient")       # patient letters keep everything
+    assert "schizophrenia relapse" in pmd
+
+
+def test_r10_cut_stop_reason_in_template_line():
+    t = tpl(question="Is she well?", meds=["zorbaline 5 mg daily; ceased 1937-06-01 - schizophrenia relapse"])
+    flags = []
+    md, _ = L.build_from_template(t, "gp-update", "GP", flags=flags)
+    ch = section(md, "Medicine changes")
+    assert "Reason for change: reason not included." in ch and L.MED_FLAG in ch and "schizophrenia" not in md.lower()
+
+
+@pytest.mark.parametrize("word", ["after", "following"])
+def test_r10_after_and_following_kept_as_written_never_a_reason(word):
+    md, _ = build(f"SYNTH-9302\n1937-06-01 review.\nCeased: zorbaline 5 mg daily {word} 2 weeks\nQuestion: ok?\n",
+                  "gp-update", "GP")
+    ch = L.FLAG_ANY.sub("", section(md, "Medicine changes"))
+    assert f"zorbaline 5 mg daily {word} 2 weeks" in ch and f"Reason for change: {word}" not in ch
+
+
+def test_r10_text_after_dash_is_a_reason():
+    md, _ = build("SYNTH-9303\n1937-06-01 review.\nCeased: zorbaline 5 mg daily - rash\nQuestion: ok?\n", "gp-update", "GP")
+    assert "Reason for change: rash." in section(md, "Medicine changes")

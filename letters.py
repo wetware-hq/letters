@@ -465,7 +465,7 @@ def _pkey(s):
     return HEDGE.sub("", s.strip()).lower()
 
 
-STOP_REASON = re.compile(r"^(?P<d>.+?)(?:\s+(?P<r>(?:due to|because of|because|owing to|after|following)\s+.+)|"
+STOP_REASON = re.compile(r"^(?P<d>.+?)(?:\s+(?P<r>(?:due to|because of|because|owing to)\s+.+)|"
                          r"\s+[-\u2013\u2014]+\s+(?P<r2>[^\d].*))$", re.I)
 
 
@@ -565,6 +565,8 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                     sr = STOP_REASON.match(drug)
                     if sr:
                         drug, reason = sr.group("d").strip(" ,;-"), (sr.group("r") or sr.group("r2")).strip(" .")
+                if not reason and any(lid in d_.split(":")[0].split(",") and "cut" in d_ for d_ in dropped):
+                    reason = "reason not included"               # a stated reason was cut on purpose
                 sd = ISO.search(drug)
                 sdate = sd.group(0) if sd else (None if _TEMPLATE else d)   # own date first; never the letter's date
                 drug = re.sub(r"\s+", " ", ISO.sub(" ", drug)).strip(" ,;-") if sd else drug
@@ -1602,6 +1604,10 @@ def apply_cut_rule(md, text, dropped, flags, title=None):
                     body = re.sub(rf"(?<![A-Za-z0-9]){re.escape(b)}(?![A-Za-z0-9]){DRUG_FLAG_RX}", g, body, flags=re.I)
             # the medicine points to the cut item, so its stated reason is cut too: 'reason not included'
             body = re.sub(r"\s*\(for [^()]*\)", ", reason not included", body)
+            # a kept stop or change reason still goes through the cut rules (round 10)
+            body = re.sub(r"Reason for change: ([^\[]*?)\.(?=\s|$)",
+                          lambda m: "Reason for change: reason not included." if any_linked.search(m.group(1))
+                          else m.group(0), body)
             if any_word:                                 # other linked words on the medication line: only that part goes
                 bare = lambda p: FLAG_ANY.sub("", p)          # hard terms never include a bare generic
                 parts = re.split(r",\s*(?![^\[]*\])(?![^()]*\))", body)       # not inside a flag or bracket
