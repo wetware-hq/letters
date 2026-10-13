@@ -3112,3 +3112,18 @@ def test_r11_check_template_shares_the_letters_parser(monkeypatch, capsys, tmp_p
     out = tmp_path / "o"
     assert L.main([str(n), "--brief", "update to GP", "--out", str(out)]) == 0
     assert calls[:2] == ["pre", "from_template"]          # the letter command runs the very same functions, in order
+
+
+# ---------- round 11 follow-up ----------
+@pytest.mark.parametrize("d", ["1930-01-01", "1934-02-28", "1936-02-29", "1937-12-31", "1939-07-15"])
+def test_r11f_template_date_accepts_any_valid_date(d):
+    conv = L.from_template(tpl(question="Please review.", date=d))
+    assert d in conv.splitlines()
+
+
+@pytest.mark.parametrize("d", ["1937-02-30", "1937-13-01", "1935-2-3", "37-02-01"])
+def test_r11f_template_date_invalid_refused(d):
+    text = tpl(question="Please review.", date=d)
+    with pytest.raises(L.Refused) as e:
+        L.from_template(text)
+    assert str(e.value) == L.TEMPLATE_REFUSED.format(n=2)

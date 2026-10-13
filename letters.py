@@ -26,6 +26,17 @@ ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 DMY = re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})\b")
 LONGNUM = re.compile(r"(?<![\w.])\+?\d(?:[\s-]?\d){7,}(?![\w.])")
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+DATE = r"\d{4}-\d{2}-\d{2}"
+
+
+def valid_date(v):
+    """True for a real calendar date written YYYY-MM-DD (any year)."""
+    import datetime
+    try:
+        datetime.date.fromisoformat(v)
+        return bool(re.fullmatch(DATE, v))
+    except ValueError:
+        return False
 
 
 class Refused(Exception):
@@ -2161,7 +2172,7 @@ def from_template(text):
                 bad(n)
             out.append(f"Patient: {v}")
         elif f == "Date":
-            if not re.fullmatch(r"1937-\d{2}-\d{2}", v):
+            if not valid_date(v):        # any valid calendar date; the year policy lives in check_safe() only
                 bad(n)
             out.append(v)
         elif f == "Recipients":
@@ -2201,7 +2212,7 @@ def empty_template_sections(converted):
     for i, l in enumerate(lines):
         if l.startswith("#field "):
             nxt = next((x for x in lines[i + 1:] if x.strip()), "")
-            if nxt.startswith("#") or not nxt or nxt.startswith("1937-"):
+            if nxt.startswith("#") or not nxt or bool(re.match(DATE, nxt)):
                 out.update(TEMPLATE_SECTIONS[l.split(" ", 1)[1]])
                 for sec in TEMPLATE_SECTIONS[l.split(" ", 1)[1]]:
                     _EMPTY_LINES[sec] = f"L{i + 1}"
