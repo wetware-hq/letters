@@ -2654,3 +2654,52 @@ def test_r10_sent_specimen_is_not_a_copy_request(tmp_path):
     r, _ = _run_t(tmp_path, tpl(question="Is it infected?", pending=["urine culture, sent 1937-06-02, GP"],
                                 history="Urine culture sent to the lab."), "--brief", "update to GP")
     assert r.returncode == 0, r.stderr
+
+
+# ---------- round 10 item 1: reverse check (dates, numbers, names, owners must be in the notes or brief) ----------
+REV_T = tpl(question="Is the dose right?", problems=["knee pain"], date="1937-04-15",
+            meds=["zorbaline 50 mg tds reason: knee pain", "trimeloxin 10 mg daily; ceased 1937-04-12 - nausea"],
+            results=["sodium 133 mmol/L 1937-04-11"], pending=["urine culture, sent 1937-04-13, practice nurse"],
+            actions=["review in 2 weeks, practice nurse"])
+
+
+def _rev_md():
+    return build_from_template_md(REV_T)
+
+
+def build_from_template_md(t, **k):
+    return L.build_from_template(t, "gp-update", "GP", **k)[0]
+
+
+def test_r10_reverse_dates_come_from_the_line_never_the_letter_date():
+    md = _rev_md()
+    assert "Stopped on 12 Apr 1937" in md and "15 Apr 1937: trimeloxin" not in md
+    assert "133 mmol/L on 11 Apr 1937" in md and "sent on 13 Apr 1937" in md
+
+
+@pytest.mark.parametrize("old,new", [("12 Apr 1937", "15 Apr 1937"),          # letter's own date for a stop date
+                                     ("133 mmol/L", "134 mmol/L"),            # number not in the notes
+                                     ("11 Apr 1937", "10 Apr 1937"),          # recalculated date
+                                     ("Who follows up: practice nurse", "Who follows up: Dr Quell")])
+def test_r10_reverse_check_refuses_with_letter_line(old, new):
+    md = _rev_md()
+    bad = md.replace(old, new, 1)
+    n = next(k for k, l in enumerate(md.split("\n"), 1) if old in l)
+    with pytest.raises(Refused) as e:
+        L.reverse_check(bad, L.from_template(REV_T), "GP", template=True)
+    assert str(e.value) == f"Refused: line L{n} of this letter has a date, number or name that isn't in the notes. Nothing was written."
+
+
+def test_r10_reverse_check_allows_signed_rewording_and_reformatted_dates():
+    t = tpl(question="Is it the joint?", meds=["paracetamol 1 g prn max 8 tablets in 24 hours reason: pain",
+                                               "zorbaline 5 mg mane reason: gout"])
+    md, _ = L.build_from_template(t, "gp-update", "Patient", audience="patient")
+    assert "when needed" in md and "in the morning" in md
+    L.reverse_check(md, L.from_template(t), "Patient")
+
+
+def test_r10_reverse_check_names_from_brief_allowed_but_not_invented():
+    md = _rev_md()
+    L.reverse_check(md, L.from_template(REV_T), "GP")
+    with pytest.raises(Refused, match="line L\\d+ of this letter"):
+        L.reverse_check(md.replace("Dear colleague,", "Dear Dr Quell,"), L.from_template(REV_T), "GP")

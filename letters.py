@@ -134,6 +134,7 @@ def sensitive_cat(s):
     return None
 
 
+_TEMPLATE = []          # non-empty while a template letter is built: the Date field is the letter's own date
 _NOT_COPY = []          # '--not-copy L<n>' lines for one letter
 _EMPTY_FIELDS = set()   # template list fields left empty (set per letter by build_from_template)
 _INCLUDE = set()     # items the brief asked to include ('include: <item name>'); set by build() for one letter
@@ -565,7 +566,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                     if sr:
                         drug, reason = sr.group("d").strip(" ,;-"), (sr.group("r") or sr.group("r2")).strip(" .")
                 sd = ISO.search(drug)
-                sdate = sd.group(0) if sd else d                 # the line's own date first, else its dated entry
+                sdate = sd.group(0) if sd else (None if _TEMPLATE else d)   # own date first; never the letter's date
                 drug = re.sub(r"\s+", " ", ISO.sub(" ", drug)).strip(" ,;-") if sd else drug
                 k = _mkey(drug)
                 old = st["meds"].pop(k, None)
@@ -576,10 +577,14 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 st["allergies"].append((body, ids))
             elif kind == "result":
                 clear_pending(st, body, tagged_result=True)
+                rd = ISO.search(body)
+                if rd:                                   # the result's own date, never the entry's
+                    body0, body = body, re.sub(r"\s+", " ", ISO.sub(" ", body)).strip(" :,;")
+                    body = re.sub(r"\s+(?:was|is|were|of)\s+(?=[<>]?-?\d)", " ", body).replace(" :", "")
                 r = RES.match(body)
                 if not r or not r.group("unit") or re.match(r"^[\d.]", r.group("unit")):
                     if PER_LITRE.search(body):
-                        st["narrative"].append((d, body, ids))      # a result written in a sentence stays as written
+                        st["narrative"].append((d, body0 if rd else body, ids))      # a result written in a sentence stays as written
                         continue
                     dropped.append(f"{lid}: result without a unit dropped")
                     continue
@@ -587,7 +592,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 k = name.lower()
                 st["pending"].pop(k, None)
                 h = st["results"].setdefault(k, {"name": name, "values": []})
-                h["values"].append((d, r.group("val"), r.group("unit"), r.group("note").strip(), lid))
+                h["values"].append((rd.group(0) if rd else (None if _TEMPLATE else d), r.group("val"), r.group("unit"), r.group("note").strip(), lid))
             elif kind == "pending":
                 sm = re.search(r";\s*sent:\s*(1937-\d{2}-\d{2})", body)
                 sent = sm.group(1) if sm else None
@@ -1324,7 +1329,86 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
         if flags is not None:
             flags.append(QUESTION_NOTICE)
     verify_letter(md, text, audience, _INCLUDE)
+    reverse_check(md, text, " ".join([x for x in (to, recipient) if x] + [f for _, f in resolved.values()]))
     return md, dropped
+
+
+# ---------- reverse check: every date, number, name and owner in the letter is in the notes or the brief ----------
+REVERSE_REFUSED = "Refused: line L{n} of this letter has a date, number or name that isn't in the notes. Nothing was written."
+_LETTER_DATE = re.compile(r"\b(\d{1,2}) (" + "|".join(MONTHS) + r") (1937)\b")
+
+
+def _tool_words():
+    words = set()
+    for v in list(globals().values()):
+        if isinstance(v, (list, tuple)):
+            v = " ".join(x for x in v if isinstance(x, str))
+        if isinstance(v, str):
+            words |= {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z'-]*", v)}
+        elif isinstance(v, dict):
+            for x in v.values():
+                if isinstance(x, str):
+                    words |= {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z'-]*", x)}
+                if isinstance(x, dict):
+                    for y in x.values():
+                        if isinstance(y, str):
+                            words |= {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z'-]*", y)}
+    return words
+
+
+def reverse_check(md, text, extra="", template=None):
+    """Every date, number, person name and owner in the letter must appear in the notes (cited lines for a cited
+    letter line) or the brief. Allowed rewording: the signed lists only (frequency plain words, brand to generic,
+    'no more than X in 24 hours'). A date may be reformatted, never recalculated. Line refs are exempt."""
+    raw = {f"L{n}": l for n, l in enumerate(text.splitlines(), 1)}
+    for lid, (_, d) in parse(text)[1].items():             # a line's own dated entry is a notes date for it
+        if d and not (bool(_TEMPLATE) if template is None else template):   # never the template Date field (the letter's own date)
+            raw[lid] = raw.get(lid, "") + " " + d
+    allnotes = text + "\n" + (extra or "")
+    tool = _tool_words()
+    single = load_single_meaning()
+    expans = " ".join(v["clinical"] + " " + v["patient"] for v in single.values()).lower()
+    body = md.split("\n---\n")[0]
+    tool |= {"dear", "who", "when", "action", "changed", "from", "now", "stopped", "started", "restarted", "reason",
+             "change", "resolved", "ruled", "out", "sent", "undocumented", "date", "follows", "up"}
+    started = False
+    for n, line in enumerate(body.split("\n"), 1):
+        started = started or line.startswith("**Date:**")       # the brand pack's own header is not note content
+        if not started or not line.strip() or line.startswith(("## ", "<!--", "![")) or line.startswith("| Test"):
+            continue
+        ids = [i for i in _line_ids(line) if i.startswith("L")]
+        res = [i for i in _line_ids(line) if i.startswith("R")]
+        src = " ".join(raw.get(i, "") for i in ids) if ids else allnotes
+        src += " " + (extra or "")
+        t = re.sub(r"^(?:- |\d+\. |\| )", "", FLAG_ANY.sub("", split_ids(line)[0]))
+        bad = False
+        for m in _LETTER_DATE.finditer(t):
+            iso = f"1937-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
+            if iso not in src:
+                bad = True
+        for m in ISO.finditer(t):
+            if m.group(0) not in src:
+                bad = True
+        rest = ISO.sub(" ", _LETTER_DATE.sub(" ", t))
+        if re.search(PLAIN[-1][0], src):                        # signed: 'no more than X in 24 hours'
+            rest = rest.replace(" in 24 hours", " ")
+        num = re.compile(r"(?<![A-Za-z\d.])\d+(?:\.\d+)?(?![A-Za-z\d])")
+        srcnums = set(num.findall(src))
+        if any(x not in srcnums for x in num.findall(re.sub(r"\bSYNTH-\w+", " ", rest))):
+            bad = True
+        srcw = {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z'-]*", src)}
+        for w in re.findall(r"(?<![\w-])[A-Z][a-z]+(?:-[A-Za-z]+)*(?![\w])", rest):     # person and place names
+            lw = w.lower()
+            if lw in srcw or lw in tool or lw in expans or lw in drug_names() or any(p in srcw for p in lw.split("-")):
+                continue
+            bad = True
+        for m in re.finditer(r"\bWho(?: follows up)?: ([^.]+)\.", rest):          # owners
+            who = m.group(1).strip()
+            if who != ND and not all(w.lower() in srcw or w.lower() in expans
+                                     for w in re.findall(r"[A-Za-z][A-Za-z'-]*", who)):
+                bad = True
+        if bad:
+            raise Refused(REVERSE_REFUSED.format(n=n))
 
 
 # ---------- post-write checks: linked terms, required details, long sentences ----------
@@ -2067,10 +2151,11 @@ def _template_item(field, item):
 def build_from_template(text, *a, **k):
     conv = from_template(text)
     _EMPTY_FIELDS.clear(); _EMPTY_FIELDS.update(empty_template_sections(conv))
+    _TEMPLATE[:] = [True]
     try:
         return build(conv, *a, **k)
     finally:
-        _EMPTY_FIELDS.clear()
+        _EMPTY_FIELDS.clear(); _TEMPLATE.clear()
 
 
 # ---------- held-out harness ----------
@@ -2199,6 +2284,7 @@ def main(argv=None):
     try:
         text = from_template(text)
         _EMPTY_FIELDS.update(empty_template_sections(text))
+        _TEMPLATE[:] = [True]
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2
