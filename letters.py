@@ -1191,8 +1191,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
     if not patient:
         md = apply_cut_rule(md, text, dropped, flags, TITLES[letter_type])
         md = flag_cuts(md, dropped, flags, TITLES[letter_type])
-    refuse_missing_medicines(md, text)
-    refuse_missing_results(md, text, dropped)
+    verify_letter(md, text, audience, _INCLUDE)
     return md, dropped
 
 
@@ -1515,73 +1514,7 @@ def _drug_present(body, plain):
     return first is None or re.search(rf"(?<![a-z0-9]){re.escape(first.lower())}(?![a-z0-9])", plain)
 
 
-def refuse_missing_medicines(md, text):
-    """Post-write guard, every letter: each medicine, stop and allergy line's parts must reach the letter, in the
-    lines that cite it. Medicine: drug (generic ok) + every dose + every frequency (or its signed plain words) + any
-    maximum. Stop: drug + stop word. Allergy: drug + reaction."""
-    cited = {}
-    for _, line in _body_lines(md):
-        for i in _line_ids(line):
-            cited[i] = cited.get(i, "") + " " + _norm(split_ids(line)[0])
-    for lid, (kind, body) in _source_lines(text).items():
-        if kind not in ("med", "stop", "allergy"):
-            continue
-        plain = cited.get(lid, "")
-        if kind == "allergy":
-            for part in re.split(r"[,;](?![^()]*\))", body):
-                drug, reaction = split_reaction(part)
-                if not drug or NO_REACTION.match(drug) or re.match(r"^(?:nil|none|nkda|no known)", drug, re.I):
-                    continue
-                need = [drug] + ([reaction] if reaction and not NO_REACTION.match(reaction) else [])
-                if not all(_norm(x) in plain for x in need):
-                    raise Refused(ALLERGY_MISSING.format(lid=lid))
-            continue
-        for part in body.split(" || "):
-            if not _drug_present(part, plain):
-                raise Refused(MED_MISSING.format(lid=lid))
-            if kind == "stop":
-                if not STOP_RX.search(plain):
-                    raise Refused(MED_MISSING.format(lid=lid))
-                continue
-            for m in MAX_RX.finditer(part):
-                plain_max = re.sub(PLAIN[-1][0], PLAIN[-1][1], m.group(0))
-                if _norm(m.group(0)) not in plain and _norm(plain_max) not in plain:
-                    raise Refused(MAX_MISSING.format(lid=lid))
-            noted = _norm(MAX_RX.sub(" ", part))
-            for m in DOSE_RX.finditer(noted):
-                if not re.search(rf"(?<![\d.]){re.escape(m.group(0))}(?![a-z])", plain):
-                    raise Refused(MED_MISSING.format(lid=lid))
-            for tok, written in note_freqs(part):
-                if not _freq_present(tok, plain, written):
-                    raise Refused(MED_MISSING.format(lid=lid))
-            for m in MAX_RX.finditer(part):
-                plain_max = re.sub(PLAIN[-1][0], PLAIN[-1][1], m.group(0))
-                if _norm(m.group(0)) not in plain and _norm(plain_max) not in plain:
-                    raise Refused(MAX_MISSING.format(lid=lid))
-
-
 RESULT_MISSING = "Refused: a result on line {lid} of the notes is missing from this letter. Nothing was written."
-
-
-def refuse_missing_results(md, text, dropped):
-    """Post-write guard, every letter: each result line with a unit keeps its value and unit in the lines that
-    cite it, unless the item on that line was cut."""
-    cut = {i.strip() for d in dropped for i in d.split(":")[0].split(",")
-           if "result without a unit" not in d}
-    cited = {}
-    for _, line in _body_lines(md):
-        for i in _line_ids(line):
-            cited[i] = cited.get(i, "") + " " + _norm(split_ids(line)[0])
-    for lid, (kind, body) in _source_lines(text).items():
-        if kind != "result" or lid in cut:
-            continue
-        r = RES.match(body)
-        if not r or not r.group("unit") or re.match(r"^[\d.]", r.group("unit")):
-            continue
-        plain = cited.get(lid, "")
-        if not re.search(rf"(?<![\d.]){re.escape(r.group('val'))}(?![\d])", plain) or \
-                _norm(r.group("unit")) not in plain:
-            raise Refused(RESULT_MISSING.format(lid=lid))
 
 
 def finalise(md):
@@ -1595,6 +1528,240 @@ def finalise(md):
 
 def make_letter(text, letter_type, to, recipient=None, audience=None, template=None, brand=None):
     return build(text, letter_type, to, recipient, audience, template, brand)[0]
+
+
+# ---------- independent post-write check ----------
+# Reads the notes with its own line reader. It never uses parse(), classify(), cumsum() or any parser output, so
+# a parser bug (a merged line, a misread heading) cannot hide from it. Only fixed vocabularies are shared
+# (drug names, dose and frequency patterns, linked terms).
+V_DATE = re.compile(r"^\s*1937-\d{2}-\d{2}\b[\s:,-]*")
+V_BULLET = re.compile(r"^\s*(?:[*\u2022\u00b7]|-(?=\s))\s*")
+V_HEAD = re.compile(r"^(?P<h>[A-Za-z][A-Za-z /'-]{0,40}?)\s*(?::|\s[-\u2013\u2014]+(?=\s|$)|\s*(?:->|[\u2192\u279d]))\s*(?P<b>.*)$")
+V_ALLERGY_HEAD = re.compile(r"\b(?:allerg\w*|sensitivit\w*|intoleran\w*|reactions?|anaphyla\w*|adverse)\b", re.I)
+V_STOP_HEAD = re.compile(r"\b(?:stop\w*|ceased?|withheld|discontinued)\b", re.I)
+V_MED_HEAD = re.compile(r"\b(?:med\w*|drugs?|chart|prescri\w*|tablets?|regimen|rx|takes|taking|start|restart|change)\b", re.I)
+V_NIL = re.compile(r"^\s*(?:nil|none|nkda|nkfa|no known(?: drug)? allerg\w*|no allerg\w*)(?:\s+known)?\s*\.?\s*$", re.I)
+V_REACT = re.compile(r"^\s*(?P<a>.+?)\s*(?:\((?P<p>[^)]*)\)\s*$|\s*(?:->|[\u2192\u279d])\s*|\s[-\u2013\u2014]+\s+|\s*:\s+|"
+                     r"\s*=\s*|\s+/\s+|\s+(?:causes|caused|gives|gave)\s+)(?P<r>.*?)\s*$", re.I)
+V_RESULT = re.compile(r"(?<![\d.])(?P<v>-?\d+(?:\.\d+)?)\s?(?P<u>[A-Za-z\u00b5]*/L)(?![A-Za-z])")
+V_REASON = re.compile(r"(?:\s[-\u2013\u2014]+\s+|,\s*for\s+|\s+for\s+|\s*\((?:for\s+)?)(?P<r>[^()]+?)\)?\s*\.?$", re.I)
+V_SPLIT = re.compile(r"[,;](?![^()]*\))")
+LEAK_REFUSED = LINKED_REFUSED
+
+
+def _v_heading(body):
+    """(heading, rest) when the line opens with a short heading; never a medicine written with a dash reason."""
+    m = V_HEAD.match(body)
+    if not m:
+        return None, body
+    h = m.group("h").strip()
+    if len(h.split()) > 4 or drugs_in(h) or FREQ_RX.search(h):
+        return None, body
+    return h, m.group("b").strip()
+
+
+def read_notes(text):
+    """[(lid, kind, body)] for every notes line, read on its own (no line is ever joined with another).
+    kind: med, stop, allergy, result or None. A short medicine heading with nothing after it ('Current Rx',
+    'Regular meds -') opens a block; indented or bulleted lines under it are medicines."""
+    out, block = [], False
+    for n, raw in enumerate(text.splitlines(), 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            block = False if not raw.strip() else block
+            continue
+        lid = f"L{n}"
+        indented = bool(re.match(r"^\s+\S", raw)) or bool(V_BULLET.match(raw) and raw.lstrip()[:1] in "*\u2022\u00b7")
+        line = V_DATE.sub("", raw.strip())
+        line = V_BULLET.sub("", line) if indented else line
+        head, body = _v_heading(line)
+        if head is None and len(line.split()) <= 4 and not re.search(r"\d", line) and V_MED_HEAD.search(line) \
+                and not drugs_in(line):
+            head, body = line, ""
+        kind = None
+        if head is not None and TAGS.get(head.lower()) not in (None, "med", "stop", "allergy"):
+            out.append((lid, None, line))            # a known non-medicine heading (Problem, Plan, Pending...)
+            block = False
+            continue
+        if head is not None:
+            if V_ALLERGY_HEAD.search(head):
+                kind = "allergy"
+            elif V_STOP_HEAD.search(head):
+                kind = "stop"
+            elif V_MED_HEAD.search(head):
+                kind = "stop" if STOP_RX.search(body) else "med"
+            if kind == "med" and not body:
+                block = True
+                out.append((lid, None, line))
+                continue
+        if kind is None and block and indented:
+            kind = "stop" if STOP_RX.search(body) else "med"
+        if not indented:
+            block = False
+        if kind is None:
+            whole = line
+            if PER_LITRE.search(whole) and not FREQ_RX.search(whole) and not DOSE_RX.search(whole):
+                kind, body = "result", whole
+            elif STOP_RX.search(whole) and drugs_in(whole):
+                kind, body = "stop", whole
+            elif DOSE_RX.search(whole) and not re.search(r"\b(?:sent|pending|awaiting|result)\b", whole, re.I):
+                kind, body = "med", (body if head and drugs_in(body) else whole)
+        out.append((lid, kind, body if kind else line))
+    return out
+
+
+def _v_med_parts(body):
+    """Split a medicine list ('a 5 mg daily, b 10 mg bd') only when every part has its own dose or frequency."""
+    parts = [p.strip() for p in V_SPLIT.split(body) if p.strip()]
+    if len(parts) > 1 and all(DOSE_RX.search(p) or FREQ_RX.search(p) for p in parts):
+        return parts
+    return [body]
+
+
+def _v_reason(part):
+    m = V_REASON.search(part)
+    if not m:
+        return None
+    r = m.group("r").strip(" .")
+    return r if r and not DOSE_RX.search(r) and not FREQ_RX.search(r) and not STOP_RX.search(r) else None
+
+
+def _v_allergies(body):
+    """[(allergen as written, reaction or None)]; nil statements give []."""
+    out = []
+    for part in V_SPLIT.split(body):
+        part = part.strip(" .")
+        if not part or V_NIL.match(part):
+            continue
+        m = V_REACT.match(part)
+        if m:
+            r = (m.group("p") if m.group("p") is not None else m.group("r")).strip(" .")
+            if r:
+                out.append((m.group("a").strip(), None if NO_REACTION.match(r) else r))
+                continue
+        out.append((part, None))
+    return out
+
+
+def _v_cut_words(text, audience, include):
+    """Cut categories present in the notes (never for the patient) -> list of regexes that mark a cut item."""
+    if audience == "patient":
+        return []
+    inc = {i.lower() for i in include}
+    rxs = []
+    linked = load_linked()
+    for cat, pats in SENSITIVE.items():
+        if cat.lower() in inc:
+            continue
+        v = linked.get(cat, {})
+        words = list(v.get("terms", [])) + list(v.get("flag_terms", [])) + list(v.get("medicines", [])) + \
+            list(v.get("brands", {}))
+        cat_rx = [re.compile(p, re.I) for p in pats] + [_term_re(w) for w in words]
+        hard = [re.compile(p, re.I) for p in pats] + [_term_re(w) for w in words if w not in v.get("flag_terms", [])]
+        if any(r.search(text) for r in hard):         # flag-only words never mark an item as present
+            rxs += cat_rx
+    return rxs
+
+
+def _letter_lines(md):
+    """[(section heading, ids, normalised text)] for each cited letter line."""
+    out, sec = [], None
+    for line in md.split("\n"):
+        if line.startswith("## "):
+            sec = line[3:].strip()
+            continue
+        ids = _line_ids(line)
+        if ids:
+            out.append((sec, ids, _norm(re.sub(r"^(- |\d+\. |\| )", "", split_ids(line)[0]))))
+    return out
+
+
+MED_SECTIONS = {h["meds"] for h in HEADINGS.values()}
+CHANGE_SECTIONS = {h["med_changes"] for h in HEADINGS.values()}
+ALLERGY_SECTIONS = {h["allergies"] for h in HEADINGS.values()}
+
+
+def _v_key(part):
+    found = drugs_in(part)
+    if found:
+        return found[0][1]
+    w = re.findall(r"[A-Za-z][A-Za-z-]+", part)
+    return w[0].lower() if w else part.lower()
+
+
+def _v_med_ok(part, plain):
+    if not _drug_present(re.sub(r"^\W+", "", part), plain):
+        return False
+    for m in MAX_RX.finditer(part):
+        plain_max = re.sub(PLAIN[-1][0], PLAIN[-1][1], m.group(0))
+        if _norm(m.group(0)) not in plain and _norm(plain_max) not in plain:
+            return "max"
+    for m in DOSE_RX.finditer(_norm(MAX_RX.sub(" ", part))):
+        if not re.search(rf"(?<![\d.]){re.escape(m.group(0))}(?![a-z])", plain):
+            return False
+    return all(_freq_present(tok, plain, written) for tok, written in note_freqs(part))
+
+
+def verify_letter(md, text, audience="gp", include=(), collect=None):
+    """Post-write check on the finished letter against the notes alone. Medicine: drug (generic ok), every dose,
+    every frequency (or its signed plain words) and any maximum, in a current-medicines line citing that note line.
+    Stop: drug + stop word in a medicines line. Allergy: allergen exactly as written + reaction when given.
+    Per-litre result: value + unit. Non-patient letters: a cut reason or a cut sentence must not appear.
+    collect: a list to receive every refusal (diagnostic use); otherwise the first one is raised."""
+    def fail(msg):
+        if collect is None:
+            raise Refused(msg)
+        collect.append(msg)
+    lines = _letter_lines(md)
+    whole = " ".join(t for _, _, t in lines)
+    cut = _v_cut_words(text, audience, include)
+    is_cut = lambda s: any(r.search(s) for r in cut)
+    notes = read_notes(text)
+    later = {}                                   # drug key -> number of later medicine or stop lines naming it
+    for lid, kind, body in notes:
+        if kind in ("med", "stop"):
+            for part in _v_med_parts(body):
+                later.setdefault(_v_key(part), []).append(lid)
+    for lid, kind, body in notes:
+        cites = [(s, t) for s, ids, t in lines if lid in ids]
+        anywhere = " ".join(t for _, t in cites)
+        if kind == "med":
+            for part in _v_med_parts(body):
+                superseded = later.get(_v_key(part), [lid])[-1] != lid      # same drug written again later
+                in_meds = " ".join(t for s, t in cites if s in MED_SECTIONS | (CHANGE_SECTIONS if superseded else set()))
+                ok = _v_med_ok(part, in_meds)
+                if ok == "max":
+                    fail(MAX_MISSING.format(lid=lid))
+                elif not ok:
+                    fail(MED_MISSING.format(lid=lid))
+                reason = _v_reason(part)
+                if reason and cut and (is_cut(reason) or is_cut(part)) and _norm(reason) in anywhere:
+                    fail(LEAK_REFUSED.format(lid=lid))
+        elif kind == "stop":
+            in_meds = " ".join(t for s, t in cites if s in MED_SECTIONS | CHANGE_SECTIONS)
+            if not _drug_present(body, in_meds) or not STOP_RX.search(in_meds):
+                fail(MED_MISSING.format(lid=lid))
+        elif kind == "allergy":
+            for allergen, reaction in _v_allergies(body):
+                if _norm(allergen) not in anywhere or (reaction and _norm(reaction) not in anywhere):
+                    fail(ALLERGY_MISSING.format(lid=lid)); break
+        elif kind == "result":
+            if is_cut(body):
+                continue
+            for m in V_RESULT.finditer(body):
+                if not re.search(rf"(?<![\d.]){re.escape(m.group('v'))}(?![\d])", anywhere) or \
+                        _norm(m.group("u")) not in anywhere:
+                    fail(RESULT_MISSING.format(lid=lid)); break
+        elif cut and is_cut(body):
+            for sent in re.split(r"(?<=[.!?])\s+", body):
+                s = _norm(sent).strip(" .")
+                if is_cut(sent) and s and (s in whole or any(is_cut(t) for _, t in cites)):
+                    fail(LEAK_REFUSED.format(lid=lid)); break
+    return True
+
+
+def refuse_missing_medicines(md, text, audience="gp", include=()):
+    """Kept name for older callers: the independent post-write check."""
+    return verify_letter(md, text, audience, include)
 
 
 # ---------- held-out harness ----------
