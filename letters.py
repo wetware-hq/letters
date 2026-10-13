@@ -877,9 +877,12 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
                 resolved, flags)
     md = flag_long_sentences(md, flags)
-    md = flag_linked_medicines(md, text, dropped, flags)
+    patient = audience == "patient"           # the patient keeps their own sensitive details
+    if not patient:
+        md = flag_linked_medicines(md, text, dropped, flags)
     check(md, sources, letter_type)
-    refuse_linked_terms(md, text, dropped)
+    if not patient:
+        refuse_linked_terms(md, text, dropped)
     refuse_missing_required(md, text)
     return md, dropped
 

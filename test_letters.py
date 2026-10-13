@@ -1220,3 +1220,15 @@ def test_update_to_patient_brief_is_patient_letter(tmp_path):
 def test_copy_refusal_in_any_brief_kind(tmp_path):
     r, out = _gp_cli(tmp_path, brief="discharge summary to GP, cc renal")
     _assert_gp_refused(r, out, "in the brief")
+
+
+def test_patient_letter_skips_linked_check_and_medicine_flag_but_keeps_abbreviation_flags():
+    text = HIV_NOTES + "Plan: repeat CD4 and VL in 3 months\n"
+    with pytest.raises(Refused, match="still mentions something"):
+        build(text, "gp-update", "Podiatry")
+    flags = []
+    md, _ = build(text, "gp-update", "Patient", audience="patient", flags=flags)
+    assert not any(f.startswith("Flag: a medicine") for f in flags) and L.MED_FLAG not in md
+    assert "antiretroviral" in md and "dolutegravir" in md
+    assert f"CD4 {L.FLAG}" in md and f"VL {L.FLAG}" in md
+    assert any(f.startswith("CD4") for f in flags) and any(f.startswith("VL") for f in flags)
