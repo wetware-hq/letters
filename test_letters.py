@@ -418,6 +418,9 @@ def _hygiene_hits(p):
     if p == ENGLISH:
         lines = [l for l in lines if l not in TELEGRAM_OK]
     s = "\n".join(lines)
+    if p.name == "linked_terms.toml":       # the signed-off header names its reviewer (room ruling)
+        lines = [l for l in lines if l != "# Version 2 signed off by BIO Physician 13 Oct 2026. Frozen."]
+        s = "\n".join(lines)
     return [bad for bad in ("/workspace", "/home/", "BIO ", "telegram", "patient-store") if bad in s]
 
 
@@ -1080,8 +1083,7 @@ def test_sensitive_cut_everywhere_medicine_stays_and_flagged(letter_type, to):
         L.finalise(md)
 
 
-@pytest.mark.parametrize("extra,lid", [("PMHx: undetectable VL", "L12"), ("Problem: monitoring CD4 count", "L12"),
-                                       ("Plan: repeat viral load in 3 months", "L12")])
+@pytest.mark.parametrize("extra,lid", [("Problem: monitoring CD4 count", "L12"), ("Plan: RVD clinic", "L12")])
 def test_linked_term_left_after_cut_refused_names_line_only(tmp_path, extra, lid):
     n = tmp_path / "n.txt"; n.write_text(HIV_NOTES + extra + "\n")
     with pytest.raises(Refused) as e:
@@ -1116,18 +1118,20 @@ def test_lithium_medicine_flagged_when_reason_cut():
 
 def test_linked_terms_file_signed_off():
     raw = L.LINKED_TERMS_FILE.read_text()
-    assert "Reviewed by clinician; needs fresh sign-off for any change" in raw and "Physician sign-off" in raw
-    assert "Version 2" in raw and "DRAFT" not in raw
+    assert "Reviewed by clinician; needs fresh sign-off for any change" in raw
+    assert "Version 2 signed off by BIO Physician 13 Oct 2026. Frozen." in raw and "DRAFT" not in raw
     items = L.load_linked()
     hiv, psy, prep = items["HIV status"], items["psychiatric history"], items["PrEP"]
-    assert {"HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "VL", "viral load", "CD4", "RVD",
+    assert {"HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "CD4", "RVD",
             "antiretroviral", "S100 prescriber"} <= set(hiv["terms"])
-    assert {"Truvada", "Descovy", "tenofovir", "S100", "ritonavir", "lamivudine"} <= set(hiv["flag_terms"])
+    assert not {"VL", "viral load"} & set(hiv["terms"])
+    assert {"Truvada", "Descovy", "tenofovir", "S100", "ritonavir", "lamivudine", "VL", "viral load"} <= set(hiv["flag_terms"])
     assert {"Biktarvy", "Triumeq", "Dovato", "Genvoya"} <= set(hiv["brands"])
     assert {"CPMS", "clozapine registry", "Li+", "lithium toxicity", "Li level"} <= set(psy["terms"])
     assert psy["brands"] == {"Clozaril": "clozapine", "Clopine": "clozapine", "Lithicarb": "lithium", "Quilonum": "lithium"}
-    assert set(prep["terms"]) == {"PrEP", "pre-exposure prophylaxis"} and prep["flag_terms"] == ["sexual health clinic"]
-    assert {"tenofovir/emtricitabine", "tenofovir", "emtricitabine"} <= set(prep["medicines"])
+    assert set(prep["terms"]) == {"PrEP", "pre-exposure prophylaxis"}
+    assert set(prep["flag_terms"]) == {"sexual health clinic", "tenofovir"}
+    assert set(prep["medicines"]) == {"tenofovir/emtricitabine", "emtricitabine"}
     assert set(prep["brands"]) == {"Truvada", "Descovy"}
 
 
@@ -1562,3 +1566,11 @@ def test_prep_kept_for_relevant_reader_and_patient():
 def test_prep_clause_cut_upstream():
     md, dropped = build(PREP + "Plan: pre-exposure prophylaxis reviewed\n", "gp-update", "Podiatry")
     assert "prophylaxis" not in md and any("L7" in d for d in dropped)
+
+
+
+@pytest.mark.parametrize("extra", ["PMHx: undetectable VL", "Plan: repeat viral load in 3 months"])
+def test_viral_load_and_vl_flag_only_after_signoff(extra):
+    flags = []
+    md, _ = build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry", flags=flags)
+    assert WORD_MSG.format("L12") in flags

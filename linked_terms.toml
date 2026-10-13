@@ -1,6 +1,6 @@
 # Linked terms for items this tool may cut from a letter. Version 2.
 # Reviewed by clinician; needs fresh sign-off for any change.
-# Version 2 awaiting Physician sign-off; not frozen yet (LINKED_TERMS.SHA256 still holds the version 1 checksum).
+# Version 2 signed off by BIO Physician 13 Oct 2026. Frozen.
 #
 # For each cut category (names match SENSITIVE in letters.py), checked ONLY when that item is on the
 # letter's dropped list, and never for letters addressed to the patient:
@@ -10,9 +10,10 @@
 #   brands     - brand name = generic medicine; same rule as medicines.
 
 [items."HIV status"]
-terms = ["HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "VL", "viral load", "CD4", "RVD",
+terms = ["HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "CD4", "RVD",
          "antiretroviral", "S100 prescriber"]
-flag_terms = ["undetectable", "ART", "ritonavir", "lamivudine", "Truvada", "Descovy", "tenofovir", "S100"]
+flag_terms = ["undetectable", "ART", "ritonavir", "lamivudine", "Truvada", "Descovy", "tenofovir", "S100", "viral load",
+              "VL"]
 medicines = ["dolutegravir", "emtricitabine", "zidovudine", "abacavir", "bictegravir", "raltegravir", "rilpivirine",
              "darunavir", "efavirenz", "nevirapine", "cobicistat"]
 
@@ -37,8 +38,8 @@ Quilonum = "lithium"
 
 [items."PrEP"]
 terms = ["PrEP", "pre-exposure prophylaxis"]
-flag_terms = ["sexual health clinic"]
-medicines = ["tenofovir/emtricitabine", "tenofovir", "emtricitabine"]
+flag_terms = ["sexual health clinic", "tenofovir"]
+medicines = ["tenofovir/emtricitabine", "emtricitabine"]
 
 [items."PrEP".brands]
 Truvada = "tenofovir/emtricitabine"
