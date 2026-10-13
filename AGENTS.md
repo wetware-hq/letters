@@ -39,7 +39,7 @@ Allergies with reaction; full current medication list; reason for each change; p
 
 ## Writing
 
-- Abbreviations **MUST** stay as written and be flagged, unless listed in `single_meaning.toml` (each entry signed off by the physician; patient letters use its signed plain-words version). A clinician closes a flag with `--resolve "ABBR=meaning"`, which becomes a cited source. `--final` **MUST** refuse while any flag is open, and **MUST** strip source tags only.
+- Abbreviations **MUST** stay as written and be flagged, unless listed in `single_meaning.toml` (each entry signed off by the physician; patient letters use its signed plain-words version). Anything that may be an abbreviation **MUST** be flagged: any case variant of a listed entry, any word of two or more letters in capitals or with an inner capital, any entry in `shorthand.txt` (clinician-reviewed), the single letter u/U, and any word not in the committed English or medical word lists (checksummed; drug names included). A clinician closes a flag with `--resolve "ABBR=meaning"`, which becomes a cited source. `--final` **MUST** refuse while any flag is open, and **MUST** strip source tags only.
 - Trends **MUST** be values with dates, never a direction.
 - A sensitive indication **MUST** be cut when the reader doesn't need it; the medicine stays.
 - Stigmatising labels **MUST** be rewritten neutrally or dropped.
