@@ -1641,7 +1641,8 @@ def test_prep_brand_swapped(medline):
 def test_prep_linked_off_med_line_left_out(extra):
     flags = []
     md, _ = build(PREP + extra + "\n", "gp-update", "Podiatry", flags=flags)
-    assert LEFT_MSG.format("L7") in flags
+    # 'sexual health' is itself an H22 item since 14 Oct 2026, so that line is cut as sensitive (its own flag)
+    assert LEFT_MSG.format("L7") in flags or ("sexual health" in extra and any("L7 was cut" in f for f in flags))
     body = md.split("## Current medicines")[0] + md.split("## Current medicines")[1].split("##", 1)[1]
     for w in ("Truvada", "emtricitabine", "sexual health"):
         assert w not in body, w
@@ -1722,11 +1723,20 @@ def test_include_line_keeps_item(tmp_path):
     assert "bipolar" in md and "Cut from this letter" not in r.stderr and L.CUT_FLAG not in md
 
 
-@pytest.mark.parametrize("brief", ["update to GP\ninclude: Mrs Synthname", "update to GP\nreferral to renal"])
+@pytest.mark.parametrize("brief", ["update to GP\nreferral to renal"])
 def test_bad_include_or_two_briefs_refused_without_echo(tmp_path, brief):
     n = tmp_path / "n.txt"; n.write_text(PSY)
     r = subprocess.run(CLI + [str(n), "--brief", brief, "--out", str(tmp_path / "o")], capture_output=True, text=True)
-    assert r.returncode == 2 and r.stderr.strip() == BRIEF_MSG and "Synthname" not in r.stderr
+    assert r.returncode == 2 and r.stderr.strip() == BRIEF_MSG
+
+
+def test_bad_include_names_item_per_ruling(tmp_path):
+    # ruling 14 Oct 2026: an Include: item off the sensitive-items list is refused with wording that names it
+    n = tmp_path / "n.txt"; n.write_text(PSY)
+    r = subprocess.run(CLI + [str(n), "--brief", "update to GP\ninclude: Mrs Synthname", "--out", str(tmp_path / "o")],
+                       capture_output=True, text=True)
+    assert r.returncode == 2 and r.stderr.strip() == L.SENSITIVE_REFUSED.format(n=2, item="Mrs Synthname")
+    assert not (tmp_path / "o").exists()
 
 
 def test_patient_letters_exempt_from_cut():
@@ -2990,7 +3000,8 @@ def test_r11_brief_include_line_accepted(tmp_path, brief, items):
 def test_r11_brief_include_unknown_item_still_refused(tmp_path):
     r, out = _run_t(tmp_path, (pathlib.Path(L.__file__).parent / "fixtures/template/podiatry_referral.txt").read_text(),
                     "--brief", "referral to podiatry\nInclude: alcohol history")
-    assert r.returncode == 2 and r.stderr.strip() == L.BRIEF_REFUSED
+    assert r.returncode == 2 and r.stderr.strip() == ("Refused: line L2 of the brief includes alcohol history, which "
+                                                      "isn't on the sensitive-items list. Nothing was written.")
 
 
 
@@ -3507,3 +3518,84 @@ def test_r11j_route_slot_only_in_medicine_lines_unit():
     assert L.med_item("morphine 2 mg every 4 hours IV max 10 mg in 24 hours reason: pain")["route"] == "IV"
     assert L.med_item("methotrexate 15 mg every 2 weeks reason: arthritis")["route"] is None
     assert L.med_item("methotrexate 15 mg weekly intrathecal reason: arthritis")["route"] == "intrathecal"
+
+
+
+# ---- round 11 follow-up 13: the Include: list matches hazard H22 (ruling 14 Oct 2026), written from the rule ----
+H22 = ["HIV status", "PrEP", "abuse", "psychiatric history", "Mental Health Act status", "sexual health",
+       "pregnancy loss or termination", "genetic results"]
+NEW_H22 = {"Mental Health Act status": "Detained under the Mental Health Act in 1930",
+           "sexual health": "Chlamydia treated at a sexual health clinic in 1931",
+           "pregnancy loss or termination": "Miscarriage in 1932",
+           "genetic results": "BRCA2 pathogenic variant on genetic testing in 1933"}
+H22_NOTES = ("Patient: SYNTH-9311\nDate: 1938-11-20\nRecipients: Podiatry clinic\n"
+             "Question: Please assess the left forefoot callus.\nProblems:\n- left forefoot callus\n"
+             "History: {hist}. Painful callus left forefoot.\nMedicines:\n- paracetamol 1 g four times daily oral "
+             "reason: pain\nAllergies:\n- No known allergies\nResults:\nPending:\nActions:\n- review in 4 weeks\n")
+SENS_MSG = "Refused: line L{n} of the brief includes {item}, which isn't on the sensitive-items list. Nothing was written."
+
+
+def test_r11k_include_list_is_h22():
+    assert list(L.SENSITIVE) == H22
+    assert L.SENSITIVE_REFUSED.format(n=2, item="x") == SENS_MSG.format(n=2, item="x")
+
+
+@pytest.mark.parametrize("item", H22)
+@pytest.mark.parametrize("case", [str, str.upper, str.lower])
+def test_r11k_every_h22_item_accepted(item, case):
+    assert L.read_brief(f"referral to podiatry\nInclude: {case(item)}")[2] == [case(item)]
+
+
+@pytest.mark.parametrize("item,sentence", list(NEW_H22.items()))
+def test_r11k_new_items_cut_by_default(tmp_path, item, sentence):
+    text = H22_NOTES.format(hist=sentence)
+    r, out = _run_t(tmp_path, text, "--brief", "referral to podiatry")
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert sentence.split()[0] not in md and "1930" not in md and "1931" not in md and "1932" not in md, md
+    assert "Cut from this letter" in r.stderr or "cut" in r.stderr.lower()
+    f = subprocess.run(CLI + [str(tmp_path / "n.txt"), "--brief", "referral to podiatry", "--final"],
+                       capture_output=True, text=True)
+    assert f.returncode != 0                                    # a sensitive cut blocks --final, as for the first four
+
+
+@pytest.mark.parametrize("item,sentence", list(NEW_H22.items()))
+def test_r11k_new_items_kept_when_included(tmp_path, item, sentence):
+    text = H22_NOTES.format(hist=sentence)
+    r, out = _run_t(tmp_path, text, "--brief", f"referral to podiatry\nInclude: {item}")
+    assert r.returncode == 0, r.stderr
+    assert f"Included by the brief: {item}." in r.stderr
+    assert sentence.split()[0] in (out / "letter.md").read_text()
+
+
+@pytest.mark.parametrize("item,sentence", list(NEW_H22.items()))
+def test_r11k_new_items_kept_for_patient(tmp_path, item, sentence):
+    r, out = _run_t(tmp_path, H22_NOTES.format(hist=sentence), "--brief", "update to patient")
+    assert r.returncode == 0, r.stderr
+    assert sentence.split()[0] in (out / "letter.md").read_text()
+
+
+@pytest.mark.parametrize("brief,n,item", [
+    ("referral to podiatry\nInclude: smoking history", 2, "smoking history"),
+    ("referral to podiatry\n\nInclude: sexual health, alcohol use", 3, "alcohol use"),
+    ("referral to podiatry. Include: family history", 1, "family history"),
+    ("referral to podiatry\nInclude: genetic results\nInclude: driving status", 3, "driving status"),
+])
+def test_r11k_off_list_item_refused_naming_it(tmp_path, brief, n, item):
+    text = H22_NOTES.format(hist="No other history")
+    want = SENS_MSG.format(n=n, item=item)
+    with pytest.raises(Refused) as e:
+        L.read_brief(brief)
+    assert str(e.value) == want
+    r, out = _run_t(tmp_path / "cli", text, "--brief", brief)
+    assert r.returncode == 2 and r.stderr.strip() == want and not out.exists()
+    b = tmp_path / "b.txt"; b.write_text(brief)
+    c = _check(tmp_path / "chk", text, "--brief", str(b))
+    assert c.returncode == 2 and c.stderr.strip() == want
+
+
+@pytest.mark.parametrize("brief", ["gibberish", "referral to podiatry\nupdate to GP", "Include: HIV status"])
+def test_r11k_unparseable_brief_still_not_understood(tmp_path, brief):
+    with pytest.raises(Refused) as e:
+        L.read_brief(brief)
+    assert str(e.value) == L.BRIEF_REFUSED

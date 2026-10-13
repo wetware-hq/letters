@@ -134,12 +134,25 @@ SENSITIVE = {
     "abuse": [r"\babuse", r"\bassault", r"\bdomestic violence"],
     "psychiatric history": [r"\bdepress", r"\bbipolar", r"\bschizo", r"\bpsychiatr", r"\bpsychos",
                             r"\bself[- ]harm", r"\boverdose", r"\banxiety", r"\bsuicid"],
+    # H22 items added 14 Oct 2026: cut and include exactly like the four above
+    "Mental Health Act status": [r"\bMental Health Act\b", r"\bMHA\b", r"\bsectioned\b", r"\binvoluntary (?:patient|admission)",
+                                 r"\bcommunity treatment order", r"\bCTO\b"],
+    "sexual health": [r"\bsexual health", r"\bsexually transmitted", r"\bSTIs?\b", r"\bchlamydia", r"\bgonorrh",
+                      r"\bsyphilis", r"\bgenital (?:herpes|warts)"],
+    "pregnancy loss or termination": [r"\bmiscarr", r"\bpregnancy loss", r"\btermination of pregnancy", r"\babortion",
+                                      r"\bstillbirth", r"\bectopic pregnancy"],
+    "genetic results": [r"\bgenetic (?:test|result|testing|screen)", r"\bBRCA\d?\b", r"\bpathogenic variant",
+                        r"\bgene variant", r"\bHuntington", r"\bLynch syndrome"],
 }
 RELEVANT = {
     "HIV status": r"infectious|immunolog|hiv|sexual health",
     "PrEP": r"sexual health|infectious|hiv",
     "abuse": r"social work|safeguarding|psychiatr|mental health",
     "psychiatric history": r"psychiatr|mental health|psycholog",
+    "Mental Health Act status": r"psychiatr|mental health",
+    "sexual health": r"sexual health|infectious",
+    "pregnancy loss or termination": r"obstetric|gynaecolog|women",
+    "genetic results": r"genetic|clinical genetics",
 }
 CLAUSE = re.compile(r"[^,;.]+[,;.]?")
 
@@ -1365,7 +1378,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     """include: item names the brief asked to keep (see SENSITIVE); everything else sensitive is cut."""
     unknown = [i for i in (include or []) if i.lower() not in {c.lower() for c in SENSITIVE}]
     if unknown:
-        raise Refused(BRIEF_REFUSED)
+        raise Refused(SENSITIVE_REFUSED.format(n=1, item=unknown[0]))   # no brief line here: the brief is line L1
     _INCLUDE.clear(); _INCLUDE.update(i.lower() for i in (include or []))
     _NOT_COPY[:] = list(not_copy or ())
     try:
@@ -2433,6 +2446,8 @@ def heldout(path):
 
 BRIEF_REFUSED = ('Refused: brief not understood. Write it as "<kind> to <reader>", for example '
                  '"discharge to GP" or "update to patient".')
+SENSITIVE_REFUSED = ("Refused: line L{n} of the brief includes {item}, which isn't on the sensitive-items list. "
+                     "Nothing was written.")
 BRIEF_KINDS = {
     "referral": "referral", "refer": "referral", "referral letter": "referral",
     "discharge": "discharge", "discharge summary": "discharge", "discharge letter": "discharge",
@@ -2474,12 +2489,21 @@ def line_only_flag(f):
 def read_brief(brief):
     """The brief as (type, reader, include items, copy text or None). Refuses with BRIEF_REFUSED.
     Shared by the letter command and the standalone template checker."""
-    blines = [l.strip() for l in re.split(r"\n|[.;]\s*(?=include\s*:)", brief, flags=re.I) if l.strip()]
-    include = [x.strip() for m in (re.match(r"^include\s*:\s*(.+?)\s*\.?$", l, re.I) for l in blines) if m
-               for x in re.split(r"\s*,\s*|\s+and\s+", m.group(1)) if x.strip()]   # signed 'Include:' line; a list is fine
+    numbered = [(n, l.strip()) for n, raw in enumerate(brief.splitlines(), 1)
+                for l in re.split(r"[.;]\s*(?=include\s*:)", raw, flags=re.I) if l.strip()]
+    blines = [l for _, l in numbered]
     rest = [l for l in blines if not re.match(r"^include\s*:", l, re.I)]
-    if len(rest) > 1 or any(i.lower() not in {c.lower() for c in SENSITIVE} for i in include):
+    if len(rest) > 1:
         raise Refused(BRIEF_REFUSED)
+    include, known = [], {c.lower() for c in SENSITIVE}
+    for n, l in numbered:
+        m = re.match(r"^include\s*:\s*(.+?)\s*\.?$", l, re.I)       # signed 'Include:' line; a list is fine
+        if not m:
+            continue
+        for x in (x.strip() for x in re.split(r"\s*,\s*|\s+and\s+", m.group(1)) if x.strip()):
+            if x.lower() not in known:
+                raise Refused(SENSITIVE_REFUSED.format(n=n, item=x))
+            include.append(x)
     brief_text = rest[0] if rest else ""
     cut = re.search(r"[,;]?\s*(?:\b(?:cc|copy|copies|copied)\b|c\.c\.).*$", brief_text, re.I)
     brief_copy = cut.group(0) if cut else None
