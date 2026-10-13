@@ -29,7 +29,7 @@ Please answer the question below.
 
 ## Medicine changes
 
-- Changed on 16 Mar 1937: from ramipril 2.5 mg daily. Now: ramipril 5 mg daily. Reason for change: not documented. [L7, L11]
+- Changed on 16 Mar 1937: from ramipril 2.5 mg daily. Now: ramipril 5 mg daily. [L7, L11]
 
 ## Current medicines
 

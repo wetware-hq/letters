@@ -1774,11 +1774,21 @@ def _brand_map(items):
 CUT_CHANGE_REASON = " Reason for change: reason not included."
 
 
+NO_REASON_CHANGE = " Reason for change: not documented."
+NO_REASON_NOTICE = "No reason was written for line {lid}."   # round 11: on screen only, does not block --final
+
+
 def drop_cut_change_reasons(md, flags):
     """H22/H29: a stop or change whose reason was cut prints in full with no reason and no marker; the medicine
-    flag is on screen only."""
+    flag is on screen only. Matching-line rule (round 11): a stop or change with no reason written prints exactly the
+    same line, with a non-blocking notice on screen only. Never called for patient letters."""
     out = []
     for line in md.split("\n"):
+        if NO_REASON_CHANGE in line and line.startswith(("- Changed", "- Stopped", "- Started", "- Restarted")):
+            line = line.replace(NO_REASON_CHANGE, "")
+            ids = _line_ids(line)
+            if flags is not None and ids:
+                flags.append(NO_REASON_NOTICE.format(lid=ids[-1]))
         if CUT_CHANGE_REASON in line:
             line = line.replace(CUT_CHANGE_REASON, "")
             ids = _line_ids(line)
@@ -2570,7 +2580,7 @@ def parse_brief(core):
 
 def line_only_flag(f):
     """Print every flag beside a letter as fixed wording plus line ids; never source words."""
-    if f.startswith("Flag: "):
+    if f.startswith(("Flag: ", NO_REASON_NOTICE.split("{")[0])):
         return f
     ids = re.findall(r"\b[LR]\d+\b", f)
     where = f"on line {', '.join(dict.fromkeys(ids))}" if ids else "in this letter"

@@ -171,7 +171,8 @@ def test_med_change_reason_kept_or_not_documented():
     md = make_letter(t, "gp-update", "GP")
     assert f"Reason for change: BP {L.FLAG} above target" in md
     md2 = make_letter(F("chest_pain.txt"), "referral", "Cardiology")
-    assert f"Reason for change: {ND}" in md2
+    # round 11 matching-line rule (Physician, signed): a clinician letter prints no 'not documented' on a change line
+    assert "Reason for change" not in md2 and "- Changed on 16 Mar 1937: from ramipril 2.5 mg daily. Now: ramipril 5 mg daily. [L7, L11]" in md2
 
 
 def test_pending_shows_who_follows_up():
@@ -528,7 +529,8 @@ def test_final_text_otherwise_unchanged():
     text = F("pneumonia_admission.txt")
     flags = []
     build(text, "discharge", "General practice", audience="gp", flags=flags)
-    res = sorted({f.split()[0] + "=meaning of " + f.split()[0] for f in flags})
+    res = sorted({f.split()[0] + "=meaning of " + f.split()[0] for f in flags
+                  if not f.startswith(L.NO_REASON_NOTICE.split("{")[0])})    # round 11: no-reason notice, not an abbreviation
     md, _ = build(text, "discharge", "General practice", audience="gp", resolve=res)
     fin = L.finalise(md)
     assert "[L" not in fin and fin.count("\n") == md.count("\n")
@@ -3991,3 +3993,94 @@ def test_r11q_template_changed_tail_refused_never_partly_parsed(tmp_path, brief,
     with pytest.raises(Refused) as e:
         L.from_template(text)
     assert str(e.value) == msg
+
+
+# ---- signed ruling (round 11): matching lines. A stop or change with no reason written prints exactly the same line
+# as one whose reason was cut as sensitive (GP and other clinician letters). On screen only: a missing reason gets the
+# non-blocking notice "No reason was written for line Ln."; a cut reason keeps the sensitive flag, which blocks --final.
+def _change_notes(drug, reason=None):
+    tail = f" reason: {reason}" if reason else ""
+    return (f"Patient: SYNTH-9401\n1937-06-01 review.\nMed: {drug} 100 mg daily\n1937-06-10 review.\n"
+            f"Med: {drug} 200 mg daily{tail}\nQuestion: is she well?\n")
+
+
+def _change_build(monkeypatch, drug, reason=None, to="GP", audience=None):
+    monkeypatch.setattr(L, "_TEMPLATE", [])
+    monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
+    flags = []
+    md, _ = build(_change_notes(drug, reason), "gp-update", to, audience=audience, flags=flags)
+    return md, flags, next(l for l in md.splitlines() if l.startswith("- Changed"))
+
+
+@pytest.mark.parametrize("drug,reason,words", CHANGE_CASES)
+def test_r11r_change_line_missing_reason_identical_to_cut_reason(drug, reason, words, monkeypatch):
+    _, _, cut = _change_build(monkeypatch, drug, reason)
+    md, _, missing = _change_build(monkeypatch, drug, None)
+    # byte-identical once draft-only flags are removed (a draft spelling flag can differ; --final refuses while any is open)
+    assert FLAG_RX.sub("", missing).encode() == FLAG_RX.sub("", cut).encode()
+    assert FLAG_RX.sub("", missing) == f"- Changed on 10 Jun 1937: from {drug} 100 mg daily. Now: {drug} 200 mg daily. [L3, L5]"
+    assert "not documented" not in missing and "Reason for change" not in md
+
+
+def _stop_text(drug, reason=None):
+    return tpl(question="Please review.", problems=("cough",),
+               meds=(f"{drug} 10 mg daily; ceased 1937-06-01" + (f" - {reason}" if reason else ""),),
+               actions=("review in 2 weeks",))
+
+
+@pytest.mark.parametrize("drug,reason,words", STOP_CASES)
+def test_r11r_stop_line_missing_reason_identical_to_cut_reason(tmp_path, drug, reason, words):
+    lines = []
+    for name, why in (("cut", reason), ("missing", None)):
+        r, out = _run_t(tmp_path / name, _stop_text(drug, why), "--brief", "update to GP")
+        assert r.returncode == 0, r.stderr
+        md = (out / "letter.md").read_text()
+        line = next(l for l in md.splitlines() if l.startswith("- Stopped"))
+        assert "not documented" not in line and "Reason for change" not in md
+        lines.append(FLAG_RX.sub("", line))
+    assert lines[0].encode() == lines[1].encode()                             # byte-identical
+
+
+@pytest.mark.parametrize("drug", ["ramipril", "metformin", "atorvastatin"])
+def test_r11r_missing_reason_notice_on_screen_does_not_block_final(tmp_path, drug):
+    text = _stop_text(drug)
+    lid = line_of(text, drug)
+    r, out = _run_t(tmp_path / "d", text, "--brief", "update to GP")
+    assert r.returncode == 0, r.stderr
+    assert L.NO_REASON_NOTICE.format(lid=lid) in r.stderr.splitlines()
+    assert "No reason was written" not in (out / "letter.md").read_text()      # screen only
+    f, out2 = _run_t(tmp_path / "f", text, "--brief", "update to GP", "--final")
+    assert f.returncode == 0, f.stderr                                        # notice does not block --final
+    assert "--final refused" not in f.stderr and "[L" not in (out2 / "letter.md").read_text()
+
+
+def test_r11r_missing_change_reason_notice_does_not_block_final_library(monkeypatch):
+    md, flags, _ = _change_build(monkeypatch, "ramipril", None)
+    shown = L.printed_flags(flags, md)
+    assert L.NO_REASON_NOTICE.format(lid="L5") in shown and "No reason was written" not in md
+    screen = sum(f.startswith((L.SENS_RESULT_NOTICE.split("{")[0], L.MED_NOTICE.split("{")[0])) for f in shown)
+    assert screen == 0
+    assert "[L" not in L.finalise(md, len(shown), screen)                    # not refused
+
+
+@pytest.mark.parametrize("drug,reason,words", STOP_CASES)
+def test_r11r_cut_reason_flag_still_blocks_final(tmp_path, drug, reason, words):
+    text = _stop_text(drug, reason)
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP", "--final")
+    assert r.returncode == 3 and "--final refused" in r.stderr
+    assert L.MED_NOTICE.format(lid=line_of(text, drug)) in r.stderr.splitlines()
+    assert "No reason was written" not in r.stderr
+
+
+def test_r11r_patient_letter_unchanged_missing_reason(monkeypatch):
+    md, flags, line = _change_build(monkeypatch, "lithium", None, to="patient", audience="patient")
+    assert "Reason for change: not documented." in line
+    assert not any(f.startswith("No reason was written") for f in flags)
+
+
+def test_r11r_allergy_reaction_not_documented_untouched(tmp_path):
+    text = tpl(question="Please review.", problems=("cough",), meds=("ramipril 5 mg daily; ceased 1937-06-01",),
+               allergies=("penicillin",), actions=("review in 2 weeks",))
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    assert r.returncode == 0, r.stderr
+    assert "penicillin: reaction not documented" in section((out / "letter.md").read_text(), "Allergies")

@@ -30,8 +30,8 @@ Discharged on 4 Jun 1937. Actions are numbered at the end.
 
 ## Medicine changes
 
-- Stopped on 3 Jun 1937: metformin 500 mg twice daily (bd). Reason for change: not documented. [L8, L12]
-- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] three times daily (tds). Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days. Reason for change: not documented. [L7, L15]
+- Stopped on 3 Jun 1937: metformin 500 mg twice daily (bd). [L8, L12]
+- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] three times daily (tds). Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days. [L7, L15]
 
 ## Current medicines
 
