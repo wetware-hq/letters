@@ -44,6 +44,7 @@ The output folder holds only the letter. Identical input gives an identical lett
 - **Labels** such as "non-compliant" become a plain description or are dropped. Write as if the patient will read it.
 - **Abbreviations.** An abbreviation is spelled out only if it's on a short reviewed list of abbreviations with one meaning in every specialty. Every other abbreviation stays as written and is flagged for the signing clinician. `--final` won't run while a flag is open.
 - **Style.** Sentences are short, and every number has a unit. A letter is about one page.
+- **Copies.** letters doesn't send copies. A copy request in the brief, template or notes is refused, so nobody believes a reader was copied in when they weren't. Write a separate letter for each reader.
 - **Footer.** Every letter ends with an unsigned clinician block and "Draft: check against the record before sending."
 - **No model calls** in v0.1. An optional model rewrite may come later, off by default, and must pass the same checker.
 

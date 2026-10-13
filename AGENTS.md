@@ -43,6 +43,7 @@ Allergies with reaction; full current medication list; reason for each change; p
 - Trends **MUST** be values with dates, never a direction.
 - A sensitive indication **MUST** be cut when the reader doesn't need it; the medicine stays.
 - Stigmatising labels **MUST** be rewritten neutrally or dropped.
+- A copy request (brief, template slot, or cc line in notes) **MUST** be refused with exit code 2 and nothing written; it **MUST NOT** be dropped silently. Letters to the patient **MUST** end with: "This letter includes private details about your health. It's yours to share or keep private."
 - Every letter **MUST** end with an unsigned clinician block and "Draft: check against the record before sending."
 - Branded drafts **MUST** show "DRAFT, unsigned" beside the logo.
 
