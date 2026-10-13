@@ -397,13 +397,32 @@ def test_fixtures_synthetic_1937():
         assert all(y == "1937" for y in re.findall(r"\b(\d{4})-\d{2}-\d{2}\b", s))
 
 
+ENGLISH = HERE / "wordlists" / "english.txt"
+TELEGRAM_OK = {"telegram", "telegram's", "telegrams"}   # the dictionary word and its inflections, english.txt only
+
+
+def _hygiene_hits(p):
+    lines = p.read_text().splitlines()
+    if p == ENGLISH:
+        lines = [l for l in lines if l not in TELEGRAM_OK]
+    s = "\n".join(lines)
+    return [bad for bad in ("/workspace", "/home/", "BIO ", "telegram", "patient-store") if bad in s]
+
+
 def test_no_internal_names_or_paths():
+    scanned = []
     for p in HERE.rglob("*"):
         if p.is_file() and ".git" not in p.parts and p.suffix in (".py", ".md", ".txt", ".toml") \
-                and p.name != "test_letters.py" and p != HERE / "wordlists" / "english.txt":  # third-party dictionary
-            s = p.read_text()
-            for bad in ("/workspace", "/home/", "BIO ", "telegram", "patient-store"):
-                assert bad not in s, (p, bad)
+                and p.name != "test_letters.py":
+            assert _hygiene_hits(p) == [], p
+            scanned.append(p)
+    assert ENGLISH in scanned
+
+
+def test_hygiene_allows_telegram_only_in_english_list(tmp_path):
+    assert set(ENGLISH.read_text().splitlines()) >= TELEGRAM_OK
+    other = tmp_path / "x.txt"; other.write_text("telegram\n")
+    assert _hygiene_hits(other) == ["telegram"]
 
 
 # ---------- checker hardening: expansions and rewrites must be earned by the cited lines ----------
