@@ -3302,3 +3302,48 @@ def test_r11g_reflux_in_reason_not_flagged(tmp_path, brief):
 def test_r11g_reason_flag_rule_unit():
     assert all(L.reason_flag(t) for t in ("ms", "pe", "MS", "QZX"))
     assert not any(L.reason_flag(t) for t in ("reflux", "heartburn", "cx"))
+
+
+# ---- round 11 follow-up 9: off-list frequencies, written from the LOCKED medicine-line syntax only ----
+# '- drug dose frequency [route] [max X in 24 hours | max X per <period>] [for N days] [reason: <why>]
+#  [; stopped|ceased|withheld <date> - <reason>]'. Each case runs through the letter command AND the checker.
+LOCKED_NOTES = ("Patient: SYNTH-9300\nDate: 1934-03-12\nRecipients: General practice\nQuestion: Please review.\n"
+                "Problems:\n- rheumatoid arthritis\nHistory:\nMedicines:\n- {med}\nAllergies:\n- No known allergies\n"
+                "Results:\nPending:\nActions:\n- review in 2 weeks\n")
+LOCKED_FREQ_MEDS = [
+    "methotrexate 15 mg every 1 week reason: arthritis",
+    "methotrexate 15 mg every 2 weeks reason: arthritis",
+    "methotrexate 15 mg every 2 weeks oral reason: arthritis",
+    "methotrexate 15 mg every 2 weeks max 15 mg per week reason: arthritis",
+    "methotrexate 15 mg every 2 weeks max 15 mg in 24 hours reason: arthritis",
+    "methotrexate 15 mg every 2 weeks for 28 days reason: arthritis",
+    "methotrexate 15 mg every 2 weeks reason: arthritis; stopped 1934-03-01 - nausea",
+    "methotrexate 15 mg every 2 weeks oral max 15 mg per week for 28 days reason: arthritis; ceased 1934-03-01 - nausea",
+    "methotrexate 15 mg every 2 weeks subcutaneous reason: arthritis; withheld 1934-03-01 - infection",
+    "methotrexate 15 mg every 2 weeks",
+    "methotrexate 15 mg every 4 weeks reason: arthritis",
+    "methotrexate 15 mg fortnightly reason: arthritis",
+    "methotrexate 15 mg weekly reason: arthritis",
+    "methotrexate 15 mg once a month reason: arthritis",
+    "methotrexate 15 mg every 4 weeks oral max 15 mg per week for 28 days reason: arthritis; stopped 1934-03-01 - nausea",
+    "methotrexate 15 mg fortnightly oral for 28 days reason: arthritis",
+    "methotrexate 15 mg weekly oral max 15 mg per week reason: arthritis",
+    "methotrexate 15 mg once a month oral reason: arthritis; ceased 1934-03-01 - nausea",
+]
+
+
+@pytest.mark.parametrize("med", LOCKED_FREQ_MEDS)
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11h_locked_off_list_frequency_letter_and_checker(tmp_path, med, brief):
+    text = LOCKED_NOTES.format(med=med)
+    c = _check(tmp_path / "chk", text)
+    assert c.returncode == 0 and c.stdout.strip() == L.TEMPLATE_OK, c.stderr
+    r, out = _run_t(tmp_path / "cli", text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    assert "template" not in r.stderr, r.stderr
+    freq = re.search(r"mg (every \d+ weeks?|fortnightly|weekly|once a month)", med).group(1)
+    md = (out / "letter.md").read_text()
+    assert f"methotrexate 15 mg {freq}" in md, md
+    lid = line_of(text, "methotrexate")
+    assert not any(lid in l for l in r.stderr.splitlines()), r.stderr
+
