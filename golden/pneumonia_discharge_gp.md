@@ -35,7 +35,7 @@ Discharged on 4 Jun 1937. Actions are numbered at the end.
 
 ## Current medicines
 
-- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days, reason not documented [L7, L15]
+- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days [L7, L15]
 
 ## Allergies
 

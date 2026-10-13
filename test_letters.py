@@ -104,7 +104,7 @@ def test_planted_number_refused():
 def test_planted_drug_refused():
     _, md, src = _good()
     with pytest.raises(Refused, match="word not in cited"):
-        check(md.replace("aspirin 100 mg daily, reason not documented [L6]", "aspirin 100 mg daily, clopidogrel [L6]"), src, "referral")
+        check(md.replace("aspirin 100 mg daily [L6]", "aspirin 100 mg daily, clopidogrel [L6]"), src, "referral")
 
 
 def test_planted_unsourced_sentence_refused():
@@ -747,7 +747,7 @@ def test_shorthand_and_wordlist_files_documented():
 def test_resolve_as_written_closes_flag_without_expansion():
     text = "Patient: SYNTH-3301\n1937-05-01 Clinic review.\nMed: ramipril 5 mg daily\nFollow-up: review in 2 weeks"
     md, _ = build(text, "gp-update", "General practice", resolve=["ramipril=ramipril"])
-    assert "- ramipril 5 mg daily, reason not documented [L3, R1]" in md and L.FLAG not in md
+    assert "- ramipril 5 mg daily [L3, R1]" in md and L.FLAG not in md          # round 11 freeze: no "reason not documented"
 
 
 # ---------- patient letters: plain words + (ABBR) first, plain words alone after ----------
@@ -1688,7 +1688,7 @@ def test_med_list_lines_split_never_list_not_documented(line):
     meds = section(md, "Current medicines")
     assert "allopurinol" in meds and "colchicine" in meds and "Current medicines not documented" not in md
     for l in meds.splitlines():
-        assert ("(for " in l) != ("reason not documented" in l), l
+        assert "reason not documented" not in l, l                          # round 11 freeze: matching-line rule
 
 
 @pytest.mark.parametrize("later", ["Echo done, normal", "Result back for echo: normal", "Repeat echo was normal",
@@ -1725,9 +1725,10 @@ CUT_MSG = "Flag: something on line {} was cut to keep it private. Check the read
 def test_default_cut_for_gp_and_flagged_blocks_final():
     flags = []
     md, _ = build(PSY, "gp-update", "GP", flags=flags)
-    assert "bipolar" not in md and CUT_MSG.format("L4") in flags and L.CUT_FLAG in md
+    assert "bipolar" not in md and CUT_MSG.format("L4") in flags and L.CUT_FLAG not in md   # round 11 freeze: screen only
+    shown = L.printed_flags(flags, md)
     with pytest.raises(Refused, match="--final refused"):
-        L.finalise(md)
+        L.finalise(md, len(shown), sum(f.startswith(L.SCREEN_ONLY_PREFIXES) for f in shown))
 
 
 PSY_T = tpl(pid="SYNTH-5401", question="Can you treat the toenail?", problems=["ingrown toenail"], history="bipolar disorder",
@@ -1790,7 +1791,7 @@ def test_med_entry_that_would_disappear_refused():
 
 @pytest.mark.parametrize("medline,want", [
     ("Med: lithium 250 mg twice daily (for bipolar disorder)", None),      # H22: cut reason dropped, no marker
-    ("Med: lithium 250 mg twice daily", "reason not documented"),
+    ("Med: lithium 250 mg twice daily", None),                             # round 11 freeze: matching-line rule
 ])
 def test_reason_not_included_only_when_a_reason_was_cut(medline, want):
     md, _ = build(PSY.replace("Med: lithium 250 mg twice daily", medline), "gp-update", "Podiatry")
@@ -4142,3 +4143,81 @@ def test_r11r_allergy_reaction_not_documented_untouched(tmp_path):
     r, out = _run_t(tmp_path, text, "--brief", "update to GP")
     assert r.returncode == 0, r.stderr
     assert "penicillin: reaction not documented" in section((out / "letter.md").read_text(), "Allergies")
+
+
+# ---- round 11 freeze (Physician + Scientist): matching medicines line, no cut marker in letter.md, unbracketed stop
+# reason refused ----
+@pytest.mark.parametrize("drug,reason,words", CHANGE_CASES)
+def test_r11s_current_medicines_line_missing_reason_identical_to_cut_reason(drug, reason, words, monkeypatch):
+    cmd, _, _ = _kind_build(monkeypatch, "started", drug, reason)
+    mmd, _, _ = _kind_build(monkeypatch, "started", drug, None)
+    line = lambda md: next(l for l in section(md, "Current medicines").splitlines() if drug in l)
+    assert line(mmd).encode() == line(cmd).encode()                           # nothing stripped
+    assert "reason not documented" not in line(mmd)
+    assert mmd.encode() == cmd.encode()                                       # whole draft letter is byte-identical
+
+
+def test_r11s_patient_current_medicines_line_unchanged(monkeypatch):
+    monkeypatch.setattr(L, "_TEMPLATE", [])
+    monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
+    gp = (HERE / "golden" / "pneumonia_discharge_patient.md").read_text()
+    assert "reason not documented" in gp                                     # patient golden keeps its wording
+
+
+def _all_letters(tmp_path):
+    for g in GOLDEN:
+        yield (HERE / "golden" / g[-1]).read_text()
+    for i, text in enumerate([PSY_T, H22_NOTES.format(hist="BRCA1 carrier")] +
+                             [_stop_text(d, r) for d, r, _ in STOP_CASES]):
+        r, out = _run_t(tmp_path / f"t{i}", text, "--brief", "update to GP")
+        assert r.returncode == 0, r.stderr
+        yield (out / "letter.md").read_text()
+
+
+def test_r11s_no_letter_md_ever_contains_cut_marker(tmp_path, monkeypatch):
+    seen = 0
+    for md in _all_letters(tmp_path):
+        assert L.CUT_FLAG not in md and "something cut to keep it private" not in md
+        seen += 1
+    for kind in ("changed", "stopped", "started", "restarted"):
+        for drug, reason, _ in CHANGE_CASES:                                  # lithium = a linked medicine
+            md, _, _ = _kind_build(monkeypatch, kind, drug, reason)
+            assert L.CUT_FLAG not in md
+            seen += 1
+    monkeypatch.setattr(L, "_TEMPLATE", [])
+    flags = []
+    md, _ = build(PSY, "gp-update", "GP", flags=flags)                         # a history cut
+    assert L.CUT_FLAG not in md and CUT_MSG.format("L4") in flags
+    assert seen > 20
+
+
+def test_r11s_cut_flag_on_screen_still_blocks_final(tmp_path):
+    r, out = _run_t(tmp_path, PSY_T, "--brief", "update to GP", "--final")
+    assert r.returncode == 3 and "--final refused" in r.stderr and not (out / "letter.md").exists()
+    assert any(l.startswith("Flag: something on line ") for l in r.stderr.splitlines())
+
+
+STOP_UNBRACKETED = ["Stop: ramipril 5 mg daily reason: cough", "Stop: ramipril 5 mg daily, reason: cough",
+                    "Stop: ramipril 5 mg daily - reason: chlamydia", "Ceased: ramipril 5 mg daily Reason: cough"]
+
+
+@pytest.mark.parametrize("stop", STOP_UNBRACKETED)
+def test_r11s_unbracketed_stop_reason_refused_nothing_written(stop, monkeypatch):
+    monkeypatch.setattr(L, "_TEMPLATE", [])
+    monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
+    text = ("Patient: SYNTH-9403\nAllergy: nil known\n1937-06-01 review.\nMed: metformin 500 mg daily\n"
+            f"Med: ramipril 5 mg daily\n1937-06-10 review.\n{stop}\nQuestion: is she well?\n")
+    flags = []
+    with pytest.raises(Refused) as e:
+        build(text, "gp-update", "GP", flags=flags)
+    assert str(e.value) == "Refused: line L7 of the notes has a stop reason that isn't in brackets. Nothing was written."
+    assert "cough" not in str(e.value) and "chlamydia" not in str(e.value) and not flags
+
+
+def test_r11s_bracketed_stop_reason_still_works(monkeypatch):
+    monkeypatch.setattr(L, "_TEMPLATE", [])
+    monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
+    text = ("Patient: SYNTH-9404\nAllergy: nil known\n1937-06-01 review.\nMed: metformin 500 mg daily\n"
+            "Med: ramipril 5 mg daily\n1937-06-10 review.\nStop: ramipril 5 mg daily (reason: dry cough)\nQuestion: is she well?\n")
+    md, _ = build(text, "gp-update", "GP")
+    assert "Stopped on 10 Jun 1937: ramipril 5 mg daily. Reason for change: dry cough." in md

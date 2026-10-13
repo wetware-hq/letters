@@ -33,9 +33,9 @@ Please answer the question below.
 
 ## Current medicines
 
-- aspirin 100 mg daily, reason not documented [L6]
-- ramipril 5 mg daily, reason not documented [L7, L11]
-- atorvastatin 40 mg nocte, reason not documented [L12]
+- aspirin 100 mg daily [L6]
+- ramipril 5 mg daily [L7, L11]
+- atorvastatin 40 mg nocte [L12]
 
 ## Allergies
 

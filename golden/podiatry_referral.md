@@ -3,7 +3,7 @@
 **Date:** 10 Feb 1937  
 **To:** Podiatry  
 **Patient:** SYNTH-4004  
-**Letter:** Referral [flag: something cut to keep it private]
+**Letter:** Referral
 
 Dear colleague,
 
@@ -33,7 +33,7 @@ Please answer the question below.
 ## Current medicines
 
 - lithium 400 mg nocte [L6]
-- metformin 500 mg twice daily (bd), reason not documented [L7]
+- metformin 500 mg twice daily (bd) [L7]
 
 ## Allergies
 

@@ -627,6 +627,8 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 st["meds"][k] = {"drug": drug, "ind": ind, "date": d, "ids": (old["ids"] if old else []) + ids,
                                  "cut": cut and not ind}
             elif kind == "stop":
+                if not _TEMPLATE and re.search(r"(?<!\()\breason\s*:", line, re.I) and not re.search(r"\(\s*reason\s*:", line, re.I):
+                    raise Refused(STOP_REASON_REFUSED.format(lid=lid))      # unbracketed: never partly parsed
                 mm = MEDP.match(body)
                 drug, reason = mm.group("drug").strip(), mm.group("v") if (mm.group("k") or "").lower().startswith("reason") else None
                 if not reason:                                 # a stated reason is kept as written
@@ -764,7 +766,7 @@ def section_items(name, st, audience="specialist"):
     if name == "meds" and audience == "patient":
         return [f"{m['drug']}, {_patient_reason(m['ind'])}" + tag(m["ids"]) for m in st["meds"].values()]  # patient: nothing cut
     if name == "meds":
-        return [m["drug"] + (f" (for {m['ind']})" if m["ind"] else "" if m.get("cut") else f", {REASON_ND}")   # H22: a cut reason is dropped, no marker
+        return [m["drug"] + (f" (for {m['ind']})" if m["ind"] else "")   # H22 + matching-line rule: no reason, no marker
                 + tag(m["ids"]) for m in st["meds"].values()]
     if name == "med_changes":
         out = []
@@ -1616,6 +1618,7 @@ def _meds_of(items):
 
 CUT_FLAG = "[flag: something cut to keep it private]"
 CUT_NOTICE = "Flag: something on line {lid} was cut to keep it private. Check the reader doesn't need it."
+STOP_REASON_REFUSED = "Refused: line {lid} of the notes has a stop reason that isn't in brackets. Nothing was written."
 
 
 # Sensitive result cut (round 11 signed rulings; override: the flag is on screen only, never in letter.md).
@@ -1668,26 +1671,7 @@ def flag_cuts(md, dropped, flags, title, text=None):
         return md
     if flags is not None:
         flags.extend(CUT_NOTICE.format(lid=l) for l in lids)
-    # Matching-line rule (round 11): a reason cut from a medicine line is flagged on screen only. When the medicine
-    # flag for that line is already on screen (it blocks --final), no header marker goes into letter.md, so a draft
-    # with a cut reason is byte-identical to one where no reason was written.
-    def med_reason_only(l):
-        ds = [d for d in dropped if l in re.findall(r"\b[LR]\d+\b", d.split(":")[0])]
-        ms = [re.match(r"^[LR\d, ]+: indication for (.+?) cut \(.*?, not relevant to (.*?)\)", d) for d in ds]
-        if not ds or not all(ms) or flags is None or MED_NOTICE.format(lid=l) not in flags:
-            return False
-        for m in ms:                       # the medicine itself is a linked medicine: marked either way, keep marker
-            drug, to = m.group(1), m.group(2)
-            for cat, v in load_linked().items():
-                names = list(v.get("medicines", [])) + list(v.get("brands", {}))
-                if not relevant(cat, to) and any(_term_re(w).search(drug) for w in names):
-                    return False
-        return True
-    lids = [l for l in lids if not med_reason_only(l)]
-    if not lids:
-        return md
-    head = f"**Letter:** {title}"
-    return md.replace(head, f"{head} {CUT_FLAG}", 1) if head in md else md.replace("\n", f" {CUT_FLAG}\n", 1)
+    return md          # round 11 freeze: the cut flag is on screen only and blocks --final; never in letter.md
 
 
 def mark_linked_items(text, to, dropped):
@@ -2024,6 +2008,9 @@ def printed_flags(flags, md):
             if notice not in out:
                 out.append(notice)
     return out
+
+
+SCREEN_ONLY_PREFIXES = tuple(x.split("{")[0] for x in (SENS_RESULT_NOTICE, MED_NOTICE, CUT_NOTICE))
 
 
 def finalise(md, n=None, screen_only=0):
@@ -2773,7 +2760,7 @@ def main(argv=None):
     dropped.clear()
     if a.final:
         try:
-            md = finalise(md, len(shown), sum(f.startswith((SENS_RESULT_NOTICE.split("{")[0], MED_NOTICE.split("{")[0])) for f in shown))
+            md = finalise(md, len(shown), sum(f.startswith(SCREEN_ONLY_PREFIXES) for f in shown))
         except Refused as e:
             print(str(e), file=sys.stderr)
             return 3
