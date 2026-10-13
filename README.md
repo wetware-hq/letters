@@ -66,10 +66,9 @@ Regression tests plant each failure: an unsourced fact, a stopped medicine, a ne
 
 ## Roadmap
 
-1. **Notes to draft letter** (v0.1, this repo).
-2. Template and brand packs, with a made-up example brand only.
-3. Held-out runs with a reported failure rate.
-4. Any path to real data, as a separate review.
+1. **Notes to draft letter, with template and brand packs** (v0.1, this repo). Only a made-up example brand ships.
+2. Held-out runs with a reported failure rate.
+3. Any path to real data, as a separate review.
 
 ## License
 
