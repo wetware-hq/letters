@@ -59,12 +59,26 @@ def fdate(iso):
 HEAD = re.compile(r"^\s*(1937-\d{2}-\d{2})\b[\s:,-]*(.*)$")
 
 
+BULLET = re.compile(r"^(?:[*\u2022\u00b7]|-(?=\s))\s*")
+MED_BLOCK_HEAD = re.compile(r"^(?P<h>[A-Za-z][A-Za-z /'-]{0,40}?)\s*(?::|\s[-\u2013\u2014]+)?\s*$")
+
+
+def _med_block_head(line):
+    """'Current Rx', 'Regular meds -', 'Tablets taken:': a short medicine heading with nothing after it."""
+    m = MED_BLOCK_HEAD.match(line)
+    return bool(m) and len(m.group("h").split()) <= 4 and bool(MED_HEAD.search(m.group("h"))) and not drugs_in(line)
+
+
 def parse(text):
-    """Return (entries, sources). A line starting with a 1937 date opens an entry. Ids are L<line number>."""
+    """Return (entries, sources). A line starting with a 1937 date opens an entry. Ids are L<line number>.
+    Every line stays on its own: nothing is ever joined with the line before or after it. Under a short medicine
+    heading with nothing after it, each indented or bulleted line is read as one medicine line."""
     entries, sources, cur = [], {}, {"date": None, "lines": []}
+    block = False
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
+            block = block and bool(line)
             continue
         m = HEAD.match(line)
         if m:
@@ -73,6 +87,15 @@ def parse(text):
             cur = {"date": m.group(1), "lines": []}
             line = m.group(2).strip()
         sources[f"L{n}"] = (raw.strip(), cur["date"])
+        indented = raw[:1].isspace() or bool(re.match(r"^[*\u2022\u00b7]", line))
+        line = BULLET.sub("", line) if indented else line
+        if _med_block_head(line):
+            block = True
+            continue                                       # a heading only: its lines carry the content
+        if block and indented and line and not TAG.match(line):
+            line = f"Med: {line}"
+        elif not indented:
+            block = False
         if line:
             cur["lines"].append((f"L{n}", line))
     if cur["lines"] or cur["date"]:
@@ -305,8 +328,8 @@ def content_kind(head, body):
         return "allergy"
     if STOP_RX.search(whole) and drugs:
         return "stop"
-    if drugs and (DOSE_RX.search(whole) or FREQ_RX.search(whole)):
-        return "med"
+    if drugs and DOSE_RX.search(whole):
+        return "med"            # a drug and a frequency with no dose ('X bloods due weekly') is a sentence, not a medicine
     # Signed rule (13 Oct 2026): a dose in mg, g, mcg, units or mL (no "/L") is a medicine; a per-litre
     # concentration is a result only when the line has no frequency word, otherwise a medicine.
     if DOSE_RX.search(whole):
@@ -416,7 +439,13 @@ def tag_kind(tag):
 
 
 def _mkey(s):
-    return s.split()[0].lower() if s.split() else s.lower()
+    """One key per medicine: its recognised generic, else its first word. Two different drugs never share a key,
+    so no change is ever inferred between them."""
+    found = drugs_in(s)
+    if found:
+        return found[0][1]
+    w = re.findall(r"[A-Za-z][A-Za-z0-9-]*", s)
+    return w[0].lower() if w else s.lower()
 
 
 def _pkey(s):

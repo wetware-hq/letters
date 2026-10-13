@@ -2224,3 +2224,47 @@ def test_r9_build_runs_the_independent_check(monkeypatch):
     monkeypatch.setattr(L, "verify_letter", lambda *a, **k: called.append(1) or real(*a, **k))
     make_letter(F("chest_pain.txt"), "referral", "Cardiology")
     assert called
+
+
+# ---------- round 9: never merge two lines, never infer a change between drugs ----------
+NM_NOTES = """SYNTH-9911 :: M :: 58
+Allergy: zorbamycin - rash
+1937-02-19 lipid clinic.
+Current Rx
+* alphastatin 2 mg nocte - cholesterol
+* betamibe 10 mg daily
+Question: target LDL given family history?
+"""
+
+
+def test_r9_bulleted_medicines_stay_separate():
+    md, _ = build(NM_NOTES, "referral", "Cardiology")
+    meds = FLAG_RX.sub("", section(md, "Current medicines"))
+    assert "alphastatin 2 mg nocte" in meds and "[L5]" in meds and "betamibe 10 mg daily" in meds and "[L6]" in meds
+    assert "[L5, L6]" not in md and "No medicine changes documented." in md and "Changed" not in md
+
+
+def test_r9_brand_then_other_drug_not_a_change():
+    notes = NM_NOTES.replace("* alphastatin 2 mg nocte - cholesterol", "* Nexium 20 mg daily - reflux")
+    md, _ = build(notes, "gp-update", "GP")
+    meds = FLAG_RX.sub("", section(md, "Current medicines"))
+    assert "Nexium 20 mg daily (for reflux) [L5]" in meds and "betamibe 10 mg daily" in meds and "Changed" not in md
+
+
+def test_r9_sentence_after_medicine_never_joined():
+    notes = ("SYNTH-9912 :: M :: 52\nAllergy: penicillin - hives\n1937-06-02 discharged after hernia repair.\n"
+             "Medication chart:\n  amlodipine 5 mg mane\nAmlodipine review due weekly per clinic.\n")
+    md, _ = build(notes, "discharge", "GP")
+    meds = FLAG_RX.sub("", section(md, "Current medicines"))
+    assert "amlodipine 5 mg mane" in meds and "review due" not in meds and "Changed" not in md
+
+
+def test_r9_block_line_without_dose_is_a_medicine():
+    notes = "SYNTH-9913 :: F :: 45\n1937-07-02 seen for tiredness.\nRegular meds \u2014\n  combined pill daily\nQuestion: cause?\n"
+    md, _ = build(notes, "referral", "Dermatology")
+    assert "combined pill daily" in section(md, "Current medicines")
+
+
+def test_r9_same_drug_rewritten_is_still_a_change():
+    md = make_letter(F("chest_pain.txt"), "referral", "Cardiology")
+    assert "from ramipril 2.5 mg daily. Now: ramipril 5 mg daily" in md
