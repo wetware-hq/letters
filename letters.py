@@ -704,7 +704,7 @@ def section_items(name, st, audience="specialist"):
     if name == "allergies":
         out = []
         for b, i in st["allergies"]:
-            if re.fullmatch(r"(nil( known)?|nkda|none( known)?)", b.strip(), re.I):
+            if re.fullmatch(r"(nil( known)?( allergies)?|nkda|none( known)?|no known( drug)? allergies)\.?", b.strip(), re.I):
                 out.append("No known drug allergies" + tag(i))
                 continue
             no_react = ALLERGY_NO_REACTION_PATIENT if audience == "patient" else f"reaction {ND}"

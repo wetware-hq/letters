@@ -2731,3 +2731,20 @@ def test_r10_per_section_check_catches_each_misplacement(frag, what):
     lines.insert(j, moved if moved.startswith("- ") else "- " + moved.split(". ", 1)[1])
     with pytest.raises(Refused, match="wrong section|missing from this letter"):
         L.verify_letter("\n".join(lines), L.from_template(PLACE_T), "gp")
+
+
+# ---------- round 10 item 4: 'No known allergies', 'NKDA' and 'nil known' mean no allergies ----------
+@pytest.mark.parametrize("item", ["No known allergies", "NKDA", "nil known", "Nil known allergies"])
+@pytest.mark.parametrize("aud", [None, "patient"])
+def test_r10_no_allergy_statements_are_not_an_allergy(item, aud):
+    t = tpl(question="Is it the joint?", problems=["knee pain"], allergies=[item])
+    md, _ = L.build_from_template(t, "gp-update", "Patient" if aud else "GP", audience=aud)
+    al = section(md, "Allergies")
+    assert al.startswith("- No known drug allergies") and "reaction" not in al and L.ALLERGY_FLAG not in al
+
+
+def test_r10_no_allergy_statement_inline_on_the_heading(tmp_path):
+    t = tpl(question="Is it the joint?", problems=["knee pain"], allergies=()).replace("Allergies:\n", "Allergies: NKDA\n")
+    r, out = _run_t(tmp_path, t, "--brief", "update to GP")
+    assert r.returncode == 0, r.stderr
+    assert section((out / "letter.md").read_text(), "Allergies").startswith("- No known drug allergies")
