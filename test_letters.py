@@ -2954,3 +2954,16 @@ def test_r11_off_list_frequency_kept_as_written_no_flag(tmp_path, freq, brief):
     assert f"methotrexate 10 mg {freq}" in md
     lid = line_of(text, "methotrexate")
     assert not any(lid in l for l in r.stderr.splitlines()), r.stderr
+
+
+@pytest.mark.parametrize("mx", ["max 4 g per day", "max 30 mg per week", "max 8 puffs per week", "max 2 doses in 7 days"])
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11_dose_limit_other_period_kept_as_written(tmp_path, mx, brief):
+    text = tpl(question="Please review.", problems=("pain",), meds=(f"paracetamol 1 g daily {mx}",),
+               actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path / mx.replace(" ", "_"), text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert mx in md and "in 24 hours" not in md
+    lid = line_of(text, "paracetamol")
+    assert not any(lid in l for l in r.stderr.splitlines()), r.stderr

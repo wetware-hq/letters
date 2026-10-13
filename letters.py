@@ -834,6 +834,8 @@ def needs_flag(tok, prev="", exact=()):
         return False                                        # slash unit, e.g. mmol/L
     if tok in UNITS:
         return False
+    if low in ("max", "maximum"):
+        return False                                        # dose-limit word: kept as written ('max X per week')
     if re.fullmatch(r"[IVX]+", tok) and prev.lower() in ROMAN_CTX:
         return False                                        # stage IV
     if low in SHORTHAND or "." in tok or "/" in tok:
@@ -2184,7 +2186,8 @@ MED_ITEM = re.compile(
     r"(?:\s+(?:one|two)\s+puffs?)?))?"
     r"\s+(?P<freq>" + _FREQS + r"(?:\s+and\s+" + _FREQS + r")?)"
     r"(?:\s+(?P<route>oral|IV|PO|SC|IM|inhaled|topical|sublingual|PR|intravenous|subcutaneous|by mouth))?"
-    r"(?:\s+(?P<max>max(?:imum)?\s+\d+(?:\.\d+)?\s?(?:mg|mcg|g|mL|tablets?|doses?|puffs?)?\s+(?:in\s+24\s+hours|per\s+[a-z]+)))?"
+    r"(?:\s+(?P<max>max(?:imum)?\s+\d+(?:\.\d+)?\s?(?:mg|mcg|micrograms?|g|mL|ml|units?|tablets?|doses?|puffs?|drops?)?"
+    r"\s+(?:in\s+24\s+hours|(?:per|in|every)\s+(?:\d+\s+)?[a-z]+)))?"
     r"(?:\s+(?P<dur>for\s+\d+\s+(?:more\s+)?days?))?"
     r"(?:\s+" + re.escape(MED_REASON_MARK) + r"\s*(?P<reason>(?:(?!\bmax(?:imum)?\s+\d|\bfor\s+\d+\s+(?:more\s+)?days?\b)[^;])+?))?"
     r"(?:\s*;\s*(?P<stop>stopped|ceased|withheld)\s+(?P<sdate>1937-\d{2}-\d{2})(?:\s+-\s+(?P<sreason>.+?))?)?\s*$", re.I)
