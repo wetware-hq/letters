@@ -1,0 +1,22 @@
+# Linked terms for items this tool may cut from a letter.
+# Reviewed by clinician; needs fresh sign-off for any change.
+# Physician sign-off recorded 2026-10-13. Frozen: checksum in LINKED_TERMS.SHA256.
+#
+# For each cut category (names match SENSITIVE in letters.py), checked ONLY when that item is on the
+# letter's dropped list, and never for letters addressed to the patient:
+#   terms      - refuse-level: if any appears in the written letter, the letter is refused (line id only).
+#   flag_terms - flag-only (multi-meaning words): never refuse; each line using one gets an open flag.
+#   medicines  - stay on the medicine list but get an open flag that blocks --final.
+
+[items."HIV status"]
+terms = ["HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "VL", "viral load", "CD4", "RVD",
+         "antiretroviral"]
+flag_terms = ["undetectable", "ART", "ritonavir", "lamivudine"]
+medicines = ["dolutegravir", "tenofovir", "emtricitabine", "zidovudine", "abacavir", "bictegravir", "raltegravir",
+             "rilpivirine", "darunavir", "efavirenz", "nevirapine", "cobicistat"]
+
+[items."psychiatric history"]
+terms = ["lithium level", "serum lithium", "clozapine level", "clozapine monitoring", "ANC monitoring",
+         "lithium toxicity", "Li level", "clozapine clinic", "schizophrenia", "schizoaffective"]
+flag_terms = ["ANC", "bipolar", "psychosis"]
+medicines = ["lithium", "clozapine"]
