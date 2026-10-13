@@ -6,6 +6,7 @@ amiodarone
 amitriptyline
 amlodipine
 amoxicillin
+amoxicillin/clavulanate
 apixaban
 aspirin
 atenolol
@@ -46,6 +47,7 @@ ibuprofen
 indapamide
 insulin
 irbesartan
+lamivudine
 lamotrigine
 lansoprazole
 levetiracetam
@@ -78,6 +80,7 @@ propranolol
 quetiapine
 ramipril
 risperidone
+ritonavir
 rivaroxaban
 rosuvastatin
 salbutamol
@@ -88,6 +91,7 @@ sodium valproate
 spironolactone
 sumatriptan
 tamsulosin
+tenofovir
 tiotropium
 tramadol
 trimethoprim
@@ -102,3 +106,4 @@ Nexium=esomeprazole
 Ventolin=salbutamol
 Zoloft=sertraline
 esomeprazole
+Augmentin=amoxicillin/clavulanate

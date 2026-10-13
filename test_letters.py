@@ -2431,3 +2431,47 @@ def test_r9_copy_request_in_a_sentence_refused_by_build(sentence):
 def test_r9_copies_as_a_lab_unit_is_not_a_copy_request():
     md, _ = build(COPY_BASE + "Result: viral load <20 copies/mL\n", "gp-update", "Patient", audience="patient")
     assert "copies/mL" in md
+
+
+# ---------- round 9: queued signed items ----------
+@pytest.mark.parametrize("line,allergen", [("Allergy: penicillin", "penicillin"), ("Allergy: Zorvacillin - unknown", "Zorvacillin"),
+                                           ("Sensitivities: zorbamycin (reaction not known)", "zorbamycin")])
+def test_r9_allergy_without_reaction_clinician_wording(line, allergen):
+    md, _ = build(f"SYNTH-9961 :: F :: 60\n{line}\n1937-02-01 review.\n", "gp-update", "GP")
+    assert f"{allergen}: reaction not documented" in FLAG_RX.sub("", section(md, "Allergies"))
+
+
+@pytest.mark.parametrize("line,allergen", [("Allergy: penicillin", "penicillin"), ("Allergy: Zorvacillin - unknown", "Zorvacillin")])
+def test_r9_allergy_without_reaction_patient_wording(line, allergen):
+    md, _ = build(f"SYNTH-9962 :: F :: 60\n{line}\n1937-02-01 review.\n", "gp-update", "Patient", audience="patient")
+    assert (f"{allergen}: the reaction wasn't written in your notes. Tell your next doctor what happened."
+            in FLAG_RX.sub("", section(md, "Allergies")))
+    assert "reaction not documented" not in md
+
+
+def test_r9_drugs_list_additions():
+    names = L.drug_names()
+    assert names["augmentin"] == "amoxicillin/clavulanate" and names["amoxicillin/clavulanate"] == "amoxicillin/clavulanate"
+    for g in ("tenofovir", "ritonavir", "lamivudine"):
+        assert names[g] == g and not L.needs_flag(g)
+
+
+def test_r9_new_hiv_names_stay_flag_only_for_cutting():
+    linked = L.load_linked()["HIV status"]
+    for g in ("tenofovir", "ritonavir", "lamivudine"):
+        assert g in linked["flag_terms"] and g not in linked["terms"] and g not in linked.get("medicines", [])
+    md, dropped = build("SYNTH-9963 :: M :: 40\n1937-02-01 review.\nMed: ritonavir 100 mg daily\n", "gp-update", "Podiatry")
+    assert not dropped and "ritonavir 100 mg daily" in md and L.DRUG_FLAG not in md
+
+
+def test_r9_augmentin_recognised_not_flagged():
+    md, _ = build("SYNTH-9964 :: M :: 40\n1937-02-01 review.\nMed: Augmentin 875 mg bd\n", "gp-update", "GP")
+    assert f"Augmentin {L.DRUG_FLAG}" not in md and "Augmentin 875 mg" in md
+
+
+def test_r9_combination_refusal_and_linked_terms_unchanged():
+    import hashlib
+    digest = (HERE / "LINKED_TERMS.SHA256").read_text().split()[0]
+    assert hashlib.sha256((HERE / "linked_terms.toml").read_bytes()).hexdigest() == digest
+    with pytest.raises(Refused, match="combination medicine"):
+        build("SYNTH-9965 :: M :: 40\n1937-02-01 review.\nMed: Biktarvy 1 tablet daily\n", "gp-update", "GP")

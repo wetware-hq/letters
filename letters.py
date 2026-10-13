@@ -638,6 +638,7 @@ def dt(d):
     return f" on {fdate(d)}" if d else ""
 
 
+ALLERGY_NO_REACTION_PATIENT = "the reaction wasn't written in your notes. Tell your next doctor what happened."
 REASON_FLAG = "[flag: reason, plain words not confirmed]"
 REASON_ND = "reason not documented"
 
@@ -693,14 +694,15 @@ def section_items(name, st, audience="specialist"):
             if re.fullmatch(r"(nil( known)?|nkda|none( known)?)", b.strip(), re.I):
                 out.append("No known drug allergies" + tag(i))
                 continue
+            no_react = ALLERGY_NO_REACTION_PATIENT if audience == "patient" else f"reaction {ND}"
             for part in re.split(r"[,;](?![^()]*\))", b):
                 drug, react = split_reaction(part)
                 if react and NO_REACTION.match(react):
-                    out.append(f"{drug}: reaction {ND}" + tag(i))
+                    out.append(f"{drug}: {no_react}" + tag(i))      # signed: never dropped, allergen as written
                 elif react:
                     out.append(f"{drug}: {react}" + tag(i))
                 elif len(part.split()) <= 1:              # nothing follows the drug name
-                    out.append(f"{part.strip()}: reaction {ND}" + tag(i))
+                    out.append(f"{part.strip()}: {no_react}" + tag(i))
                 else:                                      # trailing words not confidently parsed: keep, flag
                     out.append(f"{part.strip()} {ALLERGY_FLAG}" + tag(i))
         return out
@@ -916,7 +918,7 @@ DIRECTION = re.compile(r"\b(improv\w*|rising|rose|risen|falling|fell|fallen|wors
                        r"normalis\w*|settl\w*)\b", re.I)
 _FIXED = [*EMPTY.values(), ND, "reaction", "Reason for change", "Who follows up", "Who When Action", "sent on an "
           "undocumented date", "No known drug allergies", "resolved ruled out", "started changed stopped restarted from now",
-          "possible", " ".join(MONTHS), "Test Results", "reason not included"]
+          "possible", " ".join(MONTHS), "Test Results", "reason not included", ALLERGY_NO_REACTION_PATIENT]
 VOCAB = set()
 for _s in _FIXED:   # only fixed scaffolding; expansions and rewrites are earned per cited line
     VOCAB.update(w.lower() for w in re.findall(r"[A-Za-z][A-Za-z-]+", _s))
