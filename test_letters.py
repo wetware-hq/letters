@@ -642,7 +642,7 @@ def test_iv_route_still_flagged():
 def test_units_not_flagged():
     md, flags = _one("Med: ramipril 5 mg daily\nMed: lactulose 10 mL twice a day\nResult: potassium 4.1 mmol/L\n"
                      "Result: CRP 12 mg/L\nResult: weight 70 kg")
-    assert set(flags) == {"ramipril", "lactulose"}     # drug names flagged (acceptable); no unit flagged
+    assert set(flags) == {"lactulose"}     # unknown drug name flagged; recognised ramipril never; no unit flagged
     for u in ("5 mg", "10 mL", "4.1 mmol/L", "12 mg/L", "70 kg"):
         assert u in md
     assert all(not L.abbreviations(u) for u in ("mg", "mL", "mmol/L", "mg/L", "kg"))
@@ -815,10 +815,10 @@ def test_fixed_wording_never_flagged():
 # ---------- drug-name flag label ----------
 def test_non_wordlist_word_on_medicine_line_gets_drug_label():
     flags = []
-    md, _ = build("Patient: SYNTH-3701\n1937-05-01 Clinic review.\nMed: ramipril 5 mg daily", "gp-update", "GP",
+    md, _ = build("Patient: SYNTH-3701\n1937-05-01 Clinic review.\nMed: synthopril 5 mg daily", "gp-update", "GP",
                   flags=flags)
-    assert f"ramipril {L.DRUG_FLAG} 5 mg" in md and L.FLAG not in md
-    assert flags == ["ramipril (drug name, check spelling) [L3]"]
+    assert f"synthopril {L.DRUG_FLAG} 5 mg" in md and L.FLAG not in md
+    assert flags == ["synthopril (drug name, check spelling) [L3]"]
 
 
 def test_non_wordlist_word_elsewhere_keeps_abbreviation_label():
@@ -832,7 +832,7 @@ def test_shorthand_and_capitals_on_medicine_line_keep_abbreviation_label():
 
 
 def test_final_refused_while_drug_flag_open():
-    md, _ = _one("Med: ramipril 5 mg daily")
+    md, _ = _one("Med: synthopril 5 mg daily")
     with pytest.raises(Refused, match="1 flag"):
         L.finalise(md)
 
@@ -860,12 +860,12 @@ def test_patient_medicine_reason_signed_entry_gets_plain_words_unflagged():
 
 def test_patient_medicine_without_reason_says_reason_not_documented():
     _, meds = _pmeds(F("ckd_update.txt"))
-    assert f"empagliflozin {L.DRUG_FLAG} 10 mg once a day, reason not documented [L6]" in meds
+    assert f"empagliflozin 10 mg once a day, reason not documented [L6]" in meds
 
 
 def test_patient_keeps_sensitive_indication_other_audiences_cut():
     pmd, pmeds = _pmeds(F("podiatry_referral.txt"))
-    assert f"lithium 400 mg nocte {L.FLAG}, for bipolar disorder {L.REASON_FLAG} [L6]" in pmeds
+    assert f"lithium 400 mg at night, for bipolar disorder {L.REASON_FLAG} [L6]" in pmeds
     for to, aud in (("General practice", "gp"), ("Podiatry", "specialist")):
         md, dropped = build(F("podiatry_referral.txt"), "gp-update", to, audience=aud)
         assert "bipolar" not in md and any("indication for lithium cut" in d for d in dropped)
@@ -1876,3 +1876,159 @@ def test_include_lines_recorded_on_stderr(tmp_path):
     lines = r.stderr.splitlines()
     assert "Included by the brief: psychiatric history." in lines and "Included by the brief: PrEP." in lines
     assert [p.name for p in out.iterdir()] == ["letter.md"]
+
+
+# ---------- round 8: medicines and allergies by content; post-write medicine guard (Physician, heldout5) ----------
+R8 = """Patient: SYNTH-9801
+Reactions on file: trimethoprim - itchy rash
+1937-04-02 seen for knee pain after a fall.
+Drug chart: propranolol 40 mg bd - tremor
+Drug chart: atenolool 25 mg mane
+"""
+
+
+def _r8(text=R8, t="gp-update", to="GP", aud=None):
+    flags = []
+    md, _ = build(text, t, to, audience=aud, flags=flags)
+    return md, flags
+
+
+def test_r8_unfamiliar_headings_found_by_content():
+    md, _ = _r8()
+    meds, allergies = section(md, "Current medicines"), section(md, "Allergies")
+    assert "propranolol 40 mg twice daily (bd)" in FLAG_RX.sub("", meds) and "Current medicines not documented" not in md
+    assert "trimethoprim: itchy rash" in allergies and "Allergies not documented" not in md
+
+
+def test_r8_misspelt_drug_under_unfamiliar_heading_gets_drug_flag():
+    md, _ = _r8()
+    assert f"atenolool {L.DRUG_FLAG}" in md and f"atenolool {L.FLAG}" not in md
+    assert f"propranolol {L.FLAG}" not in md and f"propranolol {L.DRUG_FLAG}" not in md   # recognised: no flag
+
+
+def test_r8_unknown_brand_on_drug_chart_gets_drug_flag_not_abbreviation():
+    md, _ = _r8(R8.replace("atenolool 25 mg mane", "Synthaten 25mg mane"))
+    assert f"Synthaten {L.DRUG_FLAG}" in md and f"Synthaten {L.FLAG}" not in md
+
+
+def test_r8_patient_letter_drug_chart_and_reactions_kept_in_signed_plain_words():
+    md, _ = _r8(t="gp-update", to="Patient", aud="patient")
+    meds = FLAG_RX.sub("", md)
+    assert "propranolol 40 mg twice a day" in meds and "atenolool 25 mg in the morning" in meds
+    assert "trimethoprim: itchy rash" in section(md, "Allergies")
+
+
+def test_r8_cut_medicine_with_dose_kept_passes():
+    text = R8 + "Drug chart: lithium carbonate 400 mg nocte - mood\nPMHx: bipolar disorder\n"
+    md, flags = _r8(text)
+    meds = FLAG_RX.sub("", section(md, "Current medicines"))
+    assert "lithium carbonate 400 mg nocte" in meds and L.MED_FLAG in md and "bipolar" not in md
+
+
+def _guard(notes, letter_lines):
+    md = "**Letter:** Update\n\n## Current medicines\n\n" + "\n".join(letter_lines) + "\n"
+    L.refuse_missing_medicines(md, notes)
+
+
+NOTE1 = "Patient: SYNTH-9802\n1937-04-02 review.\nDrug chart: Synthomed 10 mg daily\n"
+
+
+def test_r8_guard_dose_dropped_refuses():
+    _guard(NOTE1, ["- Synthomed 10 mg daily [L3]"])
+    with pytest.raises(L.Refused, match=re.escape(L.MED_MISSING.format(lid="L3"))):
+        _guard(NOTE1, ["- Synthomed daily [L3]"])
+
+
+def test_r8_guard_dose_changed_refuses():
+    with pytest.raises(L.Refused, match="a medicine on line L3"):
+        _guard(NOTE1, ["- Synthomed 100 mg daily [L3]"])
+
+
+def test_r8_guard_frequency_changed_refuses():
+    with pytest.raises(L.Refused, match="a medicine on line L3"):
+        _guard(NOTE1, ["- Synthomed 10 mg bd [L3]"])
+    with pytest.raises(L.Refused, match="a medicine on line L3"):
+        _guard(NOTE1, ["- Synthomed 10 mg twice daily [L3]"])
+
+
+def test_r8_guard_nocte_written_as_at_night_passes():
+    notes = NOTE1.replace("daily", "nocte")
+    _guard(notes, ["- Synthomed 10 mg at night [L3]"])
+    with pytest.raises(L.Refused):
+        _guard(notes, ["- Synthomed 10 mg in the morning [L3]"])          # mane is not nocte
+
+
+@pytest.mark.parametrize("abbr,plain", [("mane", "in the morning"), ("daily", "once a day"), ("bd", "twice a day"),
+                                        ("tds", "three times a day"), ("qid", "four times a day"), ("prn", "when needed")])
+def test_r8_guard_signed_frequency_equivalents(abbr, plain):
+    _guard(NOTE1.replace("daily", abbr), [f"- Synthomed 10 mg {plain} [L3]"])
+
+
+def test_r8_guard_od_has_no_equivalent():
+    notes = NOTE1.replace("daily", "od")
+    _guard(notes, ["- Synthomed 10 mg od [L3]"])
+    with pytest.raises(L.Refused, match="a medicine on line L3"):
+        _guard(notes, ["- Synthomed 10 mg once a day [L3]"])
+
+
+def test_r8_guard_medicine_missing_entirely_refuses():
+    with pytest.raises(L.Refused, match="a medicine on line L3"):
+        _guard(NOTE1, ["- something else [L4]"])
+
+
+def test_r8_guard_allergy_reaction_dropped_refuses():
+    notes = "Patient: SYNTH-9803\nReactions on file: trimethoprim - itchy rash\n1937-04-02 review.\n"
+    _guard(notes, ["- trimethoprim - itchy rash [L2]"])
+    with pytest.raises(L.Refused, match=re.escape(L.ALLERGY_MISSING.format(lid="L2"))):
+        _guard(notes, ["- trimethoprim [L2]"])
+
+
+def test_r8_guard_stop_line_needs_drug_and_stop_word():
+    notes = "Patient: SYNTH-9804\n1937-04-02 review.\nDrug chart: ramipril stopped - kidney injury\n"
+    md, _ = _r8(notes)
+    assert "ramipril" in md and "stopped" in md.lower()
+    _guard(notes, ["- Stopped: ramipril [L3]"])
+    with pytest.raises(L.Refused, match="a medicine on line L3"):
+        _guard(notes, ["- ramipril [L3]"])
+
+
+def test_r8_ceased_and_withheld_lines_reach_letter():
+    for w in ("ceased", "withheld"):
+        md, _ = _r8(f"Patient: SYNTH-9805\n1937-04-02 review.\nwarfarin {w} before surgery\n")
+        assert "warfarin" in md and w in md.lower() or "stopped" in md.lower()
+
+
+PRN = "Patient: SYNTH-9806\n1937-04-02 review.\nDrug chart: paracetamol 1 g prn {mx}\n"
+
+
+def test_r8_prn_maximum_dropped_refuses():
+    notes = PRN.format(mx="max 4 g in 24 h")
+    _guard(notes, ["- paracetamol 1 g prn max 4 g in 24 h [L3]"])
+    with pytest.raises(L.Refused, match=re.escape(L.MAX_MISSING.format(lid="L3"))):
+        _guard(notes, ["- paracetamol 1 g prn [L3]"])
+
+
+@pytest.mark.parametrize("mx,num", [("max 4 g in 24 h", "4 g"), ("max 8 tablets in 24hrs", "8 tablets"),
+                                    ("maximum 4 g per 24 hours", "4 g")])
+def test_r8_patient_24h_maximum_in_signed_plain_words(mx, num):
+    md, _ = _r8(PRN.format(mx=mx), to="Patient", aud="patient")
+    assert f"no more than {num} in 24 hours" in FLAG_RX.sub("", md)
+
+
+def test_r8_weekly_maximum_keeps_its_period():
+    md, _ = _r8(PRN.format(mx="max 20 mg per week"), to="Patient", aud="patient")
+    assert "max 20 mg per week" in FLAG_RX.sub("", md) and "in 24 hours" not in md
+
+
+def test_r8_pending_cleared_by_later_result_and_owner_kept():
+    notes = ("Patient: SYNTH-9807\n1937-08-04 seen for tiredness.\nIron studies sent 1937-08-04 - await\n"
+             "Thyroid test sent 1937-08-04 - practice nurse following\n1937-08-06 iron studies back: ferritin low 9\n")
+    md, _ = _r8(notes, to="Patient", aud="patient")
+    p = FLAG_RX.sub("", section(md, "Tests we are still waiting on"))
+    assert "Iron studies" not in p and "Thyroid test" in p and "practice nurse following" in p and "await" not in p
+
+
+def test_r8_referral_without_question_or_problem_opens_with_first_note_line():
+    notes = "Patient: SYNTH-9808\n1937-10-13 headaches most mornings, worse lying down.\nDrug chart: paracetamol 1 g prn\n"
+    md, _ = _r8(notes, t="referral", to="Neurology")
+    assert "Reason for referral: headaches most mornings" in md and "Reason for referral not documented" not in md

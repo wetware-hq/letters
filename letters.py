@@ -246,8 +246,88 @@ def untagged_pending(body):
     m = PENDING_AFTER.match(body)
     if m and not NEG.match(body):
         rest = m.group("rest").strip(" ,;-")
+        rest = re.sub(r"^(?:on\s+)?1937-\d{2}-\d{2}\b[\s,;:.\-\u2013\u2014]*", "", rest)
+        rest = re.sub(r"^(?:await(?:ed|ing)?|pending|outstanding|results? to follow)\b[\s.]*$", "", rest, flags=re.I).strip(" ,;-")
         return f"{m.group('test').strip()} - {rest}" if rest else m.group("test").strip()
     return None
+
+
+DRUG_FILE = HERE / "drugs.txt"
+DOSE_RX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?(mg|mcg|micrograms?|g|mL|ml|units?|IU)(?![A-Za-z/])", re.I)
+FREQ_RX = re.compile(r"(?<![A-Za-z])(daily|bd|tds|qid|nocte|mane|prn|weekly|od)(?![A-Za-z])", re.I)
+STOP_RX = re.compile(r"\b(?:stopped|ceased|withheld|stop)\b", re.I)
+ALLERGY_RX = re.compile(r"\b(?:allerg\w*|reactions?|intoleran\w*|anaphyla\w*)\b", re.I)
+MED_HEAD = re.compile(r"\b(?:drugs?|med\w*|chart|prescri\w*|tablets?|regimen|rx)\b", re.I)
+_DRUGS = {}
+
+
+def drug_names():
+    """{lowercase name: generic} for recognised medicines and brands (drugs.txt + linked_terms.toml)."""
+    if not _DRUGS:
+        for l in _lines(DRUG_FILE):
+            if l.startswith("#"):
+                continue
+            if "=" in l:
+                b, g = (x.strip() for x in l.split("=", 1)); _DRUGS[b.lower()] = g.lower()
+            else:
+                _DRUGS[l.lower()] = l.lower()
+        for v in load_linked().values():
+            for m in v.get("medicines", []):
+                _DRUGS.setdefault(m.lower(), m.lower())
+            for b, g in v.get("brands", {}).items():
+                _DRUGS.setdefault(b.lower(), (g or b).lower())
+    return _DRUGS
+
+
+def drugs_in(s):
+    """Recognised medicine names in s, longest first, as [(as written, generic)]."""
+    out, low = [], s.lower()
+    for name in sorted(drug_names(), key=len, reverse=True):
+        m = re.search(rf"(?<![a-z0-9]){re.escape(name)}(?![a-z0-9])", low)
+        if m and not any(name in o[0].lower() for o in out):
+            out.append((s[m.start():m.end()], drug_names()[name]))
+    return out
+
+
+def content_kind(head, body):
+    """Kind for a line the heading didn't place: by heading words, then by content. None if unsure."""
+    h = (head or "").lower()
+    if h and ALLERGY_RX.search(h):
+        return "allergy"
+    if h and MED_HEAD.search(h):
+        return "stop" if STOP_RX.search(body) else "med"
+    if h and STOP_RX.search(h):
+        return "stop"
+    whole = f"{head}: {body}" if head else body
+    drugs = drugs_in(whole)
+    if ALLERGY_RX.search(whole) and drugs:
+        return "allergy"
+    if STOP_RX.search(whole) and drugs:
+        return "stop"
+    if drugs and (DOSE_RX.search(whole) or FREQ_RX.search(whole)):
+        return "med"
+    if DOSE_RX.search(whole) and FREQ_RX.search(whole):
+        return "med"
+    return None
+
+
+def classify(line):
+    """(kind, body) for one notes line: a known heading first, otherwise by heading words and content."""
+    m = TAG.match(line)
+    kind = tag_kind(m.group("tag")) if m else None
+    if kind:
+        body = m.group("body").strip()
+        if kind == "med" and STOP_RX.search(body) and not re.match(r"^(?:start|restart)$", m.group("tag").strip(), re.I):
+            kind = "stop"
+        return kind, body
+    if m:
+        k = content_kind(m.group("tag").strip(), m.group("body").strip())
+        if k and (ALLERGY_RX.search(m.group("tag")) or MED_HEAD.search(m.group("tag")) or STOP_RX.search(m.group("tag"))):
+            return k, m.group("body").strip()
+        if k:
+            return k, line
+        return None, line
+    return content_kind(None, line), line
 
 
 DURATION = re.compile(r"^(?:\d|(?:a|an|one|two|three|four|five|six|several|another)\s+(?:day|week|month|year)s?\b|"
@@ -264,6 +344,9 @@ def med_reason(drug):
                  drug, re.I)
     if m and m.group("d").strip() and not DURATION.match(m.group("r")):
         return m.group("d").strip(" ,;-"), m.group("r").strip(" .")
+    m = re.match(r"^(?P<d>.*?)\s+[-\u2013\u2014]\s+(?P<r>[^-\u2013\u2014()]+?)\s*$", drug)
+    if m and m.group("d").strip() and not DOSEISH.search(m.group("r")) and not STOP_RX.search(m.group("r")):
+        return m.group("d").strip(), m.group("r").strip(" .")
     m = re.match(r"^(?P<d>.*?)\s*\((?P<r>[^()]+)\)\s*(?P<tail>.*)$", drug)
     if m and m.group("d").strip() and not DOSEISH.search(m.group("r")):
         return f"{m.group('d').strip()} {m.group('tail').strip()}".strip(), m.group("r").strip()
@@ -292,11 +375,19 @@ def split_med_lists(lines):
     out = []
     for lid, line in lines:
         m = TAG.match(line)
-        if m and m.group("tag").strip().lower() in MED_LIST_TAGS:
+        kind, body = classify(line)
+        converted = False
+        if kind in ("med", "allergy", "stop") and not (m and tag_kind(m.group("tag"))):
+            converted = True
+            line = f"{ {'med': 'Med', 'allergy': 'Allergy', 'stop': 'Stop'}[kind]}: {body}"   # unfamiliar heading or none
+            m = TAG.match(line)
+        if kind == "med" and m and (m.group("tag").strip().lower() in MED_LIST_TAGS or converted):
             parts = [p.strip() for p in re.split(r"[,;](?![^()]*\))", m.group("body")) if p.strip()]
-            if len(parts) > 1:
+            if len(parts) > 1 and (not converted or all(DOSE_RX.search(p) or FREQ_RX.search(p) for p in parts)):
                 out += [(lid, f"Med: {p}") for p in parts]
                 continue
+        if kind == "stop" and m and m.group("tag").strip().lower() not in ("stop", "ceased"):
+            line = f"Stop: {m.group('body').strip()}"
         out.append((lid, line))
     return out
 
@@ -611,7 +702,12 @@ SHORTHAND_FILE = HERE / "shorthand.txt"
 WORDLISTS = [HERE / "wordlists" / "english.txt", HERE / "wordlists" / "medical.txt"]
 # Plain-language swaps for patients: ordinary words only, never abbreviations.
 PLAIN = [(r"\boral\b", "tablets"), (r"\bhypertension\b", "high blood pressure"), (r"\bexertional\b", "when active"),
-         (r"\bdaily\b", "once a day")]
+         (r"(?<!twice )(?<!three times )(?<!four times )(?<!once )\bdaily\b", "once a day"),
+         # signed frequency plain words (13 Oct 2026); od has none
+         (r"\bnocte\b", "at night"), (r"\bmane\b", "in the morning"), (r"\bprn\b", "when needed"),
+         # signed: a maximum over 24 hours; number and unit kept exactly; any other period stays as written
+         (r"\bmax(?:imum)?\.?\s+(?:dose\s+)?(?:of\s+)?(\d+(?:\.\d+)?\s?(?:mg|mcg|g|ml|mL|tablets?|doses?))"
+          r"\s*(?:in|per|/|every)\s*24\s?(?:h|hrs?|hours?)\b", r"no more than \1 in 24 hours")]
 
 
 def _lines(p):
@@ -638,6 +734,8 @@ def needs_flag(tok, prev="", exact=()):
     if tok in exact or tok in TOOL_WORDS:
         return False
     low = tok.lower()
+    if low in drug_names():
+        return False                                        # recognised medicine or brand
     if "/" in tok and tok not in ("c/o", "o/e"):
         return False                                        # slash unit, e.g. mmol/L
     if tok in UNITS:
@@ -867,6 +965,8 @@ def no_question_opener(st):
     """No question found: open with the reason for referral (the first current problem), sourced."""
     for body, _, ids in st["problems"].values():
         return f"Reason for referral: {body} [{', '.join(ids)}]"
+    for _, body, ids in st["narrative"]:                # no problem tagged: the first clinical note line
+        return f"Reason for referral: {body} [{', '.join(ids)}]"
     return f"Reason for referral {ND}."
 PATIENT_OPENER = "This letter explains your care and what happens next."
 
@@ -1065,6 +1165,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
     if not patient:
         md = apply_cut_rule(md, text, dropped, flags, TITLES[letter_type])
         md = flag_cuts(md, dropped, flags, TITLES[letter_type])
+    refuse_missing_medicines(md, text)
     return md, dropped
 
 
@@ -1143,9 +1244,11 @@ def _source_lines(text):
     out = {}
     for e in parse(text)[0]:
         for lid, line in e["lines"]:
-            m = TAG.match(line)
-            kind = tag_kind(m.group("tag")) if m else None
-            out[lid] = (kind, m.group("body").strip() if kind else line)
+            parts = split_med_lists([(lid, line)])
+            kind, body = classify(parts[0][1])
+            if len(parts) > 1:
+                body = " || ".join(classify(p)[1] for _, p in parts)
+            out[lid] = (kind, body)
     return out
 
 
@@ -1331,6 +1434,103 @@ QUESTION_FLAG = "[flag: no clear question]"
 QUESTION_NOTICE = "Flag: this referral has no clear question. Add one before it's signed."
 FINAL_REFUSED = ("--final refused: {n} flag(s) still open. Confirm each meaning with "
                  '--resolve "AB=meaning" (or edit the notes), then run --final again.')
+
+
+MED_MISSING = "Refused: a medicine on line {lid} of the notes is missing from this letter. Nothing was written."
+ALLERGY_MISSING = "Refused: an allergy on line {lid} of the notes is missing from this letter. Nothing was written."
+MAX_MISSING = ("Refused: the medicine on line {lid} has a maximum dose in the notes that this letter leaves out. "
+               "Nothing was written.")
+# Signed frequency equivalents (Physician, 13 Oct 2026). Nothing else counts; od has none.
+FREQ_SIGNED = {"nocte": ["at night"], "mane": ["in the morning"], "daily": ["once a day", "once daily"],
+               "bd": ["twice a day"], "tds": ["three times a day"], "qid": ["four times a day"], "prn": ["when needed"],
+               "weekly": [], "od": []}
+MULTI_DAILY = re.compile(r"\b(?:twice|three times|four times|once)\s+daily\b")
+MAX_RX = re.compile(r"\bmax(?:imum)?\.?\s+(?:dose\s+)?(?:of\s+)?\d+(?:\.\d+)?\s?(?:mg|mcg|g|ml|tablets?|doses?)\b"
+                    r"(?:\s*(?:in|per|/|every)\s*(?:24\s?(?:h|hrs?|hours?)|a day|day))?", re.I)
+
+
+def _norm(s):
+    s = re.sub(r"\s+", " ", FLAG_ANY.sub("", s)).lower()
+    return DOSE_RX.sub(lambda m: f"{m.group(1)}{m.group(2).lower().rstrip('s')}", s)
+
+
+MULTI_FREQ = re.compile(r"\b(once|twice|three times|four times)\s+(?:daily|a day)\b", re.I)
+MULTI_TOK = {"once": "daily", "twice": "bd", "three times": "tds", "four times": "qid"}
+
+
+def note_freqs(part):
+    """[(canonical token, as written)] for the frequencies in a medicine line."""
+    out = [(MULTI_TOK[m.group(1).lower()], m.group(0).lower()) for m in MULTI_FREQ.finditer(part)]
+    rest = MULTI_FREQ.sub(" ", part)
+    return out + [(m.group(1).lower(), m.group(1).lower()) for m in FREQ_RX.finditer(rest)]
+
+
+def _freq_present(tok, plain, written=None):
+    tok = tok.lower()
+    if written and written != "daily" and re.search(rf"(?<![a-z]){re.escape(written)}(?![a-z])", plain):
+        return True
+    if tok == "daily":
+        own = MULTI_DAILY.sub(lambda m: " once a day " if m.group(0).startswith("once") else " ", plain)
+        return bool(re.search(r"(?<![a-z])daily(?![a-z])", own)) or any(p in own for p in FREQ_SIGNED["daily"])
+    if re.search(rf"(?<![a-z]){re.escape(tok)}(?![a-z])", plain):
+        return True
+    single = load_single_meaning().get(tok, {})
+    return any(p in plain for p in FREQ_SIGNED.get(tok, []) + ([single["patient"]] if single.get("patient") in
+                                                                FREQ_SIGNED.get(tok, []) else []))
+
+
+def _drug_present(body, plain):
+    found = drugs_in(body)
+    if found:
+        return all(re.search(rf"(?<![a-z0-9]){re.escape(w.lower())}(?![a-z0-9])", plain) or
+                   re.search(rf"(?<![a-z0-9]){re.escape(g)}(?![a-z0-9])", plain) for w, g in found)
+    first = next((w for w in re.findall(r"[A-Za-z][A-Za-z-]+", body)), None)
+    return first is None or re.search(rf"(?<![a-z0-9]){re.escape(first.lower())}(?![a-z0-9])", plain)
+
+
+def refuse_missing_medicines(md, text):
+    """Post-write guard, every letter: each medicine, stop and allergy line's parts must reach the letter, in the
+    lines that cite it. Medicine: drug (generic ok) + every dose + every frequency (or its signed plain words) + any
+    maximum. Stop: drug + stop word. Allergy: drug + reaction."""
+    cited = {}
+    for _, line in _body_lines(md):
+        for i in _line_ids(line):
+            cited[i] = cited.get(i, "") + " " + _norm(split_ids(line)[0])
+    for lid, (kind, body) in _source_lines(text).items():
+        if kind not in ("med", "stop", "allergy"):
+            continue
+        plain = cited.get(lid, "")
+        if kind == "allergy":
+            for part in re.split(r"[,;](?![^()]*\))", body):
+                drug, reaction = split_reaction(part)
+                if not drug or NO_REACTION.match(drug) or re.match(r"^(?:nil|none|nkda|no known)", drug, re.I):
+                    continue
+                need = [drug] + ([reaction] if reaction and not NO_REACTION.match(reaction) else [])
+                if not all(_norm(x) in plain for x in need):
+                    raise Refused(ALLERGY_MISSING.format(lid=lid))
+            continue
+        for part in body.split(" || "):
+            if not _drug_present(part, plain):
+                raise Refused(MED_MISSING.format(lid=lid))
+            if kind == "stop":
+                if not STOP_RX.search(plain):
+                    raise Refused(MED_MISSING.format(lid=lid))
+                continue
+            for m in MAX_RX.finditer(part):
+                plain_max = re.sub(PLAIN[-1][0], PLAIN[-1][1], m.group(0))
+                if _norm(m.group(0)) not in plain and _norm(plain_max) not in plain:
+                    raise Refused(MAX_MISSING.format(lid=lid))
+            noted = _norm(MAX_RX.sub(" ", part))
+            for m in DOSE_RX.finditer(noted):
+                if not re.search(rf"(?<![\d.]){re.escape(m.group(0))}(?![a-z])", plain):
+                    raise Refused(MED_MISSING.format(lid=lid))
+            for tok, written in note_freqs(part):
+                if not _freq_present(tok, plain, written):
+                    raise Refused(MED_MISSING.format(lid=lid))
+            for m in MAX_RX.finditer(part):
+                plain_max = re.sub(PLAIN[-1][0], PLAIN[-1][1], m.group(0))
+                if _norm(m.group(0)) not in plain and _norm(plain_max) not in plain:
+                    raise Refused(MAX_MISSING.format(lid=lid))
 
 
 def finalise(md):
