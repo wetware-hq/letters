@@ -1,0 +1,11 @@
+{{header}}
+{{question}}
+{{admission}}
+{{problems}}
+{{results}}
+{{meds}}
+{{allergies}}
+{{med_changes}}
+{{pending}}
+{{followup}}
+{{footer}}

@@ -1,0 +1,10 @@
+Patient: SYNTH-3003
+PMHx: T2DM
+1937-08-01 Clinic.
+Problem: CKD stage 3
+Result: eGFR 52 mL/min
+Med: empagliflozin 10 mg daily
+1937-09-01 Clinic.
+Result: eGFR 48 mL/min
+Pending: urine albumin-creatinine ratio
+Plan: recheck eGFR in 3 months

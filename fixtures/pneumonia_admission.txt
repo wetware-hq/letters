@@ -1,0 +1,20 @@
+Patient: SYNTH-2002
+Allergy: nil known
+1937-06-01 ED. Fever, productive cough, SOB.
+Admission: community-acquired pneumonia, right lower lobe
+Problem: CAP
+Result: CRP 180 mg/L
+Med: amoxicillin 1 g IV tds
+Med: metformin 500 mg bd
+Pending: blood cultures
+1937-06-03 Ward round. Afebrile, eating.
+Result: CRP 90 mg/L
+Stop: metformin
+Course: improved on IV antibiotics, switched to oral on day 3
+1937-06-04 Discharge.
+Med: amoxicillin 1 g PO tds for 4 more days
+Result: CRP 40 mg/L
+Resolved: CAP
+Pending: sputum culture
+Follow-up: GP review in 1 week; restart metformin if eating normally
+Follow-up: repeat chest X-ray in 6 weeks

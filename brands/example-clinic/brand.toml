@@ -1,0 +1,12 @@
+# Made-up example brand. Not a real organisation.
+name = "Example Clinic"
+address = "1 Invented Lane, Nowhere Town"
+logo = "logo.svg"
+
+[fonts]
+body = "Source Serif 4"
+heading = "Inter"
+
+[colours]
+primary = "#1F4E79"
+text = "#222222"

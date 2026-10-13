@@ -1,0 +1,10 @@
+Patient: SYNTH-4004
+PMHx: type 2 diabetes, bipolar disorder
+Allergy: codeine
+1937-02-10 Podiatry clinic referral. Painful callus left forefoot, poor historian.
+Problem: left forefoot callus
+Med: lithium 400 mg nocte (for bipolar disorder)
+Med: metformin 500 mg bd
+Result: HbA1c 7.9 %
+Question: Please assess the left forefoot callus and advise on offloading.
+Follow-up: GP review in 4 weeks

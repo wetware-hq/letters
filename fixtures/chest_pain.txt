@@ -1,0 +1,14 @@
+Patient: SYNTH-1001
+PMHx: hypertension, ex-smoker
+Allergy: penicillin (rash)
+1937-03-02 GP review. Three weeks of exertional chest tightness, settles with rest.
+Problem: exertional chest pain
+Med: aspirin 100 mg daily
+Med: ramipril 2.5 mg daily
+Result: LDL 4.1 mmol/L
+Pending: exercise ECG
+1937-03-16 Review. Symptoms unchanged.
+Med: ramipril 5 mg daily
+Med: atorvastatin 40 mg nocte
+Result: LDL 3.2 mmol/L
+Question: Is this stable angina, and does she need angiography?
