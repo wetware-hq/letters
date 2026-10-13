@@ -43,7 +43,7 @@ Please answer the question below.
 
 ## Pending results
 
-- exercise ECG [flag: abbreviation, meaning not confirmed], sent on 2 Mar 1937. Who follows up: not documented. [L9]
+- exercise electrocardiogram (ECG), sent on 2 Mar 1937. Who follows up: not documented. [L9]
 
 ## Actions
 

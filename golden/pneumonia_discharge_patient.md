@@ -26,12 +26,12 @@ This letter explains your care and what happens next.
 
 ## Changes to your medicines
 
-- Stopped on 3 Jun 1937: metformin 500 mg bd [flag: abbreviation, meaning not confirmed]. Reason for change: not documented. [L8, L12]
-- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed]. Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed] for 4 more days. Reason for change: not documented. [L7, L15]
+- Stopped on 3 Jun 1937: metformin 500 mg twice a day (bd). Reason for change: not documented. [L8, L12]
+- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] three times a day (tds). Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days. Reason for change: not documented. [L7, L15]
 
 ## Your medicines now
 
-- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed] for 4 more days [L7, L15]
+- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days [L7, L15]
 
 ## Allergies
 
@@ -39,7 +39,7 @@ This letter explains your care and what happens next.
 
 ## Your test results
 
-- CRP [flag: abbreviation, meaning not confirmed]: 180 mg/L on 1 Jun 1937, 90 mg/L on 3 Jun 1937, 40 mg/L on 4 Jun 1937 [L6, L11, L16]
+- a blood test for inflammation (CRP): 180 mg/L on 1 Jun 1937, 90 mg/L on 3 Jun 1937, 40 mg/L on 4 Jun 1937 [L6, L11, L16]
 
 ## Tests we are still waiting on
 

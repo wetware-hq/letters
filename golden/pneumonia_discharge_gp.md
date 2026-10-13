@@ -26,12 +26,12 @@ Discharged on 4 Jun 1937. Actions are numbered at the end.
 
 ## Medicine changes
 
-- Stopped on 3 Jun 1937: metformin 500 mg bd [flag: abbreviation, meaning not confirmed]. Reason for change: not documented. [L8, L12]
-- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed]. Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed] for 4 more days. Reason for change: not documented. [L7, L15]
+- Stopped on 3 Jun 1937: metformin 500 mg twice daily (bd). Reason for change: not documented. [L8, L12]
+- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] three times daily (tds). Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days. Reason for change: not documented. [L7, L15]
 
 ## Current medicines
 
-- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed] for 4 more days [L7, L15]
+- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days [L7, L15]
 
 ## Allergies
 
@@ -39,7 +39,7 @@ Discharged on 4 Jun 1937. Actions are numbered at the end.
 
 ## Results
 
-- CRP [flag: abbreviation, meaning not confirmed]: 180 mg/L on 1 Jun 1937, 90 mg/L on 3 Jun 1937, 40 mg/L on 4 Jun 1937 [L6, L11, L16]
+- C-reactive protein (CRP): 180 mg/L on 1 Jun 1937, 90 mg/L on 3 Jun 1937, 40 mg/L on 4 Jun 1937 [L6, L11, L16]
 
 ## Results still to come
 

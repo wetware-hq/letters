@@ -388,7 +388,7 @@ FLAG = "[flag: abbreviation, meaning not confirmed]"
 # A Roman numeral after stage/grade/class/type/phase/NYHA is a number, not an abbreviation (stage IV).
 _ROMAN_CTX = "|".join(rf"(?<=(?i:{w}) )" for w in ("stage", "grade", "class", "type", "types", "phase", "NYHA"))
 ABBR_RE = re.compile(r"(?<![\w/-])(?!(?:" + _ROMAN_CTX + r")[IVX]+(?![\w/-]))"
-                     r"(?:(?i:c/o|o/e|sob|hx|pt|bd|tds|qds|nocte|mane|prn|od)|Hb|"
+                     r"(?:(?i:c/o|o/e|sob|hx|pt|bd|tds|qds|qid|nocte|mane|prn|od)|Hb|"
                      r"(?=[A-Za-z0-9]*[A-Z][A-Za-z0-9]*[A-Z])[A-Za-z][A-Za-z0-9]{1,6})(?![\w/-])")
 SINGLE_MEANING_FILE = HERE / "single_meaning.toml"
 # Plain-language swaps for patients: ordinary words only, never abbreviations.
@@ -446,7 +446,7 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
                 if rid not in extra:
                     extra.append(rid)
             elif ab in single:
-                full = single[ab]
+                full = single[ab]["patient" if audience == "patient" else "clinical"]
             else:
                 flags.append(f"{ab}{ids.strip(' |') and ' ' + ids.strip(' |')}")
                 return f"{ab} {FLAG}"
@@ -491,7 +491,7 @@ def _source_words(src, single=None):
     single = load_single_meaning() if single is None else single
     for ab, full in single.items():                    # reviewed list, abbreviation must be in the cited lines
         if ab in abbreviations(src):
-            words |= _words(full)
+            words |= _words(full["clinical"]) | _words(full["patient"])
     for pat, rep in PLAIN:
         if re.search(pat, src):
             words |= _words(rep)

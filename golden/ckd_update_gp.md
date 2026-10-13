@@ -11,7 +11,7 @@ Update on 1 Sep 1937. Actions are numbered at the end.
 
 ## Problems
 
-- CKD [flag: abbreviation, meaning not confirmed] stage 3 [L4]
+- chronic kidney disease (CKD) stage 3 [L4]
 
 ## Background
 
@@ -21,7 +21,7 @@ Update on 1 Sep 1937. Actions are numbered at the end.
 
 ## Results
 
-- eGFR [flag: abbreviation, meaning not confirmed]: 52 mL/min on 1 Aug 1937, 48 mL/min on 1 Sep 1937 [L5, L8]
+- estimated glomerular filtration rate (eGFR): 52 mL/min on 1 Aug 1937, 48 mL/min on 1 Sep 1937 [L5, L8]
 
 ## Medicine changes
 
@@ -41,7 +41,7 @@ Update on 1 Sep 1937. Actions are numbered at the end.
 
 ## Actions
 
-1. Who: not documented. When: in 3 months. Action: recheck eGFR [flag: abbreviation, meaning not confirmed] in 3 months [L10]
+1. Who: not documented. When: in 3 months. Action: recheck eGFR in 3 months [L10]
 
 ---
 

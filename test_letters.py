@@ -386,7 +386,7 @@ def test_planted_overlong_letter_refused_but_discharge_exempt():
 
 def test_patient_wording():
     md = make_letter(F("pneumonia_admission.txt"), "discharge", "Patient", audience="patient")
-    assert f"tds {L.FLAG}" in md and "three times a day" not in md and "Why you came to hospital" in md
+    assert "three times a day (tds)" in md and "three times daily" not in md and "Why you came to hospital" in md
 
 
 # ---------- repo hygiene ----------
@@ -483,6 +483,20 @@ def test_readme_describes_final_exactly():
             in (HERE / "README.md").read_text())
 
 
+SM_EXPECTED = {
+    "ECG": ("electrocardiogram", "a heart tracing"),
+    "CRP": ("C-reactive protein", "a blood test for inflammation"),
+    "eGFR": ("estimated glomerular filtration rate", "a blood test of how well your kidneys filter"),
+    "HbA1c": ("glycated haemoglobin", "a blood test of your average sugar level over about three months"),
+    "INR": ("international normalised ratio", "a blood test of how quickly your blood clots"),
+    "bd": ("twice daily", "twice a day"),
+    "tds": ("three times daily", "three times a day"),
+    "qid": ("four times daily", "four times a day"),
+    "CKD": ("chronic kidney disease", "long-term kidney disease"),
+    "COPD": ("chronic obstructive pulmonary disease", "long-term lung disease that makes breathing harder"),
+}
+
+
 # ---------- abbreviations: flagged by default, expanded only via reviewed list or clinician --resolve ----------
 AMBIG = "Patient: SYNTH-3001\n1937-05-01 Clinic review.\nProblem: {ab}\nFollow-up: review in 2 weeks"
 
@@ -508,9 +522,12 @@ def test_ambiguous_abbreviation_flagged_not_expanded_and_final_refused(tmp_path,
     assert f"- {ab} [L3]" in r.stderr or f"  - {ab}" in r.stderr   # flag listed in the terminal
 
 
-def test_single_meaning_list_ships_empty_with_signoff_note():
+def test_single_meaning_list_has_exactly_ten_signed_off_entries():
     p = HERE / "single_meaning.toml"
-    assert L.load_single_meaning(p) == {} and "sign-off" in p.read_text()
+    sm = L.load_single_meaning(p)
+    assert sorted(sm) == sorted(SM_EXPECTED) and len(sm) == 10
+    assert all(sm[k] == {"clinical": c, "patient": pl} for k, (c, pl) in SM_EXPECTED.items())
+    assert "IV" not in sm and "signed off by the clinician reviewer and the educator" in p.read_text()
 
 
 def test_resolve_closes_flag_cites_r1_and_final_runs(tmp_path):
@@ -546,7 +563,8 @@ def test_goldens_expand_no_abbreviation():
     for g in (HERE / "golden").glob("*.md"):
         t = g.read_text()
         assert "atrial fibrillation" not in t.lower(), g.name
-        assert not re.search(r"\w \([A-Za-z0-9/]{2,7}\)", t), g.name   # no "expansion (AB)" anywhere
+        for ab in re.findall(r"\w \(([A-Za-z0-9/]{2,7})\)", t):          # only reviewed-list expansions
+            assert ab in SM_EXPECTED, (g.name, ab)
 
 
 # ---------- abbreviation detection edges ----------
@@ -589,7 +607,40 @@ def test_iv_route_still_flagged():
 def test_units_not_flagged():
     md, flags = _one("Med: ramipril 5 mg daily\nMed: lactulose 10 mL twice a day\nResult: potassium 4.1 mmol/L\n"
                      "Result: CRP 12 mg/L\nResult: weight 70 kg")
-    assert flags == ["CRP"]
+    assert flags == []
     for u in ("5 mg", "10 mL", "4.1 mmol/L", "12 mg/L", "70 kg"):
         assert u in md
     assert all(not L.abbreviations(u) for u in ("mg", "mL", "mmol/L", "mg/L", "kg"))
+
+
+# ---------- reviewed single-meaning list ----------
+SM_NOTE = "Patient: SYNTH-3201\n1937-05-01 Clinic review.\nProblem: {ab} noted\nFollow-up: review in 2 weeks"
+
+
+@pytest.mark.parametrize("ab", list(SM_EXPECTED))
+@pytest.mark.parametrize("aud", ["gp", "specialist", "patient"])
+def test_single_meaning_entry_expands_by_audience(ab, aud):
+    clinical, plain = SM_EXPECTED[ab]
+    flags = []
+    md, _ = build(SM_NOTE.format(ab=ab), "gp-update", "General practice", audience=aud, flags=flags)
+    want, other = (plain, clinical) if aud == "patient" else (clinical, plain)
+    assert f"- {want} ({ab}) noted [L3]" in md and flags == []
+    assert other not in md or other in want
+
+
+@pytest.mark.parametrize("ab", list(SM_EXPECTED))
+def test_single_meaning_expansion_refused_when_not_cited(ab):
+    text = SM_NOTE.format(ab=ab)
+    md, _ = build(text, "gp-update", "General practice")
+    clinical = SM_EXPECTED[ab][0]
+    bad = md.replace("Clinic review. [L2]", f"Clinic review, {clinical}. [L2]")
+    assert bad != md
+    with pytest.raises(Refused, match="word not in cited lines"):
+        check(bad, parse(text)[1], "gp-update")
+
+
+@pytest.mark.parametrize("ab", ["BD", "Bd", "IV", "TDS"])
+def test_case_variants_and_iv_stay_flagged(ab):
+    flags = []
+    md, _ = build(SM_NOTE.format(ab=ab), "gp-update", "General practice", flags=flags)
+    assert f"- {ab} {L.FLAG} noted [L3]" in md and [f.split()[0] for f in flags] == [ab]

@@ -24,7 +24,7 @@ Please answer the question below.
 
 ## Results
 
-- HbA1c [flag: abbreviation, meaning not confirmed]: 7.9 % on 10 Feb 1937 [L8]
+- glycated haemoglobin (HbA1c): 7.9 % on 10 Feb 1937 [L8]
 
 ## Medicine changes
 
@@ -33,7 +33,7 @@ Please answer the question below.
 ## Current medicines
 
 - lithium 400 mg nocte [flag: abbreviation, meaning not confirmed] [L6]
-- metformin 500 mg bd [flag: abbreviation, meaning not confirmed] [L7]
+- metformin 500 mg twice daily (bd) [L7]
 
 ## Allergies
 

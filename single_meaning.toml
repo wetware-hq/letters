@@ -1,10 +1,19 @@
 # Reviewed single-meaning abbreviations: ones with exactly one meaning in every specialty.
 # Only these are spelled out automatically; every other abbreviation is kept as written and flagged.
-# Each entry needs clinician sign-off (name, role, date in the commit message) before it is added.
-# Ships empty on purpose.
-#
-# Format:
-# [abbreviations]
-# XYZ = "meaning"
+# Matching is case-sensitive: "bd" is on the list, "BD" and "Bd" are not and stay flagged.
+# clinical = wording in GP and specialist letters; patient = plain words in patient letters.
+# Each entry needs clinician sign-off before it is added.
+# These 10 entries: signed off by the clinician reviewer and the educator.
+# IV is deliberately NOT on this list and stays flagged.
 
 [abbreviations]
+ECG   = { clinical = "electrocardiogram", patient = "a heart tracing" }
+CRP   = { clinical = "C-reactive protein", patient = "a blood test for inflammation" }
+eGFR  = { clinical = "estimated glomerular filtration rate", patient = "a blood test of how well your kidneys filter" }
+HbA1c = { clinical = "glycated haemoglobin", patient = "a blood test of your average sugar level over about three months" }
+INR   = { clinical = "international normalised ratio", patient = "a blood test of how quickly your blood clots" }
+bd    = { clinical = "twice daily", patient = "twice a day" }
+tds   = { clinical = "three times daily", patient = "three times a day" }
+qid   = { clinical = "four times daily", patient = "four times a day" }
+CKD   = { clinical = "chronic kidney disease", patient = "long-term kidney disease" }
+COPD  = { clinical = "chronic obstructive pulmonary disease", patient = "long-term lung disease that makes breathing harder" }
