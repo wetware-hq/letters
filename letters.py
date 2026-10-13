@@ -134,6 +134,7 @@ def sensitive_cat(s):
     return None
 
 
+_NOT_COPY = []          # '--not-copy L<n>' lines for one letter
 _EMPTY_FIELDS = set()   # template list fields left empty (set per letter by build_from_template)
 _INCLUDE = set()     # items the brief asked to include ('include: <item name>'); set by build() for one letter
 
@@ -1152,9 +1153,23 @@ def _known_words():
     return _KNOWN[0]
 
 
-def copy_where(text):
-    """Return 'at L<n>' for the first copy request in the notes, else None. Never returns the line text.
-    Line ids match parse(). When unclear, it counts as a copy request."""
+COPY_VERB = re.compile(r"\b(?:send|post|forward|give|fax|e-?mail|mail)\b(?:\W+\w+){0,4}?\W+"
+                       r"(?:this|it|letter|letters|notes|summary|report|results)\b", re.I)
+RELATION = re.compile(r"\b(?:son|daughter|wife|husband|partner|mother|father|mum|dad|sister|brother|friend|neighbour|"
+                      r"neighbor|carer|family|solicitor|lawyer|insurer|employer|school|next of kin|nok)s?\b", re.I)
+SEND_TO = re.compile(r"\b(?:to|for|cc|in)\b:?\s+(?!(?:a|an|any|be|do|read|keep|check|review)\b)(?:the\s+|my\s+|her\s+|his\s+|their\s+)?"
+                     r"(?:mr|mrs|ms|miss|dr|prof|[A-Za-z]{2,})", re.I)
+NOTE_COPY_REFUSED = ("Refused: line L{n} mentions a copy. letters never sends copies. If this isn't a copy request, rerun with "
+                     "`--not-copy L{n}`. Nothing was written.")
+NOT_COPY_REFUSED = ("Refused: line L{n} names someone to send a copy to, so `--not-copy` can't be used on it. "
+                    "letters never sends copies. Nothing was written.")
+NOT_COPY_MARK = "Line L{n} marked as not a copy request"
+
+
+def copy_lines(text):
+    """[(n, names_someone)] for each notes line that asks to copy, send, post, forward or give the letter or notes,
+    or names a person or place to send it to. Never returns the line text. When unclear, it counts."""
+    out = []
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -1172,10 +1187,34 @@ def copy_where(text):
                                     for w in words if w not in (",", "."))
             if symptom and not NOTE_COPY.search(cc.group(1)):
                 continue
-            return f"at L{n}"
-        if NOTE_COPY.search(line) or COPY_LINE.search(line):
-            return f"at L{n}"
-    return None
+            out.append((n, True)); continue
+        hit = NOTE_COPY.search(line) or COPY_LINE.search(line) or COPY_VERB.search(line)
+        if hit:
+            after = line[hit.start():]
+            names = bool(RELATION.search(line) or SEND_TO.search(after) or COPY_LINE.search(line)
+                         or re.search(r"\b(?:mr|mrs|ms|miss|dr)\.?\s+[A-Z]", line))
+            out.append((n, names))
+    return out
+
+
+def copy_where(text):
+    """Return 'at L<n>' for the first copy request in the notes, else None (kept for older callers)."""
+    found = copy_lines(text)
+    return f"at L{found[0][0]}" if found else None
+
+
+def refuse_note_copies(text, not_copy=()):
+    """Refuse the first copy request line. '--not-copy L<n>' covers one line, never a line naming someone to send to.
+    Returns the covered line numbers (printed beside the cut list)."""
+    covered = []
+    for n, names in copy_lines(text):
+        if f"L{n}" in not_copy:
+            if names:
+                raise Refused(NOT_COPY_REFUSED.format(n=n))
+            covered.append(n)
+            continue
+        raise Refused(NOTE_COPY_REFUSED.format(n=n))
+    return covered
 
 
 PATIENT_COPY_TAIL = "A letter to the patient can't be copied to anyone else. Write a separate letter for each other reader."
@@ -1189,24 +1228,23 @@ def is_patient_letter(to, audience):
     return audience == "patient" or (to or "").strip().lower() in ("patient", "the patient")
 
 
-def refuse_copies(text, template=None, brief=None, patient=False):
+def refuse_copies(text, template=None, brief=None, patient=False, not_copy=()):
     """Every letter has one reader. Refuse any copy recipient from the brief, the template or the notes."""
     if brief and COPY_WORDS.search(brief):
         raise Refused(copy_refusal("in the brief", patient))
     if template and (COPY_SLOT.search(template) or COPY_LINE.search(template)):
         raise Refused(copy_refusal("in the template", patient))
-    where = copy_where(text)
-    if where:
-        raise Refused(copy_refusal(where, patient))
+    return refuse_note_copies(text, not_copy)
 
 
 def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None,
-          include=None):
+          include=None, not_copy=()):
     """include: item names the brief asked to keep (see SENSITIVE); everything else sensitive is cut."""
     unknown = [i for i in (include or []) if i.lower() not in {c.lower() for c in SENSITIVE}]
     if unknown:
         raise Refused(BRIEF_REFUSED)
     _INCLUDE.clear(); _INCLUDE.update(i.lower() for i in (include or []))
+    _NOT_COPY[:] = list(not_copy or ())
     try:
         return _build(text, letter_type, to, recipient, audience, template, brand, resolve, flags)
     finally:
@@ -1247,7 +1285,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
         raise ValueError(f"unknown type {letter_type}; choose from {', '.join(TYPES)}")
     audience = audience or ("gp" if letter_type in ("discharge", "gp-update", "specialist-reply") else "specialist")
     pid = check_safe(text)
-    refuse_copies(text, template, patient=is_patient_letter(to, audience))
+    refuse_copies(text, template, patient=is_patient_letter(to, audience), not_copy=_NOT_COPY)
     entries, sources = parse(text)
     resolved = resolution_sources(resolve, text)
     for ab, (rid, full) in resolved.items():
@@ -2125,6 +2163,8 @@ def main(argv=None):
                     help="remove source tags only; the draft mark and footer stay; refused while a flag is open")
     ap.add_argument("--resolve", action="append", default=[], metavar='"AB=meaning"',
                     help='confirm an abbreviation\'s meaning, e.g. "MS=multiple sclerosis" (repeatable)')
+    ap.add_argument("--not-copy", action="append", default=[], metavar="L<n>",
+                    help="mark one notes line as not a copy request (repeat for each line); never a line naming someone")
     ap.add_argument("--heldout", help="external folder of held-out synthetic notes; reports a failure rate")
     a = ap.parse_args(argv)
     llm_guard()
@@ -2163,14 +2203,19 @@ def main(argv=None):
         print(str(e), file=sys.stderr)
         return 2
     try:
-        refuse_copies(text, tpl, brief_copy, is_patient_letter(a.to, a.audience))
+        not_copy = []
+        for x in a.not_copy:
+            if not re.fullmatch(r"L\d+", x.strip()):
+                raise Refused("Refused: --not-copy takes one line, like L3. Nothing was written.")
+            not_copy.append(x.strip())
+        covered = refuse_copies(text, tpl, brief_copy, is_patient_letter(a.to, a.audience), not_copy)
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2
     try:
         flags = []
         md, dropped = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
-                            a.resolve, flags, include)
+                            a.resolve, flags, include, not_copy)
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -2183,6 +2228,8 @@ def main(argv=None):
         cut = list(dict.fromkeys(i for d in dropped for i in re.findall(r"\b[LR]\d+\b", d.split(":")[0])))
         print(f"Cut from this letter: {', '.join(cut)}." if cut else "Cut from this letter: lines not known.",
               file=sys.stderr)
+    for n in covered:
+        print(NOT_COPY_MARK.format(n=n), file=sys.stderr)              # beside the cut list; never written to disk
     for item in dict.fromkeys(c for i in include for c in SENSITIVE if c.lower() == i.lower()):
         print(f"Included by the brief: {item}.", file=sys.stderr)        # known item names only
     dropped.clear()

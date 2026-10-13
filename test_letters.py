@@ -914,13 +914,20 @@ def _patient_cli(tmp_path, notes=POD, brief="update to patient", extra=()):
 PATIENT_TAIL = "A letter to the patient can't be copied to anyone else. Write a separate letter for each other reader."
 
 
+def _copy_msg(where, tail):
+    """Brief and template copy requests keep their wording; a notes line gets the round 10 wording."""
+    if where.startswith("at L"):
+        return L.NOTE_COPY_REFUSED.format(n=int(where[4:]))
+    return f"Refused: copy request {where}. {tail}"
+
+
 def _nline(text):
     return f"at L{len(text.splitlines())}"
 
 
 def _assert_copy_refused(r, out, where):
     assert r.returncode == 2
-    assert r.stderr.strip() == f"Refused: copy request {where}. {PATIENT_TAIL}"
+    assert r.stderr.strip() == _copy_msg(where, PATIENT_TAIL)
     assert r.stdout == "" and (not out.exists() or list(out.iterdir()) == [])
 
 
@@ -942,7 +949,7 @@ def test_patient_letter_copy_via_notes_refused(tmp_path, line):
     n = tmp_path / "notes.txt"; n.write_text((TPL / "podiatry_referral.txt").read_text() + "- " + line + "\n")
     _assert_copy_refused(*_patient_cli(tmp_path, notes=n), _nline(n.read_text()))
     assert "Synth" not in L.copy_refusal("at L1", True) and "podiatry" not in L.copy_refusal("at L1", True)
-    with pytest.raises(Refused, match="A letter to the patient can't be copied"):
+    with pytest.raises(Refused, match="letters never sends copies"):
         build(F("podiatry_referral.txt") + line + "\n", "gp-update", "Patient", audience="patient")
 
 
@@ -958,7 +965,7 @@ def test_patient_letter_ends_with_privacy_line(tmp_path):
 
 
 def test_non_patient_letters_refuse_copies_and_have_no_privacy_line(tmp_path):
-    with pytest.raises(Refused, match="letters can't send copies"):
+    with pytest.raises(Refused, match="letters never sends copies"):
         build(F("podiatry_referral.txt") + "cc: GP\n", "referral", "Podiatry")
     md, _ = build(F("podiatry_referral.txt"), "referral", "Podiatry")
     assert L.PATIENT_PRIVACY not in md and md.rstrip().endswith("Draft: check against the record before sending.")
@@ -985,7 +992,7 @@ def _gp_cli(tmp_path, notes=CKD, brief="update to GP", extra=()):
 
 def _assert_gp_refused(r, out, where):
     assert r.returncode == 2
-    assert r.stderr.strip() == f"Refused: copy request {where}. {EXACT_TAIL}"
+    assert r.stderr.strip() == _copy_msg(where, EXACT_TAIL)
     assert r.stdout == "" and (not out.exists() or list(out.iterdir()) == [])
 
 
@@ -1018,7 +1025,7 @@ def test_gp_letter_without_copy_still_written(tmp_path):
 
 def test_build_refuses_copy_for_gp():
     text = CKD_FREE.read_text(encoding="utf-8") + "\ncc: renal clinic\n"
-    with pytest.raises(Refused, match="letters can't send copies"):
+    with pytest.raises(Refused, match="letters never sends copies"):
         build(text, "gp-update", "GP")
 
 
@@ -1061,7 +1068,7 @@ def test_cc_daughter_refused_with_line_and_no_name(tmp_path):
     assert where == f"at L{len(n.read_text().splitlines())}"
     rp, outp = _gp_cli(tmp_path / "p", notes=n, brief="update to patient", extra=("--audience", "patient"))
     assert rp.returncode == 2 and "Jane" not in rp.stdout + rp.stderr
-    assert rp.stderr.strip() == f"Refused: copy request {where}. {PATIENT_TAIL}"
+    assert rp.stderr.strip() == _copy_msg(where, PATIENT_TAIL)
 
 
 # ---------- sensitive reason cut everywhere: medicine lines, background, results ----------
@@ -2446,14 +2453,14 @@ def test_r9_copy_request_in_a_sentence_refused_exit_2_nothing_written(tmp_path, 
     r = subprocess.run(CLI + [str(n), "--brief", brief, "--out", str(out)] + (["--final"] if final else []),
                        capture_output=True, text=True)
     assert r.returncode == 2, (r.returncode, r.stderr)
-    assert r.stderr.strip() == f"Refused: copy request at L6. {tail}" and r.stdout == ""   # History line
+    assert r.stderr.strip() == L.NOTE_COPY_REFUSED.format(n=6) and r.stdout == ""   # History line
     assert not out.exists()
     assert "son" not in r.stderr and "daughter" not in r.stderr.lower()
 
 
 @pytest.mark.parametrize("sentence", COPY_SENTENCES)
 def test_r9_copy_request_in_a_sentence_refused_by_build(sentence):
-    with pytest.raises(Refused, match=r"^Refused: copy request at L5\. "):
+    with pytest.raises(Refused, match=r"^Refused: line L5 mentions a copy\. "):
         build(COPY_BASE + sentence + "\n", "gp-update", "Patient", audience="patient")
 
 
@@ -2581,3 +2588,69 @@ def test_r10_explicit_no_known_allergies_line(tmp_path):
     r, out = _run_t(tmp_path, tpl(question="Is it the joint?", problems=["knee pain"]), "--brief", "update to GP")
     assert r.returncode == 0, r.stderr
     assert section((out / "letter.md").read_text(), "Allergies").startswith("- No known drug allergies")
+
+
+# ---------- round 10 item 2: copy check (copy, send, post, forward, give) and --not-copy ----------
+@pytest.mark.parametrize("line", ["Can you also post this to my daughter please.", "Please forward the letter to Mr Quell.",
+                                  "Give a copy of the notes to her carer.", "Send this to the practice nurse.",
+                                  "I'd like a copy given to Mr Hale next door too."])
+@pytest.mark.parametrize("final", [False, True])
+@pytest.mark.parametrize("brief", ["letter to the patient", "update to GP"])
+def test_r10_copy_words_refused_exit_2_both_modes(tmp_path, line, final, brief):
+    text = tpl(question="Is she safe at home?", history=line)
+    r, out = _run_t(tmp_path, text, "--brief", brief, *(["--final"] if final else []))
+    n = int(line_of(text, "History")[1:])
+    assert r.returncode == 2 and r.stdout == "" and not out.exists()
+    assert r.stderr.strip() == L.NOTE_COPY_REFUSED.format(n=n)
+
+
+def test_r10_copies_per_ml_is_not_a_copy_request(tmp_path):
+    r, out = _run_t(tmp_path, tpl(question="Is it suppressed?", history="viral load <20 copies/mL"),
+                    "--brief", "letter to the patient")
+    assert r.returncode == 0, r.stderr
+
+
+def test_r10_not_copy_covers_one_line_and_prints_beside_cut_list(tmp_path):
+    text = tpl(question="Is it the joint?", problems=["knee pain"], history="Reviewed copy of old notes.")
+    n = int(line_of(text, "History")[1:])
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    assert r.returncode == 2 and r.stderr.strip() == L.NOTE_COPY_REFUSED.format(n=n)
+    r, out = _run_t(tmp_path / "b", text, "--brief", "update to GP", "--not-copy", f"L{n}")
+    assert r.returncode == 0, r.stderr
+    assert f"Line L{n} marked as not a copy request" in r.stderr.splitlines()
+    assert [p.name for p in out.iterdir()] == ["letter.md"]
+
+
+def test_r10_not_copy_is_one_line_per_flag(tmp_path):
+    text = tpl(question="Is it the joint?", problems=["knee pain", "old copy of scan reviewed"], history="Reviewed copy of old notes.")
+    a, b = int(line_of(text, "old copy")[1:]), int(line_of(text, "History")[1:])
+    r, _ = _run_t(tmp_path, text, "--brief", "update to GP", "--not-copy", f"L{a}")
+    assert r.returncode == 2 and r.stderr.strip() == L.NOTE_COPY_REFUSED.format(n=b)
+    r, _ = _run_t(tmp_path / "b", text, "--brief", "update to GP", "--not-copy", f"L{a}", "--not-copy", f"L{b}")
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("brief", ["update to GP", "letter to the patient", "referral to cardiology"])
+@pytest.mark.parametrize("line", ["Please send a copy to her son.", "Post this to my daughter."])
+def test_r10_not_copy_never_covers_a_line_naming_someone(tmp_path, brief, line):
+    text = tpl(question="Is it the joint?", problems=["knee pain"], history=line)
+    n = int(line_of(text, "History")[1:])
+    r, out = _run_t(tmp_path, text, "--brief", brief, "--not-copy", f"L{n}")
+    assert r.returncode == 2 and not out.exists() and r.stdout == ""
+    assert r.stderr.strip() == L.NOT_COPY_REFUSED.format(n=n)
+
+
+def test_r10_gp_letter_not_copy_send_a_copy_to_her_son_still_refuses(tmp_path):
+    text = tpl(question="Is it the joint?", problems=["knee pain"], history="send a copy to her son")
+    n = int(line_of(text, "History")[1:])
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP", "--not-copy", f"L{n}")
+    assert r.returncode == 2 and r.stderr.strip() == (
+        f"Refused: line L{n} names someone to send a copy to, so `--not-copy` can't be used on it. "
+        "letters never sends copies. Nothing was written.")
+    assert not out.exists()
+
+
+def test_r10_sent_specimen_is_not_a_copy_request(tmp_path):
+    r, _ = _run_t(tmp_path, tpl(question="Is it infected?", pending=["urine culture, sent 1937-06-02, GP"],
+                                history="Urine culture sent to the lab."), "--brief", "update to GP")
+    assert r.returncode == 0, r.stderr
