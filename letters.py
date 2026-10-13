@@ -910,10 +910,19 @@ def needs_flag(tok, prev="", exact=()):
     return low not in WORDS     # nbm, cx (and Nbm at sentence start); drug names too (acceptable)
 
 
+def context_ok(m):
+    """Signed context exemptions (ruling 14 Oct 2026) for a TOKEN match m: 'Ms' straight before a capitalised name
+    (Ms Brown) is a title; 'ms' straight after a number (QTc 480 ms) is milliseconds. Neither is flagged."""
+    tok, s = m.group(0), m.string
+    if tok == "Ms" and re.match(r"\.?\s+[A-Z][a-z]", s[m.end():]):
+        return True
+    return tok == "ms" and re.search(r"\d\s*$", s[:m.start()]) is not None
+
+
 def flagged_tokens(s, exact=()):
     out, prev = [], ""
     for m in TOKEN.finditer(s):
-        if needs_flag(m.group(0), prev, exact):
+        if needs_flag(m.group(0), prev, exact) and not context_ok(m):
             out.append(m.group(0))
         prev = m.group(0)
     return out
@@ -966,6 +975,8 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             ab, before = m.group(0), prev[0]
             prev[0] = ab
             in_reason = rs is not None and m.start() >= rs   # a reason: never the misspelling flag; abbreviations
+            if ab not in resolved and ab not in single and context_ok(m):
+                return ab                                    # Ms Brown, 480 ms: kept as written, no flag
             if in_reason and ab not in resolved and ab not in single and not reason_flag(ab, before, exact):
                 return ab                                    # ordinary English reason: kept as written, no flag
             if ab in resolved:
@@ -1086,7 +1097,7 @@ def check(md, sources, letter_type):
         for m in TOKEN.finditer(scan):
             ab = m.group(0)
             flag = reason_flag if rs is not None and m.start() >= rs else needs_flag
-            if flag(ab, prev, exact) and not FLAG_ANY.match(scan, m.end()):
+            if flag(ab, prev, exact) and not context_ok(m) and not FLAG_ANY.match(scan, m.end()):
                 problems.append(f"Refused: abbreviation not flagged or resolved at {at}.")
             prev = ab
         for m in DOSE_U.finditer(scan):

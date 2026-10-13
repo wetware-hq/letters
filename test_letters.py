@@ -3173,13 +3173,13 @@ def test_r11f_multi_meaning_shorthand_flagged_inside_medicine_reason(tmp_path, a
     assert any("abbreviation on line " + line_of(text, "amlodipine") in l for l in r.stderr.splitlines())
 
 
-def test_r11f_unknown_lowercase_word_in_reason_not_flagged_single_meaning_exempt(tmp_path):
+def test_r11f_unknown_word_in_reason_flagged_single_meaning_exempt(tmp_path):
     text = tpl(question="Please review.", problems=("review",),
                meds=("amlodipine 5 mg daily reason: cx", "metformin 500 mg bd reason: CKD"),
                actions=("review in 2 weeks, GP",))
     r, out = _run_t(tmp_path, text, "--brief", "update to GP")
     md = (out / "letter.md").read_text()
-    assert f"cx {L.FLAG}" not in md and L.DRUG_FLAG not in md        # ruling 13 Oct: other lowercase words never flagged
+    assert f"cx {L.FLAG}" in md and L.DRUG_FLAG not in md            # cx is on shorthand.txt (ruling 14 Oct): flagged
     assert "chronic kidney disease (CKD)" in md and f"CKD {L.FLAG}" not in md
 
 
@@ -3301,7 +3301,7 @@ def test_r11g_reflux_in_reason_not_flagged(tmp_path, brief):
 
 def test_r11g_reason_flag_rule_unit():
     assert all(L.reason_flag(t) for t in ("ms", "pe", "MS", "QZX"))
-    assert not any(L.reason_flag(t) for t in ("reflux", "heartburn", "cx"))
+    assert not any(L.reason_flag(t) for t in ("reflux", "heartburn")) and L.reason_flag("cx")
 
 
 # ---- round 11 follow-up 9: off-list frequencies, written from the LOCKED medicine-line syntax only ----
@@ -3374,3 +3374,47 @@ def test_r11h_two_line_brief_letter_and_checker(tmp_path, brief, inc):
         assert r.returncode == 0, (how, r.stderr)
         for item in inc:
             assert f"Included by the brief: " in r.stdout + r.stderr and item in r.stdout + r.stderr
+
+
+
+# ---- round 11 follow-up 11: Ms before a name and ms after a number are not shorthand (ruling 14 Oct 2026) ----
+def _ctx_notes(recipient="General practice", question="Please review.", result="ECG normal", reason="arthritis",
+               history=""):
+    return ("Patient: SYNTH-9302\nDate: 1936-08-05\nRecipients: " + recipient + "\nQuestion: " + question +
+            "\nProblems:\n- palpitations\nHistory: " + history + "\nMedicines:\n- methotrexate 15 mg weekly reason: "
+            + reason + "\nAllergies:\n- No known allergies\nResults:\n- " + result +
+            " 1936-08-05\nPending:\nActions:\n- review in 2 weeks\n")
+
+
+CTX = {"recipients": dict(recipient="Ms Brown"),
+       "body": dict(question="Ms Brown asks about the QTc 480 ms result.", history="Seen with Ms Brown. QTc 480 ms."),
+       "results": dict(result="QTc 480 ms, reviewed with Ms Brown"),
+       "reason": dict(reason="QTc 480 ms per Ms Brown")}
+
+
+@pytest.mark.parametrize("where", list(CTX))
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11i_title_and_milliseconds_not_flagged(tmp_path, where, brief):
+    text = _ctx_notes(**CTX[where])
+    c = _check(tmp_path / "chk", text)
+    assert c.returncode == 0, c.stderr
+    r, out = _run_t(tmp_path / "cli", text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert f"Ms {L.FLAG}" not in md and f"ms {L.FLAG}" not in md, md
+    assert "Ms Brown" in md or where == "recipients"
+
+
+@pytest.mark.parametrize("where,kw", [("body", dict(history="Seen for ms.")), ("body", dict(history="Seen for pe.")),
+                                      ("reason", dict(reason="ms")), ("reason", dict(reason="pe")),
+                                      ("reason", dict(reason="Ms")), ("reason", dict(reason="cx"))])
+def test_r11i_shorthand_without_context_still_flagged(tmp_path, where, kw):
+    r, out = _run_t(tmp_path, _ctx_notes(**kw), "--brief", "update to GP")
+    assert r.returncode == 0, r.stderr
+    assert L.FLAG in (out / "letter.md").read_text()
+
+
+def test_r11i_whole_words_only_and_context_unit():
+    assert L.flagged_tokens("Ms Brown, interval 480 ms, 480ms") == []
+    assert L.flagged_tokens("status permit crawl rapid excess") == []                 # ms, pe, cp, ra, cx only as whole words
+    assert L.flagged_tokens("ms noted") == ["ms"] and L.flagged_tokens("Ms noted") == ["Ms"]
