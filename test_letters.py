@@ -2929,3 +2929,15 @@ def test_r10_empty_allergies_and_medicines_patient_wording(tmp_path):
     assert r.returncode == 3 and not out.exists()
     m = re.search(r"--final refused: (\d+) flag", r.stderr)
     assert int(m.group(1)) == len([l for l in r.stderr.splitlines() if l.startswith("Flag: ")])
+
+
+# ---------- round 11 ----------
+@pytest.mark.parametrize("nka", ["No known allergies", "NKDA", "nil known", "Nil known allergies."])
+def test_r11_no_dash_no_known_allergies_line_accepted(tmp_path, nka):
+    text = tpl(question="Please review.", problems=("cough",), meds=("amlodipine 5 mg daily",), allergies=(),
+               actions=("review in 2 weeks, GP",)).replace("Allergies:\n", f"Allergies:\n{nka}\n")
+    r, out = _run_t(tmp_path / nka.replace(" ", "_"), text, "--brief", "update to GP")
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert "No known drug allergies" in md
+    assert "allergies field" not in r.stderr and "Refused" not in r.stderr

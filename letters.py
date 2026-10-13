@@ -2097,6 +2097,8 @@ def from_template(text):
             if conv is None:
                 bad(n)
             out.append(conv); continue
+        if field == "Allergies" and NKA_RX.match(line) and out and out[-1] == "#field Allergies":
+            out.append("Allergy: nil known"); continue           # 'No known allergies' / NKDA / nil known, no dash
         m = FIELD_RX.match(line)
         f = m.group("f").capitalize() if m else None
         if f not in TEMPLATE_FIELDS:
