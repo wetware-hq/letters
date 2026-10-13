@@ -14,7 +14,7 @@ INCIDENT = ("This looks like real patient information. Don't paste it here; dele
             "you copied it and report it to your organisation's privacy officer.")
 TYPES = ("referral", "discharge", "gp-update", "specialist-reply")
 AUDIENCES = ("gp", "specialist", "patient")
-NEVER_CUT = ("allergies", "meds", "med_changes", "pending", "followup")
+NEVER_CUT = ("allergies", "results", "meds", "med_changes", "pending", "followup")
 DRAFT_MARK = "**DRAFT, unsigned**"
 FOOTER = ["---", "", "Clinician: [name]  ", "Role: [role]  ", "Signature: [unsigned]", "",
           "Draft: check against the record before sending.", ""]
@@ -257,6 +257,7 @@ DOSE_RX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?(mg|mcg|micrograms?|g|mL|ml|u
 FREQ_RX = re.compile(r"(?<![A-Za-z])(daily|bd|tds|qid|nocte|mane|prn|weekly|od)(?![A-Za-z])", re.I)
 STOP_RX = re.compile(r"\b(?:stopped|ceased|withheld|stop)\b", re.I)
 ALLERGY_RX = re.compile(r"\b(?:allerg\w*|reactions?|intoleran\w*|anaphyla\w*)\b", re.I)
+PER_LITRE = re.compile(r"\d(?:\.\d+)?\s?[A-Za-z\u00b5]*/L(?![A-Za-z])")
 MED_HEAD = re.compile(r"\b(?:drugs?|med\w*|chart|prescri\w*|tablets?|regimen|rx)\b", re.I)
 _DRUGS = {}
 
@@ -306,8 +307,12 @@ def content_kind(head, body):
         return "stop"
     if drugs and (DOSE_RX.search(whole) or FREQ_RX.search(whole)):
         return "med"
-    if DOSE_RX.search(whole) and FREQ_RX.search(whole):
+    # Signed rule (13 Oct 2026): a dose in mg, g, mcg, units or mL (no "/L") is a medicine; a per-litre
+    # concentration is a result only when the line has no frequency word, otherwise a medicine.
+    if DOSE_RX.search(whole):
         return "med"
+    if PER_LITRE.search(whole):
+        return "med" if FREQ_RX.search(whole) else "result"
     return None
 
 
@@ -323,6 +328,8 @@ def classify(line):
     if m:
         k = content_kind(m.group("tag").strip(), m.group("body").strip())
         if k and (ALLERGY_RX.search(m.group("tag")) or MED_HEAD.search(m.group("tag")) or STOP_RX.search(m.group("tag"))):
+            return k, m.group("body").strip()
+        if k == "result":
             return k, m.group("body").strip()
         if k:
             return k, line
@@ -377,9 +384,9 @@ def split_med_lists(lines):
         m = TAG.match(line)
         kind, body = classify(line)
         converted = False
-        if kind in ("med", "allergy", "stop") and not (m and tag_kind(m.group("tag"))):
+        if kind in ("med", "allergy", "stop", "result") and not (m and tag_kind(m.group("tag"))):
             converted = True
-            line = f"{ {'med': 'Med', 'allergy': 'Allergy', 'stop': 'Stop'}[kind]}: {body}"   # unfamiliar heading or none
+            line = f"{ {'med': 'Med', 'allergy': 'Allergy', 'stop': 'Stop', 'result': 'Result'}[kind]}: {body}"   # unfamiliar heading or none
             m = TAG.match(line)
         if kind == "med" and m and (m.group("tag").strip().lower() in MED_LIST_TAGS or converted):
             parts = [p.strip() for p in re.split(r"[,;](?![^()]*\))", m.group("body")) if p.strip()]
@@ -1166,6 +1173,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
         md = apply_cut_rule(md, text, dropped, flags, TITLES[letter_type])
         md = flag_cuts(md, dropped, flags, TITLES[letter_type])
     refuse_missing_medicines(md, text)
+    refuse_missing_results(md, text, dropped)
     return md, dropped
 
 
@@ -1531,6 +1539,30 @@ def refuse_missing_medicines(md, text):
                 plain_max = re.sub(PLAIN[-1][0], PLAIN[-1][1], m.group(0))
                 if _norm(m.group(0)) not in plain and _norm(plain_max) not in plain:
                     raise Refused(MAX_MISSING.format(lid=lid))
+
+
+RESULT_MISSING = "Refused: a result on line {lid} of the notes is missing from this letter. Nothing was written."
+
+
+def refuse_missing_results(md, text, dropped):
+    """Post-write guard, every letter: each result line with a unit keeps its value and unit in the lines that
+    cite it, unless the item on that line was cut."""
+    cut = {i.strip() for d in dropped for i in d.split(":")[0].split(",")
+           if "result without a unit" not in d}
+    cited = {}
+    for _, line in _body_lines(md):
+        for i in _line_ids(line):
+            cited[i] = cited.get(i, "") + " " + _norm(split_ids(line)[0])
+    for lid, (kind, body) in _source_lines(text).items():
+        if kind != "result" or lid in cut:
+            continue
+        r = RES.match(body)
+        if not r or not r.group("unit") or re.match(r"^[\d.]", r.group("unit")):
+            continue
+        plain = cited.get(lid, "")
+        if not re.search(rf"(?<![\d.]){re.escape(r.group('val'))}(?![\d])", plain) or \
+                _norm(r.group("unit")) not in plain:
+            raise Refused(RESULT_MISSING.format(lid=lid))
 
 
 def finalise(md):

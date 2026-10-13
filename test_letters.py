@@ -2032,3 +2032,46 @@ def test_r8_referral_without_question_or_problem_opens_with_first_note_line():
     notes = "Patient: SYNTH-9808\n1937-10-13 headaches most mornings, worse lying down.\nDrug chart: paracetamol 1 g prn\n"
     md, _ = _r8(notes, t="referral", to="Neurology")
     assert "Reason for referral: headaches most mornings" in md and "Reason for referral not documented" not in md
+
+
+# ---------- signed result-vs-medicine rule (13 Oct 2026) ----------
+RES_NOTES = ("Patient: SYNTH-7101\n1937-03-02 Clinic.\nProblem: tiredness\n{line}\n"
+             "Med: zorvatide 500 mg daily (for tiredness)\nPlan: review in 4 weeks\n")
+
+
+@pytest.mark.parametrize("line,kind", [
+    ("Serum lithium 0.9 mmol/L", "result"),
+    ("Sodium 138 mmol/L", "result"),
+    ("Bloods: CRP 12 mg/L", "result"),
+    ("Zorvex 5 mg/L daily", "med"),
+    ("Zorvex 5 mmol/L nocte", "med"),
+    ("Zorvex 500 mg", "med"),
+    ("Zorvex 2 g", "med"),
+    ("Zorvex 250 mcg", "med"),
+    ("Zorvex 10 units", "med"),
+    ("Zorvex 5 mL", "med"),
+])
+def test_signed_result_or_medicine(line, kind):
+    assert L.classify(line)[0] == kind
+
+
+def test_untagged_result_kept_in_letter():
+    md = make_letter(RES_NOTES.format(line="Sodium 138 mmol/L"), "referral", "Renal")
+    assert "138 mmol/L" in md
+
+
+def test_untagged_lithium_result_kept_for_patient():
+    md = make_letter(RES_NOTES.format(line="Serum lithium 0.9 mmol/L"), "gp-update", "GP", audience="patient")
+    assert "0.9 mmol/L" in md
+
+
+def test_result_missing_from_letter_refused(monkeypatch):
+    real = L.render
+    monkeypatch.setattr(L, "render", lambda *a, **k: real(*a, **k).replace("138 mmol/L", "mmol/L"))
+    with pytest.raises(L.Refused, match="a result on line"):
+        make_letter(RES_NOTES.format(line="Sodium 138 mmol/L"), "referral", "Renal")
+
+
+def test_template_cannot_drop_results():
+    md = make_letter(RES_NOTES.format(line="Sodium 138 mmol/L"), "referral", "Renal", template="{{question}}\n")
+    assert "138 mmol/L" in md
