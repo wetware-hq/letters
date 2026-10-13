@@ -404,3 +404,35 @@ def test_no_internal_names_or_paths():
             s = p.read_text()
             for bad in ("/workspace", "/home/", "BIO ", "telegram", "patient-store"):
                 assert bad not in s, (p, bad)
+
+
+# ---------- checker hardening: expansions and rewrites must be earned by the cited lines ----------
+def test_planted_expanded_diagnosis_not_in_notes_refused():
+    _, md, src = _good()
+    assert not any(re.search(r"\bAF\b|atrial|fibrillation", v[0] + " " + (v[1] or "")) for v in src.values())
+    with pytest.raises(Refused, match="word not in cited lines.*(atrial|fibrillation)"):
+        check(md.replace("exertional chest pain [L5]", "exertional chest pain, atrial fibrillation [L5]"), src, "referral")
+
+
+def test_expansion_whose_abbreviation_is_in_uncited_line_refused():
+    text = ("Patient: SYNTH-2001\n1937-04-01 Clinic review.\nProblem: palpitations\nPMHx: AF\n"
+            "Follow-up: GP review in 2 weeks")
+    md, _ = build(text, "gp-update", "General practice")
+    src = parse(text)[1]
+    line = next(l for l in md.splitlines() if l.startswith("- palpitations"))
+    with pytest.raises(Refused, match="word not in cited lines"):
+        check(md.replace(line, line.replace("palpitations", "palpitations, atrial fibrillation")), src, "gp-update")
+
+
+def test_legit_expansion_still_passes():
+    text = ("Patient: SYNTH-2002\n1937-04-01 Clinic review.\nProblem: AF\nFollow-up: GP review in 2 weeks")
+    md, _ = build(text, "gp-update", "General practice")
+    assert "atrial fibrillation (AF)" in md
+    assert check(md, parse(text)[1], "gp-update")
+
+
+def test_rewritten_label_not_earned_by_cited_line_refused():
+    _, md, src = _good()
+    with pytest.raises(Refused, match="word not in cited lines"):
+        check(md.replace("exertional chest pain [L5]", "exertional chest pain, not taking medicines as prescribed [L5]"),
+              src, "referral")

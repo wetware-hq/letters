@@ -436,20 +436,38 @@ DIRECTION = re.compile(r"\b(improv\w*|rising|rose|risen|falling|fell|fallen|wors
                        r"normalis\w*|settl\w*)\b", re.I)
 _FIXED = [*EMPTY.values(), ND, "reaction", "Reason for change", "Who follows up", "Who When Action", "sent on an "
           "undocumented date", "No known drug allergies", "resolved ruled out", "started changed stopped restarted from now",
-          "not taking medicines as prescribed", "possible", " ".join(MONTHS), "Test Results"]
+          "possible", " ".join(MONTHS), "Test Results"]
 VOCAB = set()
-for _s in _FIXED + list(ABBR.values()) + [r for _, r in PLAIN + ALWAYS]:
+for _s in _FIXED:   # only fixed scaffolding; expansions and rewrites are earned per cited line
     VOCAB.update(w.lower() for w in re.findall(r"[A-Za-z][A-Za-z-]+", _s))
 WORD = re.compile(r"[A-Za-z][A-Za-z-]{3,}")
 NUM = re.compile(r"\d+(?:\.\d+)?")
 OUTDATE = re.compile(r"\b(\d{1,2}) (" + "|".join(MONTHS) + r") (1937)\b")
 
 
+# Fixed list of label rewrites: (pattern that must appear in the cited lines, wording it may become).
+LABEL_REWRITES = [(NONCOMPLIANT, "not taking medicines as prescribed")]
+
+
+def _words(s):
+    return {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z-]+", s)}
+
+
 def _source_words(src):
+    """Words a line may use: those in its cited lines, plus expansions/rewrites earned by those same lines only."""
     words = {w.lower() for w in WORD.findall(src)}
-    for ab, full in ABBR.items():
-        if re.search(rf"\b{re.escape(ab)}\b", src):
-            words.update(full.lower().split())
+    for ab, full in ABBR.items():                      # fixed dictionary, abbreviation must be in the cited lines
+        if re.search(rf"(?<![\w-]){re.escape(ab)}(?![\w-])", src):
+            words |= _words(full)
+    for pat, rep in ALWAYS:
+        if re.search(pat, src, re.I):
+            words |= _words(rep)
+    for pat, rep in PLAIN:
+        if re.search(pat, src):
+            words |= _words(rep)
+    for pat, rep in LABEL_REWRITES:
+        if pat.search(src):
+            words |= _words(rep)
     return words
 
 
