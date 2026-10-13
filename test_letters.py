@@ -684,3 +684,18 @@ def test_resolve_as_written_closes_flag_without_expansion():
     md, _ = build(text, "gp-update", "General practice", resolve=["ramipril=ramipril"])
     assert "- ramipril 5 mg daily [L3, R1]" in md and L.FLAG not in md
 
+
+# ---------- patient letters: plain words + (ABBR) first, plain words alone after ----------
+def test_patient_plain_words_first_use_then_plain_alone():
+    text = ("Patient: SYNTH-3401\n1937-05-01 Clinic review.\nProblem: CKD noted\nResult: eGFR 40 mL/min\n"
+            "1937-06-01 Review.\nProblem: CKD reviewed\nResult: eGFR 38 mL/min\nFollow-up: review in 2 weeks")
+    md = make_letter(text, "gp-update", "Patient", audience="patient")
+    assert md.count("long-term kidney disease (CKD)") == 1
+    assert "(CKD)" in md and md.count("CKD") == 1 and md.count("long-term kidney disease") >= 2
+    gp = make_letter(text, "gp-update", "General practice", audience="gp")
+    assert gp.count("chronic kidney disease (CKD)") == 1 and gp.count("CKD") >= 2
+
+
+def test_patient_golden_tds_plain_after_first_use():
+    md = (HERE / "golden" / "pneumonia_discharge_patient.md").read_text()
+    assert md.count("three times a day (tds)") == 1 and " tds" not in md.replace("(tds)", "")

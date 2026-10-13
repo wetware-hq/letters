@@ -503,7 +503,7 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             else:
                 return ab
             if ab in seen:
-                return ab
+                return full if audience == "patient" else ab
             seen.add(ab)
             return f"{full} ({ab})"
         text = TOKEN.sub(sub, text)

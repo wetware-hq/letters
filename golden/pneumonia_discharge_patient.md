@@ -27,11 +27,11 @@ This letter explains your care and what happens next.
 ## Changes to your medicines
 
 - Stopped on 3 Jun 1937: metformin 500 mg twice a day (bd). Reason for change: not documented. [L8, L12]
-- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] three times a day (tds). Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days. Reason for change: not documented. [L7, L15]
+- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] three times a day (tds). Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] three times a day for 4 more days. Reason for change: not documented. [L7, L15]
 
 ## Your medicines now
 
-- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds for 4 more days [L7, L15]
+- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] three times a day for 4 more days [L7, L15]
 
 ## Allergies
 
