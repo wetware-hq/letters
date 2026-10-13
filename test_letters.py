@@ -4012,14 +4012,64 @@ def _change_build(monkeypatch, drug, reason=None, to="GP", audience=None):
     return md, flags, next(l for l in md.splitlines() if l.startswith("- Changed"))
 
 
+def _kind_notes(kind, drug, reason=None):
+    tail = f" (reason: {reason})" if reason else ""
+    head = "Patient: SYNTH-9402\nAllergy: nil known\n1937-06-01 review.\n"
+    body = {
+        "changed": f"Med: {drug} 100 mg daily\n1937-06-10 review.\nMed: {drug} 200 mg daily{tail}\n",
+        "stopped": f"Med: ramipril 5 mg daily\nMed: {drug} 100 mg daily\n1937-06-10 review.\nStop: {drug} 100 mg daily{tail}\n",
+        "started": f"Admission: chest infection\n1937-06-10 review.\nMed: {drug} 100 mg daily{tail}\n",
+        "restarted": (f"Med: {drug} 100 mg daily\n1937-06-05 review.\nStop: {drug} 100 mg daily\n1937-06-10 review.\n"
+                      f"Med: {drug} 100 mg daily{tail}\n"),
+    }[kind]
+    return head + body + "Question: is she well?\n"
+
+
+def _kind_build(monkeypatch, kind, drug, reason=None):
+    monkeypatch.setattr(L, "_TEMPLATE", [])
+    monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
+    flags = []
+    md, _ = build(_kind_notes(kind, drug, reason), "gp-update", "GP", flags=flags)
+    lines = [l for l in md.splitlines() if l.startswith("- " + kind.capitalize() + " on")]
+    assert len(lines) == 1, md
+    return md, flags, lines[0]
+
+
+def _final_form(line):
+    return re.sub(r" \[[LR]\d+(?:, [LR]\d+)*\]", "", line)     # exactly what --final does to a line
+
+
+@pytest.mark.parametrize("kind", ["changed", "stopped", "started", "restarted"])
 @pytest.mark.parametrize("drug,reason,words", CHANGE_CASES)
-def test_r11r_change_line_missing_reason_identical_to_cut_reason(drug, reason, words, monkeypatch):
-    _, _, cut = _change_build(monkeypatch, drug, reason)
-    md, _, missing = _change_build(monkeypatch, drug, None)
-    # byte-identical once draft-only flags are removed (a draft spelling flag can differ; --final refuses while any is open)
-    assert FLAG_RX.sub("", missing).encode() == FLAG_RX.sub("", cut).encode()
-    assert FLAG_RX.sub("", missing) == f"- Changed on 10 Jun 1937: from {drug} 100 mg daily. Now: {drug} 200 mg daily. [L3, L5]"
-    assert "not documented" not in missing and "Reason for change" not in md
+def test_r11r_change_line_missing_reason_identical_to_cut_reason(drug, reason, words, kind, monkeypatch):
+    """Draft: the line is compared byte for byte with nothing stripped, and the letter header too (no inline marker
+    may differ). Final: the --final form of both lines is byte-identical."""
+    cmd, cflags, cut = _kind_build(monkeypatch, kind, drug, reason)
+    mmd, mflags, missing = _kind_build(monkeypatch, kind, drug, None)
+    assert missing.encode() == cut.encode()                                         # draft, nothing stripped
+    head = lambda md: next(l for l in md.splitlines() if l.startswith("**Letter:**"))
+    assert head(mmd).encode() == head(cmd).encode()                                 # no header marker differs
+    assert _final_form(missing).encode() == _final_form(cut).encode()               # final
+    assert "not documented" not in missing and "Reason for change" not in mmd + cmd
+    assert L.FLAG_ANY.sub("", missing).endswith("]") and "reason" not in L.FLAG_ANY.sub("", missing).lower()
+    lid = _line_ids(missing)[-1]
+    assert L.NO_REASON_NOTICE.format(lid=lid) in L.printed_flags(mflags, mmd)       # screen only
+    assert L.MED_NOTICE.format(lid=lid) in L.printed_flags(cflags, cmd)
+    with pytest.raises(Refused, match="--final refused"):                            # the cut still blocks --final
+        L.finalise(cmd, len(L.printed_flags(cflags, cmd)), 1)
+
+
+def _line_ids(line):
+    return re.findall(r"\b[LR]\d+\b", re.findall(r"\[[LR][^\]]*\]\s*$", line)[-1])
+
+
+@pytest.mark.parametrize("kind", ["changed", "started", "restarted"])
+def test_r11r_missing_reason_final_letter_line_matches_cut_draft_line(kind, monkeypatch):
+    _, _, cut = _kind_build(monkeypatch, kind, "ramipril", "BRCA2 pathogenic variant")
+    md, flags, missing = _kind_build(monkeypatch, kind, "ramipril", None)
+    shown = L.printed_flags(flags, md)
+    fin = L.finalise(md, len(shown), 0)                                             # the notice doesn't block
+    assert _final_form(cut) in fin.splitlines() and _final_form(missing) in fin.splitlines()
 
 
 def _stop_text(drug, reason=None):
@@ -4030,15 +4080,23 @@ def _stop_text(drug, reason=None):
 
 @pytest.mark.parametrize("drug,reason,words", STOP_CASES)
 def test_r11r_stop_line_missing_reason_identical_to_cut_reason(tmp_path, drug, reason, words):
-    lines = []
+    """Template notes through the letter command: the whole draft letter.md is byte-identical, nothing stripped."""
+    files, lines = [], []
     for name, why in (("cut", reason), ("missing", None)):
         r, out = _run_t(tmp_path / name, _stop_text(drug, why), "--brief", "update to GP")
         assert r.returncode == 0, r.stderr
-        md = (out / "letter.md").read_text()
-        line = next(l for l in md.splitlines() if l.startswith("- Stopped"))
-        assert "not documented" not in line and "Reason for change" not in md
-        lines.append(FLAG_RX.sub("", line))
-    assert lines[0].encode() == lines[1].encode()                             # byte-identical
+        raw = (out / "letter.md").read_bytes()
+        files.append(raw)
+        line = next(l for l in raw.decode().splitlines() if l.startswith("- Stopped"))
+        assert "not documented" not in line and "Reason for change" not in raw.decode()
+        lines.append(line.encode())
+    assert lines[0] == lines[1] and files[0] == files[1]                         # draft, byte for byte
+    f, out = _run_t(tmp_path / "final", _stop_text(drug), "--brief", "update to GP", "--final")
+    if f.returncode == 0:                                                     # final: the missing-reason letter
+        fin = (out / "letter.md").read_text().splitlines()
+        assert _final_form(lines[0].decode()) in fin
+    else:                                     # held only by another open flag (spelling, linked medicine), never the notice
+        assert f.returncode == 3 and any(l.startswith("Flag: ") for l in f.stderr.splitlines()), f.stderr
 
 
 @pytest.mark.parametrize("drug", ["ramipril", "metformin", "atorvastatin"])

@@ -1668,6 +1668,24 @@ def flag_cuts(md, dropped, flags, title, text=None):
         return md
     if flags is not None:
         flags.extend(CUT_NOTICE.format(lid=l) for l in lids)
+    # Matching-line rule (round 11): a reason cut from a medicine line is flagged on screen only. When the medicine
+    # flag for that line is already on screen (it blocks --final), no header marker goes into letter.md, so a draft
+    # with a cut reason is byte-identical to one where no reason was written.
+    def med_reason_only(l):
+        ds = [d for d in dropped if l in re.findall(r"\b[LR]\d+\b", d.split(":")[0])]
+        ms = [re.match(r"^[LR\d, ]+: indication for (.+?) cut \(.*?, not relevant to (.*?)\)", d) for d in ds]
+        if not ds or not all(ms) or flags is None or MED_NOTICE.format(lid=l) not in flags:
+            return False
+        for m in ms:                       # the medicine itself is a linked medicine: marked either way, keep marker
+            drug, to = m.group(1), m.group(2)
+            for cat, v in load_linked().items():
+                names = list(v.get("medicines", [])) + list(v.get("brands", {}))
+                if not relevant(cat, to) and any(_term_re(w).search(drug) for w in names):
+                    return False
+        return True
+    lids = [l for l in lids if not med_reason_only(l)]
+    if not lids:
+        return md
     head = f"**Letter:** {title}"
     return md.replace(head, f"{head} {CUT_FLAG}", 1) if head in md else md.replace("\n", f" {CUT_FLAG}\n", 1)
 
