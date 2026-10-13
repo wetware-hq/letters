@@ -4,6 +4,7 @@
 # clinical = wording in GP and specialist letters; patient = plain words in patient letters.
 # Each entry needs clinician sign-off before it is added.
 # These 10 entries: signed off by the clinician reviewer and the educator.
+# GTN: signed plain words "glyceryl trinitrate (GTN)" (round 11 follow-up, 13 Oct 2026).
 # IV is deliberately NOT on this list and stays flagged.
 
 [abbreviations]
@@ -17,3 +18,4 @@ tds   = { clinical = "three times daily", patient = "three times a day" }
 qid   = { clinical = "four times daily", patient = "four times a day" }
 CKD   = { clinical = "chronic kidney disease", patient = "long-term kidney disease" }
 COPD  = { clinical = "chronic obstructive pulmonary disease", patient = "long-term lung disease that makes breathing harder" }
+GTN   = { clinical = "glyceryl trinitrate", patient = "glyceryl trinitrate" }

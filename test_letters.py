@@ -581,8 +581,10 @@ def test_ambiguous_abbreviation_flagged_not_expanded_and_final_refused(tmp_path,
 
 
 def test_single_meaning_list_has_exactly_ten_signed_off_entries():
+    # r11 follow-up: the ten signed entries plus GTN (signed plain words "glyceryl trinitrate (GTN)")
     p = HERE / "single_meaning.toml"
     sm = L.load_single_meaning(p)
+    assert sm.pop("GTN") == {"clinical": "glyceryl trinitrate", "patient": "glyceryl trinitrate"}
     assert sorted(sm) == sorted(SM_EXPECTED) and len(sm) == 10
     assert all(sm[k] == {"clinical": c, "patient": pl} for k, (c, pl) in SM_EXPECTED.items())
     assert "IV" not in sm and "signed off by the clinician reviewer and the educator" in p.read_text()
@@ -851,7 +853,8 @@ def test_non_wordlist_word_elsewhere_keeps_abbreviation_label():
 
 def test_shorthand_and_capitals_on_medicine_line_keep_abbreviation_label():
     md, _ = _one("Med: ramipril 5 mg nocte\nMed: GTN spray as needed")
-    assert f"nocte {L.FLAG}" not in md and f"GTN {L.FLAG}" in md      # r11: nocte has signed plain words
+    assert f"nocte {L.FLAG}" not in md and f"GTN {L.FLAG}" not in md   # r11: nocte and GTN have signed plain words
+    assert "glyceryl trinitrate (GTN)" in md
 
 
 def test_final_refused_while_drug_flag_open():
@@ -3232,3 +3235,15 @@ def test_r11f_entresto_combination_brand_refused(audience):
     with pytest.raises(L.Refused) as e:
         make_letter(COMBO_NOTES.format(line="Med: Entresto 49/51 mg bd"), "gp-update", "GP", audience=audience)
     assert str(e.value) == COMBO_MSG.format(n=4)
+
+
+
+@pytest.mark.parametrize("brief", ["update to patient", "update to GP"])
+def test_r11f_gtn_signed_plain_words_no_flag(tmp_path, brief):
+    text = tpl(question="Please review.", problems=("angina",), meds=("GTN 400 mcg prn",),
+               actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path, text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert "glyceryl trinitrate (GTN) 400 mcg" in md and f"GTN {L.FLAG}" not in md
+    assert not any(line_of(text, "GTN") in l for l in r.stderr.splitlines()), r.stderr
