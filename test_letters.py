@@ -175,9 +175,13 @@ def test_uncertainty_preserved():
     assert f"possible PE {L.FLAG}" in md and "pulmonary embolism" not in md and "likely viral illness" in md and "?PE" not in md
 
 
-def test_referral_without_question_fails():
-    with pytest.raises(Refused, match="this referral has no question"):
-        make_letter("SYNTH-1\n1937-01-01\nProblem: cough", "referral", "Respiratory")
+def test_referral_without_question_flagged_and_final_refused():
+    flags = []
+    md, _ = build("SYNTH-1\n1937-01-01\nProblem: cough", "referral", "Respiratory", flags=flags)
+    assert "Flag: this referral has no clear question. Add one before it's signed." in flags
+    assert L.QUESTION_FLAG in md
+    with pytest.raises(Refused, match="--final refused"):
+        L.finalise(md)
 
 
 def test_referral_opens_with_question():
@@ -1437,22 +1441,6 @@ def test_patient_hiv_reason_never_with_not_documented():
         assert not ("HIV" in l and REASON_ND in l), l
 
 
-@pytest.mark.parametrize("q", ["Question: is surgery needed?", "Question for cardiology: is surgery needed?",
-                               "Q: is surgery needed?", "Q for renal: is surgery needed?", "Request: please assess",
-                               "Is surgery needed?"])
-def test_referral_question_forms(q):
-    text = "Patient: SYNTH-5101\n1937-06-03 Clinic review.\nProblem: knee pain\n" + q + "\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "referral", "Orthopaedics")
-    assert "[L4]" in md.split("## ")[1]
-
-
-def test_referral_without_question_new_wording(tmp_path):
-    r, out = _cli_out(tmp_path, "Patient: SYNTH-5102\n1937-06-03 Clinic review.\nProblem: knee pain\n",
-                      "--brief", "referral to orthopaedics")
-    assert r.returncode == 2 and r.stderr.strip() == 'Refused: this referral has no question. Add a line starting "Question:".'
-    assert not out.exists() or list(out.iterdir()) == []
-
-
 @pytest.mark.parametrize("line", ["penicillin - none documented", "penicillin (reaction not documented)",
                                   "penicillin: unknown", "penicillin - nil known", "penicillin - reaction unknown"])
 def test_allergy_no_reaction_text_exact(line):
@@ -1460,3 +1448,39 @@ def test_allergy_no_reaction_text_exact(line):
     md, _ = build(text, "gp-update", "GP")
     al = section(md, "Allergies")
     assert al.startswith("- penicillin: reaction not documented [L3]"), al
+
+
+
+def test_referral_without_question_cli_flag_not_refusal(tmp_path):
+    r, out = _cli_out(tmp_path, "Patient: SYNTH-5102\n1937-06-03 Clinic review.\nProblem: knee pain\n",
+                      "--brief", "referral to orthopaedics")
+    assert r.returncode == 0 and (out / "letter.md").exists()
+    assert "Flag: this referral has no clear question. Add one before it's signed." in r.stderr.splitlines()
+    r, out = _cli_out(tmp_path, "Patient: SYNTH-5102\n1937-06-03 Clinic review.\nProblem: knee pain\n",
+                      "--brief", "referral to orthopaedics", "--final")
+    assert r.returncode == 3
+
+
+@pytest.mark.parametrize("later", ["Result: echo normal", "Echo showed normal function", "Result: echo EF 55 %"])
+def test_pending_cleared_by_later_result(later):
+    text = ("Patient: SYNTH-5301\n1937-06-03 Clinic review.\nPending: echo - cardiology to arrange\n"
+            "1937-06-10 Review.\n" + later + "\nFollow-up: review in 2 weeks\n")
+    md, _ = build(text, "gp-update", "GP")
+    assert "cardiology to arrange" not in section(md, "Results still to come")
+
+
+def test_pending_stays_when_result_is_earlier():
+    text = ("Patient: SYNTH-5302\n1937-06-03 Clinic review.\nResult: echo normal\n"
+            "1937-06-10 Review.\nPending: echo - cardiology to arrange\nFollow-up: review in 2 weeks\n")
+    md, _ = build(text, "gp-update", "GP")
+    assert "cardiology to arrange" in section(md, "Results still to come")
+
+
+def test_letter_saying_none_pending_while_pending_refused(monkeypatch):
+    text = "Patient: SYNTH-5303\n1937-06-03 Clinic review.\nPending: echo - cardiology to arrange\nFollow-up: review in 2 weeks\n"
+    real = L.section_items
+    monkeypatch.setattr(L, "section_items", lambda n, st, a: [] if n == "pending" else real(n, st, a))
+    monkeypatch.setattr(L, "refuse_missing_required", lambda md, text, ids=None: None)
+    with pytest.raises(Refused) as e:
+        build(text, "gp-update", "GP")
+    assert str(e.value) == "Refused: line L3 has a test still pending, but this letter says none are. Nothing was written."

@@ -259,12 +259,17 @@ def med_reason(drug):
     return drug, None
 
 
+def clear_pending(st, body):
+    """A later line that starts with a pending test's name gives its result: that test is no longer pending."""
+    low = body.lower()
+    for k in list(st["pending"]):
+        if k and re.match(rf"{re.escape(k)}\b", low):
+            st["pending"].pop(k)
+
+
 def tag_kind(tag):
-    """Map a note tag to its kind. 'Question for X', 'Q for X' and 'Request' are questions."""
-    t = re.sub(r"\s+", " ", tag.strip().lower())
-    if re.match(r"^(?:question|q)(?: for .+)?$", t) or t in ("request", "referral question"):
-        return "question"
-    return TAGS.get(t)
+    """Map a note tag to its kind."""
+    return TAGS.get(re.sub(r"\s+", " ", tag.strip().lower()))
 
 
 def _mkey(s):
@@ -296,9 +301,6 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
             body = clean_text(body, ids, to, dropped, med=kind in ("med", "stop"), keep=keep_indications)
             if not body:
                 continue
-            if not kind and body.rstrip().endswith("?"):
-                st["question"].append((body, ids))
-                continue
             if not kind:
                 pb = untagged_pending(body)
                 if pb:
@@ -312,6 +314,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                         if what and (what in k or k in what):
                             b, _, pids = st["problems"].pop(k)
                             (st["ruledout"] if ro else st["resolved"])[k] = (b, d, pids + ids)
+                clear_pending(st, body)
                 st["narrative"].append((d, body, ids))
                 continue
             if kind == "problem":
@@ -363,6 +366,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
             elif kind == "allergy":
                 st["allergies"].append((body, ids))
             elif kind == "result":
+                clear_pending(st, body)
                 r = RES.match(body)
                 if not r or not r.group("unit") or re.match(r"^[\d.]", r.group("unit")):
                     dropped.append(f"{lid}: result without a unit dropped")
@@ -964,10 +968,14 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         sources[rid] = (f"{ab} = {full}", None)
     dropped = []
     st = cumsum(entries, to, dropped, keep_indications=(audience == "patient"))
-    if letter_type == "referral" and not st["question"]:
-        raise Refused(REFERRAL_REFUSED)
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
                 resolved, flags)
+    if letter_type == "referral" and not st["question"]:
+        head = f"**Letter:** {TITLES[letter_type]}"
+        md = md.replace(head, f"{head} {QUESTION_FLAG}", 1) if head in md else \
+            md.replace("\n", f" {QUESTION_FLAG}\n", 1)
+        if flags is not None:
+            flags.append(QUESTION_NOTICE)
     md = flag_long_sentences(md, flags)
     for _, line in _body_lines(md):
         for fl, notice in ((ALLERGY_FLAG, ALLERGY_NOTICE), (OWNER_FLAG, OWNER_NOTICE)):
@@ -979,7 +987,10 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     check(md, sources, letter_type)
     if not patient:
         refuse_linked_terms(md, text, dropped)
-    refuse_missing_required(md, text)
+    refuse_missing_required(md, text, {i for v in st["pending"].values() for i in v[3]})
+    if st["pending"] and EMPTY["pending"] in md:
+        lid = next(iter(st["pending"].values()))[3][-1]
+        raise Refused(PENDING_NONE_REFUSED.format(lid=lid))
     return md, dropped
 
 
@@ -1111,7 +1122,7 @@ def refuse_linked_terms(md, text, dropped):
                 raise Refused(LINKED_REFUSED.format(lid=lid))
 
 
-def refuse_missing_required(md, text):
+def refuse_missing_required(md, text, pending_ids=None):
     """Every documented allergy reaction and every named owner of a pending test must reach the letter."""
     plain = re.sub(r"\s+", " ", FLAG_ANY.sub("", md)).lower()
     for lid, (kind, body) in _source_lines(text).items():
@@ -1119,7 +1130,7 @@ def refuse_missing_required(md, text):
         if kind == "allergy":
             need = [r for _, r in (split_reaction(p) for p in re.split(r"[,;](?![^()]*\))", body))
                     if r and not NO_REACTION.match(r)]
-        elif kind == "pending":
+        elif kind == "pending" and (pending_ids is None or lid in pending_ids):
             parts = re.split(r";\s*(?:follow-up|who|f/u)\s*:\s*", body, flags=re.I)
             who = parts[1].strip() if len(parts) > 1 else split_owner(parts[0])[1]
             need = [who] if who else []
@@ -1128,7 +1139,9 @@ def refuse_missing_required(md, text):
                 raise Refused(REQUIRED_REFUSED.format(lid=lid))
 
 
-REFERRAL_REFUSED = 'Refused: this referral has no question. Add a line starting "Question:".'
+PENDING_NONE_REFUSED = "Refused: line {lid} has a test still pending, but this letter says none are. Nothing was written."
+QUESTION_FLAG = "[flag: no clear question]"
+QUESTION_NOTICE = "Flag: this referral has no clear question. Add one before it's signed."
 FINAL_REFUSED = ("--final refused: {n} flag(s) still open. Confirm each meaning with "
                  '--resolve "AB=meaning" (or edit the notes), then run --final again.')
 
