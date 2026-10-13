@@ -659,14 +659,15 @@ REASON_ND = "reason not documented"
 
 
 def _patient_reason(ind):
-    """Patient letters: the reason as written; flagged unless every word is a signed single-meaning entry."""
+    """Patient letters: the reason as written (ordinary English kept, no flag); flagged only for a shorthand.txt
+    term with no signed plain words."""
     if not ind:
         return REASON_ND
     single = load_single_meaning()
     toks = tokens(ind)
-    if toks and all(t in single for t in toks) and not re.sub(r"[A-Za-z0-9]+|\s|[,/-]", "", ind):
-        return f"for {ind}"
-    return f"for {ind} {REASON_FLAG}"
+    if any(no_plain_words(t) for t in toks):              # round 11: only shorthand with no signed plain words
+        return f"for {ind} {REASON_FLAG}"
+    return f"for {ind}"
 
 
 def section_items(name, st, audience="specialist"):
@@ -823,6 +824,36 @@ def tokens(s):
     return [m.group(0) for m in TOKEN.finditer(s)]
 
 
+SIGNED_FREQ_PLAIN = {"nocte", "mane", "prn", "daily"}       # signed frequency plain words (13 Oct 2026); od has none
+
+
+def no_plain_words(tok):
+    """True for a shorthand.txt term with no signed plain words (an exact single_meaning.toml entry or a signed
+    frequency wording). Only these get the 'no plain words' reason flag."""
+    low = tok.lower()
+    if low not in SHORTHAND:
+        return False
+    return not (tok in load_single_meaning() or low in SIGNED_FREQ_PLAIN)
+
+
+REASON_AT = re.compile(r"(?:\(|, )for (?!\d)")
+
+
+def reason_start(text):
+    """Index where a medicine line's reason starts ('(for ' or ', for '), or None."""
+    m = REASON_AT.search(text)
+    return m.end() if m else None
+
+
+def reason_flag(tok, exact=()):
+    """Inside a medicine reason, ordinary English is kept as written: flag only shorthand with no signed plain
+    words, dotted shorthand, acronyms and case variants of reviewed entries."""
+    if tok in exact or tok.lower() in drug_names():
+        return False
+    return no_plain_words(tok) or "." in tok or any(tok.lower() == e.lower() for e in exact) or \
+        (len(tok) >= 2 and (tok.isupper() or any(c.isupper() for c in tok[1:])))
+
+
 def needs_flag(tok, prev="", exact=()):
     """True if tok must be flagged. exact: abbreviations that may expand as written (reviewed list, resolutions)."""
     if tok in exact or tok in TOOL_WORDS:
@@ -838,6 +869,8 @@ def needs_flag(tok, prev="", exact=()):
         return False                                        # dose-limit word: kept as written ('max X per week')
     if re.fullmatch(r"[IVX]+", tok) and prev.lower() in ROMAN_CTX:
         return False                                        # stage IV
+    if low in SHORTHAND and not no_plain_words(tok) and "." not in tok:
+        return False                                        # signed plain words exist (nocte, mane, prn): no flag
     if low in SHORTHAND or "." in tok or "/" in tok:
         return True
     if any(low == e.lower() for e in exact):
@@ -900,9 +933,12 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
                 text = re.sub(pat, rep, text)
         extra, prev = [], [""]
         exact = tuple(resolved) + tuple(single)
+        rs = reason_start(text) if med else None
         def sub(m):
             ab, before = m.group(0), prev[0]
             prev[0] = ab
+            if rs is not None and m.start() >= rs and ab not in resolved and ab not in single and not reason_flag(ab, exact):
+                return ab                                    # ordinary English reason: kept as written, no flag
             if ab in resolved:
                 rid, full = resolved[ab]
                 if rid not in extra:
@@ -1017,8 +1053,11 @@ def check(md, sources, letter_type):
             scan = scan.replace(f"{f} ({ab})", ab).replace(f, ab)
         exact = tuple(res) + tuple(single)
         prev = ""
+        rs = reason_start(scan)
         for m in TOKEN.finditer(scan):
             ab = m.group(0)
+            if rs is not None and m.start() >= rs and not reason_flag(ab, exact):
+                prev = ab; continue
             if needs_flag(ab, prev, exact) and not FLAG_ANY.match(scan, m.end()):
                 problems.append(f"Refused: abbreviation not flagged or resolved at {at}.")
             prev = ab

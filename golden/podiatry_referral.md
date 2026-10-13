@@ -32,7 +32,7 @@ Please answer the question below.
 
 ## Current medicines
 
-- lithium 400 mg nocte [flag: abbreviation, meaning not confirmed], reason not included [flag: medicine may point to something cut] [L6]
+- lithium 400 mg nocte, reason not included [flag: medicine may point to something cut] [L6]
 - metformin 500 mg twice daily (bd), reason not documented [L7]
 
 ## Allergies

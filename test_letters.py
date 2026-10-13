@@ -705,7 +705,7 @@ def test_case_variants_and_iv_stay_flagged(ab):
 
 
 # ---------- fail-safe flagging ----------
-@pytest.mark.parametrize("tok", ["Ecg", "Crp", "nbm", "cx", "PEG", "MAP", "mane", "nocte", "stat"])
+@pytest.mark.parametrize("tok", ["Ecg", "Crp", "nbm", "cx", "PEG", "MAP", "stat"])   # r11: mane/nocte have signed plain words
 def test_failsafe_token_flagged_not_expanded(tok):
     md, flags = _one(f"Problem: review {tok} today")
     assert f"review {tok} {L.FLAG} today" in md and flags == [tok]
@@ -851,7 +851,7 @@ def test_non_wordlist_word_elsewhere_keeps_abbreviation_label():
 
 def test_shorthand_and_capitals_on_medicine_line_keep_abbreviation_label():
     md, _ = _one("Med: ramipril 5 mg nocte\nMed: GTN spray as needed")
-    assert f"nocte {L.FLAG}" in md and f"GTN {L.FLAG}" in md
+    assert f"nocte {L.FLAG}" not in md and f"GTN {L.FLAG}" in md      # r11: nocte has signed plain words
 
 
 def test_final_refused_while_drug_flag_open():
@@ -869,7 +869,7 @@ def _pmeds(text, to="Patient", aud="patient"):
 def test_patient_medicine_reason_from_cited_line_flagged_without_signed_plain_words():
     text = "Patient: SYNTH-3801\n1937-05-01 Clinic review.\nMed: metformin 500 mg bd (for type 2 diabetes)"
     md, meds = _pmeds(text)
-    assert f"- metformin 500 mg twice a day (bd), for type 2 diabetes {L.REASON_FLAG} [L3]" in meds
+    assert f"- metformin 500 mg twice a day (bd), for type 2 diabetes [L3]" in meds      # r11: ordinary English, no flag
     with pytest.raises(Refused, match="flag"):
         L.finalise(md)
 
@@ -888,7 +888,7 @@ def test_patient_medicine_without_reason_says_reason_not_documented():
 
 def test_patient_keeps_sensitive_indication_other_audiences_cut():
     pmd, pmeds = _pmeds(F("podiatry_referral.txt"))
-    assert f"lithium 400 mg at night, for bipolar disorder {L.REASON_FLAG} [L6]" in pmeds
+    assert f"lithium 400 mg at night, for bipolar disorder [L6]" in pmeds      # r11: ordinary English, no flag
     for to, aud in (("General practice", "gp"), ("Podiatry", "specialist")):
         md, dropped = build(F("podiatry_referral.txt"), "gp-update", to, audience=aud)
         assert "bipolar" not in md and any("indication for lithium cut" in d for d in dropped)
@@ -2988,3 +2988,40 @@ def test_r11_brief_include_unknown_item_still_refused(tmp_path):
     r, out = _run_t(tmp_path, (pathlib.Path(L.__file__).parent / "fixtures/template/podiatry_referral.txt").read_text(),
                     "--brief", "referral to podiatry\nInclude: alcohol history")
     assert r.returncode == 2 and r.stderr.strip() == L.BRIEF_REFUSED
+
+
+
+@pytest.mark.parametrize("reason", ["high blood pressure", "type 2 diabetes", "heart failure", "reflux"])
+def test_r11_ordinary_english_reason_kept_no_flag(tmp_path, reason):
+    text = tpl(question="none", problems=("review",), meds=(f"amlodipine 5 mg daily reason: {reason}",),
+               actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path / reason.replace(" ", "_"), text, "--brief", "update to patient")
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert f"for {reason} [L" in md and L.REASON_FLAG not in md
+    assert "no signed plain words" not in r.stderr
+
+
+def test_r11_reason_with_unsigned_shorthand_still_flagged():
+    assert L._patient_reason("pain od") == f"for pain od {L.REASON_FLAG}"
+    assert L._patient_reason("sob") == f"for sob {L.REASON_FLAG}"
+    assert L._patient_reason("pain at night") == "for pain at night"
+
+
+@pytest.mark.parametrize("tok,flag", [("nocte", False), ("mane", False), ("prn", False), ("bd", False),
+                                      ("od", True), ("stat", True), ("nbm", True), ("sob", True)])
+def test_r11_shorthand_flag_only_without_signed_plain_words(tok, flag):
+    assert L.needs_flag(tok, exact=tuple(L.load_single_meaning())) is flag
+
+
+GENERICS = ["amlodipine", "atorvastatin", "omeprazole", "ramipril", "apixaban", "metformin", "paracetamol",
+            "furosemide", "bisoprolol", "salbutamol"]
+
+
+@pytest.mark.parametrize("drug", GENERICS)
+def test_r11_common_generics_do_not_flag(tmp_path, drug):
+    assert drug in L.drug_names(), f"{drug} missing from drugs.txt"
+    text = tpl(question="none", problems=("review",), meds=(f"{drug} 5 mg daily",), actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path / drug, text, "--brief", "update to GP")
+    assert r.returncode == 0, r.stderr
+    assert "misspelled" not in r.stderr and L.DRUG_FLAG not in (out / "letter.md").read_text()
