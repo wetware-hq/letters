@@ -348,7 +348,7 @@ def test_no_banned_shorthand():
 def test_planted_shorthand_refused():
     text = F("ckd_update.txt")
     md, _ = build(text, "gp-update", "GP")
-    with pytest.raises(Refused, match="abbreviation not flagged or resolved: c/o"):
+    with pytest.raises(Refused, match="abbreviation not flagged or resolved at line L"):
         check(md.replace("Clinic. [L3]", "Clinic, c/o SOB. [L3]"), parse(text)[1], "gp-update")
 
 
@@ -437,7 +437,7 @@ def test_hygiene_allows_telegram_only_in_english_list(tmp_path):
 def test_planted_expanded_diagnosis_not_in_notes_refused():
     _, md, src = _good()
     assert not any(re.search(r"\bAF\b|atrial|fibrillation", v[0] + " " + (v[1] or "")) for v in src.values())
-    with pytest.raises(Refused, match="word not in cited lines.*(atrial|fibrillation)"):
+    with pytest.raises(Refused, match="word not in cited lines at line L"):
         check(md.replace("exertional chest pain [L5]", "exertional chest pain, atrial fibrillation [L5]"), src, "referral")
 
 
@@ -766,7 +766,7 @@ def test_10u_insulin_flagged_and_checker_refuses_unflagged():
     text = "Patient: SYNTH-3501\n1937-05-01 Clinic review.\nProblem: needs 10u insulin at night\nFollow-up: review in 2 weeks"
     md, flags = build(text, "gp-update", "General practice", flags=(fl := []))[0], fl
     assert f"10u {L.FLAG} insulin" in md and any(f.startswith("10u") for f in flags)
-    with pytest.raises(Refused, match="dose unit not flagged: 10u"):
+    with pytest.raises(Refused, match="dose unit not flagged at line L"):
         check(md.replace(f"10u {L.FLAG}", "10u"), parse(text)[1], "gp-update")
     with pytest.raises(Refused, match="flag"):
         L.finalise(md)
@@ -1019,7 +1019,7 @@ def test_cc_dose_unit_not_refused_but_flagged(tmp_path):
     flags = []
     md, _ = build(text, "gp-update", "GP", flags=flags)
     assert f"5 cc {L.FLAG}" in md and len(flags) == 1 and md.count(L.FLAG) == 1
-    with pytest.raises(Refused, match="dose unit not flagged: 5 cc"):
+    with pytest.raises(Refused, match="dose unit not flagged at line L"):
         check(md.replace(f"5 cc {L.FLAG}", "5 cc"), parse(text)[1], "gp-update")
     assert "cc" in L._lines(L.SHORTHAND_FILE)
 
@@ -1043,7 +1043,7 @@ HIV_NOTES = """Patient: SYNTH-4101
 Problem: type 2 diabetes
 PMHx: HIV
 PMHx: asthma
-Med: antiretroviral (HIV) 1 tablet daily
+Med: abacavir (HIV) 600 mg daily
 Med: dolutegravir 50 mg daily (for HIV)
 Med: metformin 500 mg twice daily (for type 2 diabetes)
 Result: HIV viral load <20 copies/mL
@@ -1063,7 +1063,7 @@ def test_sensitive_cut_everywhere_medicine_stays_and_flagged(letter_type, to):
     md, dropped = build(text, letter_type, to, flags=flags)
     for t in CUT_TERMS:
         assert not re.search(rf"\b{re.escape(t)}\b", md, re.I), t
-    for drug in ("antiretroviral", "dolutegravir", "metformin"):
+    for drug in ("abacavir", "dolutegravir", "metformin"):
         assert drug in md
     assert "for type 2 diabetes" in md
     assert MED_MSG.format("L6") in flags and MED_MSG.format("L7") in flags
@@ -1088,7 +1088,7 @@ def test_linked_term_left_after_cut_refused_names_line_only(tmp_path, extra, lid
                        capture_output=True, text=True)
     assert r.returncode == 2 and r.stderr.strip() == msg and r.stdout == ""
     assert not out.exists() or list(out.iterdir()) == []
-    for t in CUT_TERMS + ("antiretroviral",):
+    for t in CUT_TERMS + ("antiretroviral", "abacavir", "dolutegravir"):
         assert not re.search(rf"\b{re.escape(t)}\b", r.stdout + r.stderr, re.I), t
 
 
@@ -1109,14 +1109,20 @@ def test_lithium_medicine_flagged_when_reason_cut():
     assert "lithium" not in f[0] and "bipolar" not in f[0]
 
 
-def test_linked_terms_file_is_draft_and_reviewed():
+def test_linked_terms_file_signed_off():
     raw = L.LINKED_TERMS_FILE.read_text()
-    assert "Reviewed by clinician; needs fresh sign-off for any change" in raw and "DRAFT" in raw
+    assert "Reviewed by clinician; needs fresh sign-off for any change" in raw and "Physician sign-off" in raw
+    assert "DRAFT" not in raw
     items = L.load_linked()
-    assert {"HIV status", "psychiatric history"} <= set(items)
-    assert {"HIV", "HIV+", "VL", "viral load", "CD4", "RVD", "antiretroviral"} <= set(items["HIV status"]["terms"])
-    assert {"lithium", "clozapine"} <= set(items["psychiatric history"]["medicines"])
-    assert all(v["status"].startswith("DRAFT") for v in items.values())
+    hiv, psy = items["HIV status"], items["psychiatric history"]
+    assert {"HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "VL", "viral load", "CD4", "RVD",
+            "antiretroviral"} <= set(hiv["terms"])
+    assert "antiretroviral" not in hiv["medicines"]
+    assert {"abacavir", "bictegravir", "raltegravir", "rilpivirine", "darunavir", "efavirenz", "nevirapine",
+            "cobicistat", "dolutegravir", "tenofovir"} <= set(hiv["medicines"])
+    assert {"lithium toxicity", "Li level", "clozapine clinic", "schizophrenia", "schizoaffective"} <= set(psy["terms"])
+    assert set(hiv["flag_terms"]) | set(psy["flag_terms"]) == {"undetectable", "ART", "ANC", "bipolar", "psychosis",
+                                                                "ritonavir", "lamivudine"}
 
 
 @pytest.mark.parametrize("line,lost", [("Allergy: penicillin - rash", "rash"),
@@ -1127,15 +1133,15 @@ def test_missing_required_detail_refused_names_line_only(line, lost):
     L.refuse_missing_required(md, text)                      # complete letter passes
     with pytest.raises(Refused) as e:
         L.refuse_missing_required(md.replace(lost, "not documented"), text)
-    assert str(e.value) == ("Refused: line L3 has an allergy reaction or a follow-up owner that is missing "
-                            "from this letter. Nothing was written.")
+    assert str(e.value) == ("Refused: line L3 has an allergy reaction or a follow-up owner that this letter leaves out. "
+                            "Nothing was written.")
     assert lost not in str(e.value) and "penicillin" not in str(e.value) and "echo" not in str(e.value)
 
 
 def test_sensitive_kept_for_relevant_reader():
     flags = []
     md, dropped = build(HIV_NOTES + "PMHx: undetectable VL\n", "gp-update", "Infectious diseases", flags=flags)
-    assert "antiretroviral" in md and "(HIV" in md and "viral load" in md.lower() and "undetectable VL" in md
+    assert "abacavir" in md and "(HIV" in md and "viral load" in md.lower() and "undetectable VL" in md
     assert not any(f.startswith("Flag: a medicine") for f in flags)
     assert not any("HIV status" in d for d in dropped)
 
@@ -1229,6 +1235,99 @@ def test_patient_letter_skips_linked_check_and_medicine_flag_but_keeps_abbreviat
     flags = []
     md, _ = build(text, "gp-update", "Patient", audience="patient", flags=flags)
     assert not any(f.startswith("Flag: a medicine") for f in flags) and L.MED_FLAG not in md
-    assert "antiretroviral" in md and "dolutegravir" in md
+    assert "abacavir" in md and "dolutegravir" in md
     assert f"CD4 {L.FLAG}" in md and f"VL {L.FLAG}" in md
     assert any(f.startswith("CD4") for f in flags) and any(f.startswith("VL") for f in flags)
+
+
+
+# ---------- round 3: refuse-level and flag-only linked terms ----------
+WORD_MSG = ("Flag: a word on line {} may tell the reader about something that was cut from this letter. "
+            "Keep it, or reword it.")
+
+
+@pytest.mark.parametrize("extra", ["PMHx: seropositive", "Plan: PLHIV clinic",
+                                   "PMHx: on HAART", "Plan: explained U=U", "Med: antiretroviral 1 tablet daily"])
+def test_refuse_level_hiv_terms(extra):
+    with pytest.raises(Refused) as e:
+        build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry")
+    assert str(e.value) == "Refused: line L12 still mentions something this letter was meant to cut. Nothing was written."
+
+
+@pytest.mark.parametrize("extra", ["Plan: check for lithium toxicity", "Plan: Li level in 1 week",
+                                   "Plan: clozapine clinic in 1 week"])
+def test_refuse_level_psych_terms(extra):
+    with pytest.raises(Refused, match=r"^Refused: line L\d+ still mentions something"):
+        build(F("podiatry_referral.txt") + extra + "\n", "referral", "Podiatry")
+
+
+@pytest.mark.parametrize("extra,word", [("PMHx: HIV-positive", "HIV-positive"), ("PMHx: schizophrenia", "schizophrenia"),
+                                        ("PMHx: schizoaffective disorder", "schizoaffective")])
+def test_terms_already_cut_by_clause_never_reach_letter(extra, word):
+    md, dropped = build(F("podiatry_referral.txt") + extra + "\n", "referral", "Podiatry")
+    assert word.lower() not in md.lower() and any(word in d for d in dropped)
+
+
+@pytest.mark.parametrize("extra,word", [("Plan: repeat test, undetectable last time", "undetectable"),
+                                        ("Plan: ART reviewed", "ART"), ("Med: ritonavir 100 mg daily", "ritonavir"),
+                                        ("Med: lamivudine 300 mg daily", "lamivudine")])
+def test_flag_only_terms_flag_never_refuse(extra, word):
+    flags = []
+    md, _ = build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry", flags=flags)
+    assert WORD_MSG.format("L12") in flags and L.WORD_FLAG in md
+    assert all(word not in f for f in flags if f.startswith("Flag:"))
+    with pytest.raises(Refused, match="--final refused"):
+        L.finalise(md)
+
+
+def test_linked_terms_only_checked_when_item_dropped():
+    text = "Patient: SYNTH-4501\n1937-04-02 Clinic review.\nProblem: ART reviewed, undetectable\nFollow-up: review in 3 months\n"
+    flags = []
+    md, dropped = build(text, "gp-update", "Podiatry", flags=flags)
+    assert not dropped and not any(f.startswith("Flag: a word") for f in flags)
+
+
+def test_patient_letter_keeps_sensitive_background():
+    md, dropped = build(HIV_NOTES, "gp-update", "Patient", audience="patient")
+    assert "HIV" in md.split("## Your health so far")[1].split("##")[0]
+    assert not any("HIV status" in d for d in dropped)
+
+
+# ---------- round 3: allergies and pending wording ----------
+ALLERGY_MSG = "Flag: the allergy on line L3 has extra wording. Check whether it describes the reaction."
+OWNER_MSG = "Flag: the pending test on line L3 has follow-up wording. Check who follows it up."
+
+
+@pytest.mark.parametrize("line", ["penicillin rash and swelling 1930", "penicillin severe", "penicillin V tablets"])
+def test_allergy_extra_wording_flagged_not_not_documented(line):
+    text = "Patient: SYNTH-4601\n1937-06-03 Clinic review.\nAllergy: " + line + "\nFollow-up: review in 2 weeks\n"
+    flags = []
+    md, _ = build(text, "gp-update", "GP", flags=flags)
+    al = section(md, "Allergies")
+    assert "not documented" not in al and L.ALLERGY_FLAG in al and ALLERGY_MSG in flags
+
+
+@pytest.mark.parametrize("line", ["echo cardiology arranging", "echo booked by ward team", "ferritin GP chasing"])
+def test_pending_owner_wording_flagged_not_not_documented(line):
+    text = "Patient: SYNTH-4602\n1937-06-03 Clinic review.\nPending: " + line + "\nFollow-up: review in 2 weeks\n"
+    flags = []
+    md, _ = build(text, "gp-update", "GP", flags=flags)
+    p = section(md, "Results still to come")
+    assert "not documented" not in p and L.OWNER_FLAG in p and OWNER_MSG in flags
+
+
+# ---------- round 3: checker messages give line ids only ----------
+@pytest.mark.parametrize("mutate", [
+    lambda md: md.replace("review in 2 weeks", "review in 9 weeks"),
+    lambda md: md.replace("review in 2 weeks", "review in 2 Synthword weeks"),
+    lambda md: md.replace("Clinic review. [L2]", "Clinic review."),
+])
+def test_checker_messages_line_only_no_letter_text(mutate):
+    text = "Patient: SYNTH-4701\n1937-06-03 Clinic review.\nProblem: knee pain\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "GP")
+    with pytest.raises(Refused) as e:
+        check(mutate(md), parse(text)[1], "gp-update")
+    for msg in str(e.value).splitlines():
+        assert re.fullmatch(r"Refused: [a-z ,0-9;]+ at (line L\d+|letter line \d+)\.( [A-Za-z ,.]+)?", msg), msg
+    for tok in ("Synthword", "9", "review", "Clinic", "knee"):
+        assert tok not in str(e.value), tok

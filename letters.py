@@ -139,7 +139,7 @@ def clean_text(body, ids, to, dropped, med=False, keep=False):
         if hit:
             dropped.append(f"{','.join(ids)}: stigmatising label removed: '{cl.strip(' ,;.')}'")
             continue
-        cat = None if med else sensitive_cat(cl)
+        cat = None if med or keep else sensitive_cat(cl)
         if cat and not relevant(cat, to):
             dropped.append(f"{','.join(ids)}: {cat} cut, not relevant to {to}: '{cl.strip(' ,;.')}'")
             continue
@@ -175,6 +175,9 @@ REACTION = re.compile(r"^\s*(?P<drug>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014
 # "echo - cardiology to arrange", "echo (cardiology to arrange)", "echo: renal team to chase", "echo, GP to follow up"
 OWNER_SEP = re.compile(r"^\s*(?P<test>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014]+\s*|\s*:\s*|,\s*(?=.*\b(?:to|will)\b))"
                        r"(?P<who>.*?)\s*$")
+
+
+OWNERISH = re.compile(r"\b(?:to|will|arrang\w*|chas\w*|follow\w*|f/u|team|clinic|GP|by|review\w*|booked|request\w*)\b", re.I)
 
 
 def split_reaction(part):
@@ -404,11 +407,21 @@ def section_items(name, st, audience="specialist"):
                 continue
             for part in re.split(r"[,;](?![^()]*\))", b):
                 drug, react = split_reaction(part)
-                out.append(f"{drug}: {react or 'reaction ' + ND}" + tag(i))
+                if react:
+                    out.append(f"{drug}: {react}" + tag(i))
+                elif len(part.split()) <= 1:              # nothing follows the drug name
+                    out.append(f"{part.strip()}: reaction {ND}" + tag(i))
+                else:                                      # trailing words not confidently parsed: keep, flag
+                    out.append(f"{part.strip()} {ALLERGY_FLAG}" + tag(i))
         return out
     if name == "pending":
-        return [f"{b}, sent{dt(d) or ' on an undocumented date'}. Who follows up: {who or ND}." + tag(i)
-                for b, who, d, i in st["pending"].values()]
+        out = []
+        for b, who, d, i in st["pending"].values():
+            if not who and OWNERISH.search(b):            # follow-up wording not parsed: keep, flag
+                out.append(f"{b} {OWNER_FLAG}, sent{dt(d) or ' on an undocumented date'}." + tag(i))
+                continue
+            out.append(f"{b}, sent{dt(d) or ' on an undocumented date'}. Who follows up: {who or ND}." + tag(i))
+        return out
     if name == "followup":
         out = []
         for b, i in st["followup"]:
@@ -640,7 +653,7 @@ def check(md, sources, letter_type):
     problems, words_total, section = [], 0, None
     body = md.split("\n---\n")[0]
     started = False
-    for line in body.splitlines():
+    for mdn, line in enumerate(body.splitlines(), 1):
         if line.startswith("## "):
             section, started = line[3:], True
             continue
@@ -649,21 +662,22 @@ def check(md, sources, letter_type):
         text, ids = split_ids(line)
         text = re.sub(r"^(- |\d+\. |\| )", "", text).replace(" | ", " ")
         words_total += len(text.split())
+        cited = [i.strip() for i in ids.strip(" []|").split(",") if i.strip()]
+        at = f"line {cited[0]}" if cited else f"letter line {mdn}"
         for sent in re.split(r"(?<=[.!])\s+", FLAG_ANY.sub("", text)):
             if len(sent.split()) > SENTENCE_LIMIT and SENTENCE_FLAG not in line:
-                problems.append(f"sentence over {SENTENCE_LIMIT} words: {sent[:40]}...")
+                problems.append(f"Refused: sentence over {SENTENCE_LIMIT} words at {at}.")
         if re.search(r"(?<!\w)\?\w", text):
-            problems.append(f"banned shorthand: {text[:40]}")
+            problems.append(f"Refused: banned shorthand at {at}.")
         if section in ("Results", "Your test results") and DIRECTION.search(text):
-            problems.append(f"direction word in results ('{DIRECTION.search(text).group(0)}'): give values with dates")
-        cited = [i.strip() for i in ids.strip(" []|").split(",") if i.strip()]
+            problems.append(f"Refused: direction word in results at {at}. Give values with dates.")
         if not cited:
             if text.strip() in EMPTY.values():
                 continue
-            problems.append(f"unsourced sentence: {text[:60]}")
+            problems.append(f"Refused: unsourced sentence at {at}.")
             continue
         if any(c not in sources for c in cited):
-            problems.append(f"cites unknown line: {ids.strip()}")
+            problems.append(f"Refused: cites a line not in the notes at {at}.")
             continue
         src = " ".join(sources[c][0] + " " + (sources[c][1] or "") for c in cited)
         res = {sources[c][0].split(" = ", 1)[0]: sources[c][0].split(" = ", 1)[1] for c in cited if c.startswith("R")}
@@ -678,31 +692,31 @@ def check(md, sources, letter_type):
         for m in TOKEN.finditer(scan):
             ab = m.group(0)
             if needs_flag(ab, prev, exact) and not FLAG_ANY.match(scan, m.end()):
-                problems.append(f"abbreviation not flagged or resolved: {ab}")
+                problems.append(f"Refused: abbreviation not flagged or resolved at {at}.")
             prev = ab
         for m in DOSE_U.finditer(scan):
             if not FLAG_ANY.match(scan, m.end()):
-                problems.append(f"dose unit not flagged: {m.group(0)}")
+                problems.append(f"Refused: dose unit not flagged at {at}.")
         text = FLAG_ANY.sub("", text)
         for m in OUTDATE.finditer(text):
             iso = f"1937-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
             if iso not in src:
-                problems.append(f"date not in cited lines: {m.group(0)}")
+                problems.append(f"Refused: date not in cited lines at {at}.")
         rest = OUTDATE.sub(" ", text)
         srcnums = set(NUM.findall(src))
         for n in NUM.findall(rest):
             if n not in srcnums:
-                problems.append(f"number not in cited lines ({','.join(cited)}): {n}")
+                problems.append(f"Refused: number not in cited lines at {at}.")
         sw = _source_words(src)
         for w in WORD.findall(rest):
             lw = w.lower()
             if lw not in sw and lw not in VOCAB and not any(p in sw for p in lw.split("-")):
-                problems.append(f"word not in cited lines ({','.join(cited)}): {w}")
+                problems.append(f"Refused: word not in cited lines at {at}.")
     limit = int(WORD_LIMIT * 1.1)
     if letter_type != "discharge" and words_total > limit:
-        problems.append(f"letter body is {words_total} words; limit is about {WORD_LIMIT}")
+        problems.append(f"Refused: letter body is {words_total} words; limit is about {WORD_LIMIT}.")
     if problems:
-        raise Refused("Checker refused the letter:\n  " + "\n  ".join(problems))
+        raise Refused("\n".join(dict.fromkeys(problems)))
     return True
 
 
@@ -877,6 +891,10 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
                 resolved, flags)
     md = flag_long_sentences(md, flags)
+    for _, line in _body_lines(md):
+        for fl, notice in ((ALLERGY_FLAG, ALLERGY_NOTICE), (OWNER_FLAG, OWNER_NOTICE)):
+            if fl in line and flags is not None:
+                flags.append(notice.format(lid=_line_ids(line)[-1]))
     patient = audience == "patient"           # the patient keeps their own sensitive details
     if not patient:
         md = flag_linked_medicines(md, text, dropped, flags)
@@ -895,8 +913,15 @@ MED_FLAG = "[flag: medicine may point to something cut]"
 MED_NOTICE = ("Flag: a medicine on line {lid} may tell the reader about something that was cut from this letter. "
               "Keep it, or explain it to the reader.")
 LINKED_REFUSED = "Refused: line {lid} still mentions something this letter was meant to cut. Nothing was written."
-REQUIRED_REFUSED = ("Refused: line {lid} has an allergy reaction or a follow-up owner that is missing from this letter. "
+REQUIRED_REFUSED = ("Refused: line {lid} has an allergy reaction or a follow-up owner that this letter leaves out. "
                     "Nothing was written.")
+WORD_FLAG = "[flag: word may point to something cut]"
+WORD_NOTICE = ("Flag: a word on line {lid} may tell the reader about something that was cut from this letter. "
+               "Keep it, or reword it.")
+ALLERGY_FLAG = "[flag: allergy has extra wording]"
+ALLERGY_NOTICE = "Flag: the allergy on line {lid} has extra wording. Check whether it describes the reaction."
+OWNER_FLAG = "[flag: pending test has follow-up wording]"
+OWNER_NOTICE = "Flag: the pending test on line {lid} has follow-up wording. Check who follows it up."
 MED_TAGS = ("med", "stop")
 
 
@@ -970,9 +995,16 @@ def flag_linked_medicines(md, text, dropped, flags):
     if not items:
         return md
     meds = [m for v in items.values() for m in v.get("medicines", [])]
+    soft = [t for v in items.values() for t in v.get("flag_terms", [])]
     src = _source_lines(text)
     lines = md.split("\n")
     for n, line in list(_body_lines(md)):
+        body = FLAG_ANY.sub("", split_ids(line)[0])
+        whit = [i for i in _line_ids(line) if i in src and any(_term_re(t).search(src[i][1]) for t in soft)]
+        if whit and any(_term_re(t).search(body) for t in soft):
+            line = lines[n] = _add_flag(line, WORD_FLAG)
+            if flags is not None:
+                flags.append(WORD_NOTICE.format(lid=whit[0]))
         hit = [i for i in _line_ids(line) if i in src and src[i][0] in MED_TAGS
                and any(_term_re(m).search(src[i][1]) for m in meds)]
         if hit and any(_term_re(m).search(line) for m in meds) and not _shows_reason(line, meds):
