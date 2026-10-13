@@ -29,13 +29,13 @@ Please answer the question below.
 
 ## Medicine changes
 
-- Changed on 16 Mar 1937: from ramipril [flag: abbreviation, meaning not confirmed] 2.5 mg daily. Now: ramipril [flag: abbreviation, meaning not confirmed] 5 mg daily. Reason for change: not documented. [L7, L11]
+- Changed on 16 Mar 1937: from ramipril [flag: drug name, check spelling] 2.5 mg daily. Now: ramipril [flag: drug name, check spelling] 5 mg daily. Reason for change: not documented. [L7, L11]
 
 ## Current medicines
 
 - aspirin 100 mg daily [L6]
-- ramipril [flag: abbreviation, meaning not confirmed] 5 mg daily [L7, L11]
-- atorvastatin [flag: abbreviation, meaning not confirmed] 40 mg nocte [flag: abbreviation, meaning not confirmed] [L12]
+- ramipril [flag: drug name, check spelling] 5 mg daily [L7, L11]
+- atorvastatin [flag: drug name, check spelling] 40 mg nocte [flag: abbreviation, meaning not confirmed] [L12]
 
 ## Allergies
 

@@ -794,3 +794,28 @@ def test_fixed_wording_never_flagged():
     md = make_letter("Patient: SYNTH-3601\n1937-05-01 Clinic review.\nPending: ferritin", "gp-update", "General practice")
     for phrase in ("DRAFT, unsigned", "not documented"):
         assert phrase in md and not re.search(re.escape(phrase) + r"\.? \[flag", md)
+
+
+# ---------- drug-name flag label ----------
+def test_non_wordlist_word_on_medicine_line_gets_drug_label():
+    flags = []
+    md, _ = build("Patient: SYNTH-3701\n1937-05-01 Clinic review.\nMed: ramipril 5 mg daily", "gp-update", "GP",
+                  flags=flags)
+    assert f"ramipril {L.DRUG_FLAG} 5 mg" in md and L.FLAG not in md
+    assert flags == ["ramipril (drug name, check spelling) [L3]"]
+
+
+def test_non_wordlist_word_elsewhere_keeps_abbreviation_label():
+    md, flags = _one("Problem: nbm overnight")
+    assert f"nbm {L.FLAG}" in md and L.DRUG_FLAG not in md
+
+
+def test_shorthand_and_capitals_on_medicine_line_keep_abbreviation_label():
+    md, _ = _one("Med: ramipril 5 mg nocte\nMed: GTN spray as needed")
+    assert f"nocte {L.FLAG}" in md and f"GTN {L.FLAG}" in md
+
+
+def test_final_refused_while_drug_flag_open():
+    md, _ = _one("Med: ramipril 5 mg daily")
+    with pytest.raises(Refused, match="1 flag"):
+        L.finalise(md)

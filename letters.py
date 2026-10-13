@@ -383,6 +383,8 @@ def render_section(name, st, audience):
 # An abbreviation means different things in different specialties (MS, PE, CP, RA...). Default: keep it as
 # written and flag it. Expand only from the reviewed single-meaning list (ships empty) or a clinician --resolve.
 FLAG = "[flag: abbreviation, meaning not confirmed]"
+DRUG_FLAG = "[flag: drug name, check spelling]"      # non-wordlist lowercase word on a medicine line
+FLAG_ANY = re.compile(r" \[flag: [^\]]+\]")
 # Fail-safe: a token is flagged unless it is clearly an ordinary word, a unit, or an exact reviewed entry.
 TOKEN = re.compile(r"(?<![A-Za-z0-9.'])(?:c/o|o/e|(?:[A-Za-z]\.){2,}|"
                    r"(?:mmol|micromol|mcg|mg|g|kg|mL|mU|IU|U|units?)/(?:L|dL|min|kg|day|h)\b|"
@@ -480,8 +482,11 @@ def split_ids(line):
 def wording(lines, audience, resolved=None, single=None, flags=None):
     resolved, single = resolved or {}, single if single is not None else load_single_meaning()
     flags = [] if flags is None else flags
-    seen, out = set(), []
+    seen, out, med = set(), [], False
+    med_heads = {h[k] for h in HEADINGS.values() for k in ("meds", "med_changes")}
     for line in lines:
+        if line.startswith("## "):
+            med = line[3:].strip() in med_heads
         if not re.match(r"^(- |\d+\. |\| (?!Test \|))", line):
             out.append(line); continue
         text, ids = split_ids(line)
@@ -502,8 +507,10 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             elif ab in single:
                 full = single[ab]["patient" if audience == "patient" else "clinical"]
             elif needs_flag(ab, before, exact):
-                flags.append(f"{ab}{ids.strip(' |') and ' ' + ids.strip(' |')}")
-                return f"{ab} {FLAG}"
+                label = DRUG_FLAG if med and ab.islower() and ab not in SHORTHAND and ab.lower() not in WORDS else FLAG
+                note = " (drug name, check spelling)" if label == DRUG_FLAG else ""
+                flags.append(f"{ab}{note}{ids.strip(' |') and ' ' + ids.strip(' |')}")
+                return f"{ab} {label}"
             else:
                 return ab
             if ab in seen:
@@ -512,7 +519,7 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             return f"{full} ({ab})"
         text = TOKEN.sub(sub, text)
         def dose(m):
-            if text[m.end():].startswith(" " + FLAG):
+            if FLAG_ANY.match(text, m.end()):
                 return m.group(0)
             flags.append(f"{m.group(0)}{ids.strip(' |') and ' ' + ids.strip(' |')}")
             return f"{m.group(0)} {FLAG}"
@@ -605,13 +612,13 @@ def check(md, sources, letter_type):
         prev = ""
         for m in TOKEN.finditer(scan):
             ab = m.group(0)
-            if needs_flag(ab, prev, exact) and not scan[m.end():].startswith(" " + FLAG):
+            if needs_flag(ab, prev, exact) and not FLAG_ANY.match(scan, m.end()):
                 problems.append(f"abbreviation not flagged or resolved: {ab}")
             prev = ab
         for m in DOSE_U.finditer(scan):
-            if not scan[m.end():].startswith(" " + FLAG):
+            if not FLAG_ANY.match(scan, m.end()):
                 problems.append(f"dose unit not flagged: {m.group(0)}")
-        text = text.replace(" " + FLAG, "")
+        text = FLAG_ANY.sub("", text)
         for m in OUTDATE.finditer(text):
             iso = f"1937-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
             if iso not in src:
@@ -731,14 +738,14 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     return md, dropped
 
 
-FINAL_REFUSED = ("--final refused: {n} abbreviation flag(s) still open. Confirm each meaning with "
+FINAL_REFUSED = ("--final refused: {n} flag(s) still open. Confirm each meaning with "
                  '--resolve "AB=meaning" (or edit the notes), then run --final again.')
 
 
 def finalise(md):
     """Remove [Lx]/[Rx] source tags only. Refused while any abbreviation flag is open.
     The draft mark and draft footer stay until the signing clinician removes them."""
-    n = md.count(FLAG)
+    n = len(FLAG_ANY.findall(md))
     if n:
         raise Refused(FINAL_REFUSED.format(n=n))
     return re.sub(r" \[[LR]\d+(?:, [LR]\d+)*\]", "", md)
