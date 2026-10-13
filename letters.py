@@ -60,6 +60,7 @@ HEAD = re.compile(r"^\s*(1937-\d{2}-\d{2})\b[\s:,-]*(.*)$")
 
 
 BULLET = re.compile(r"^(?:[*\u2022\u00b7]|-(?=\s))\s*")
+HEAD_SEP = re.compile(r"^(?P<h>[A-Za-z][A-Za-z /'-]{0,40}?)\s*(?:\s[-\u2013\u2014]+\s|->|[\u2192\u279d])\s*(?P<b>.*)$")
 MED_BLOCK_HEAD = re.compile(r"^(?P<h>[A-Za-z][A-Za-z /'-]{0,40}?)\s*(?::|\s[-\u2013\u2014]+)?\s*$")
 
 
@@ -89,6 +90,10 @@ def parse(text):
         sources[f"L{n}"] = (raw.strip(), cur["date"])
         indented = raw[:1].isspace() or bool(re.match(r"^[*\u2022\u00b7]", line))
         line = BULLET.sub("", line) if indented else line
+        hm = HEAD_SEP.match(line)
+        if hm and len(hm.group("h").split()) <= 4 and (ALLERGY_RX.search(hm.group("h")) or MED_HEAD.search(hm.group("h"))) \
+                and not drugs_in(hm.group("h")) and hm.group("b"):
+            line = f"{hm.group('h').strip()}: {hm.group('b').strip()}"     # 'Intolerances - x: y', 'What he takes -> x'
         if _med_block_head(line):
             block = True
             continue                                       # a heading only: its lines carry the content
@@ -235,11 +240,16 @@ OWNER_MOD = {"renal", "cardiology", "ward", "practice", "medical", "surgical", "
 OWNER_SEP_ANY = re.compile(r"\s[-\u2013\u2014]+\s|:|\(|,")
 
 
+NOT_OWNER = re.compile(r"^(?:await\w*|pending|outstanding|to follow|results? to follow|sent|in progress)\b", re.I)
+
+
 def split_owner(body):
     """Return (test, owner or None). The owner is a role or team, or anyone given an action ('X to chase')."""
     m = OWNER_SEP.match(body)
     if m:
         who = (m.group("p") if m.group("p") is not None else m.group("who")).strip()
+        if who and NOT_OWNER.match(who):
+            return m.group("test").strip(), None          # 'awaiting lab' says nobody follows it up
         if who and (OWNER_ROLE.search(who) or OWNER_ACTION.search(who)):
             return m.group("test").strip(), who
     for r in OWNER_ROLE.finditer(body):
@@ -279,9 +289,9 @@ DRUG_FILE = HERE / "drugs.txt"
 DOSE_RX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?(mg|mcg|micrograms?|g|mL|ml|units?|IU)(?![A-Za-z/])", re.I)
 FREQ_RX = re.compile(r"(?<![A-Za-z])(daily|bd|tds|qid|nocte|mane|prn|weekly|od)(?![A-Za-z])", re.I)
 STOP_RX = re.compile(r"\b(?:stopped|ceased|withheld|stop)\b", re.I)
-ALLERGY_RX = re.compile(r"\b(?:allerg\w*|reactions?|intoleran\w*|anaphyla\w*)\b", re.I)
+ALLERGY_RX = re.compile(r"\b(?:allerg\w*|reactions?|intoleran\w*|anaphyla\w*|sensitivit\w*|adverse)\b", re.I)
 PER_LITRE = re.compile(r"\d(?:\.\d+)?\s?[A-Za-z\u00b5]*/L(?![A-Za-z])")
-MED_HEAD = re.compile(r"\b(?:drugs?|med\w*|chart|prescri\w*|tablets?|regimen|rx)\b", re.I)
+MED_HEAD = re.compile(r"\b(?:drugs?|med\w*|chart|prescri\w*|tablets?|regimen|rx|takes|taking)\b", re.I)
 _DRUGS = {}
 
 
@@ -452,6 +462,15 @@ def _pkey(s):
     return HEDGE.sub("", s.strip()).lower()
 
 
+STOP_REASON = re.compile(r"^(?P<d>.+?)(?:\s+(?P<r>(?:due to|because of|because|owing to|after|following)\s+.+)|"
+                         r"\s+[-\u2013\u2014]+\s+(?P<r2>[^\d].*))$", re.I)
+
+
+FOLLOWUP_UNTAGGED = re.compile(r"^(?:re-?check|review|recall|repeat|follow[- ]?up|f/u|wound check|book|return|see)\b|"
+                               r"\b(?:your )?next (?:blood test|test|review|appointment|visit|check)\b|"
+                               r"\b(?:will|to) (?:chase|arrange|book|ring|call|follow)\b", re.I)
+
+
 def cumsum(entries, to="", dropped=None, keep_indications=False):
     dropped = [] if dropped is None else dropped
     st = {"problems": OrderedDict(), "resolved": OrderedDict(), "ruledout": OrderedDict(), "history": [],
@@ -480,6 +499,10 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 pb = untagged_pending(body)
                 if pb:
                     kind, body = "pending", pb
+            if not kind and FOLLOWUP_UNTAGGED.search(body) and (WHEN.search(body) or WHO.search(body)
+                                                                or OWNER_ROLE.search(body)):
+                st["followup"].append((body, ids))          # an action and its owner go to Actions
+                continue
             if not kind:
                 neg = NEG.match(body)
                 ro = RULEDOUT.match(body)
@@ -535,6 +558,10 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
             elif kind == "stop":
                 mm = MEDP.match(body)
                 drug, reason = mm.group("drug").strip(), mm.group("v") if (mm.group("k") or "").lower().startswith("reason") else None
+                if not reason:                                 # a stated reason is kept as written
+                    sr = STOP_REASON.match(drug)
+                    if sr:
+                        drug, reason = sr.group("d").strip(" ,;-"), (sr.group("r") or sr.group("r2")).strip(" .")
                 k = _mkey(drug)
                 old = st["meds"].pop(k, None)
                 st["stopped"][k] = d
@@ -546,6 +573,9 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 clear_pending(st, body, tagged_result=True)
                 r = RES.match(body)
                 if not r or not r.group("unit") or re.match(r"^[\d.]", r.group("unit")):
+                    if PER_LITRE.search(body):
+                        st["narrative"].append((d, body, ids))      # a result written in a sentence stays as written
+                        continue
                     dropped.append(f"{lid}: result without a unit dropped")
                     continue
                 name = r.group("name").strip()
@@ -685,8 +715,12 @@ def section_items(name, st, audience="specialist"):
     if name == "followup":
         out = []
         for b, i in st["followup"]:
-            w = WHO.search(b); t = WHEN.search(b)
-            out.append(f"Who: {w.group(0) if w else ND}. When: {t.group(0) if t else ND}. Action: {b}" + tag(i))
+            dm = re.match(r"^(?P<a>.+?)\s[-\u2013\u2014]+\s(?P<w>.+)$", b)
+            w = dm.group("w").strip(" .") if dm and (WHO.search(dm.group("w")) or OWNER_ROLE.search(dm.group("w"))) else None
+            if not w:
+                w = WHO.search(b); w = w.group(0) if w else None
+            t = WHEN.search(b)
+            out.append(f"Who: {w or ND}. When: {t.group(0) if t else ND}. Action: {b}" + tag(i))
         return out
     return []
 
@@ -1177,6 +1211,12 @@ def refuse_combination_brands(text):
     raise Refused(COMBO_REFUSED.format(lid=f"L{n}"))
 
 
+def _has_question(md, audience):
+    head = HEADINGS[audience if audience in HEADINGS else "specialist"]["question"]
+    m = re.search(rf"^## {re.escape(head)}\n(.*?)(?=^## |^---|\Z)", md, re.S | re.M)
+    return bool(m and re.search(r"^- \S", m.group(1), re.M))
+
+
 def _build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None):
     """Return (markdown, dropped). The dropped list is for the clinician's eyes only; never store it.
     resolve: list of "AB=meaning" from the clinician; each becomes a cited source R1, R2...
@@ -1220,6 +1260,11 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
     if not patient:
         md = apply_cut_rule(md, text, dropped, flags, TITLES[letter_type])
         md = flag_cuts(md, dropped, flags, TITLES[letter_type])
+    if letter_type == "referral" and QUESTION_FLAG not in md and not _has_question(md, audience):
+        head = f"**Letter:** {TITLES[letter_type]}"      # the question was cut or empty: the flag still fires
+        md = md.replace(head, f"{head} {QUESTION_FLAG}", 1)
+        if flags is not None:
+            flags.append(QUESTION_NOTICE)
     verify_letter(md, text, audience, _INCLUDE)
     return md, dropped
 
@@ -1413,9 +1458,8 @@ def apply_cut_rule(md, text, dropped, flags, title=None):
                         lid = next((i for i in ids if i in src and re.search(re.escape(b), src[i][1], re.I)), ids[0])
                         raise Refused(LINKED_REFUSED.format(lid=lid))
                     body = re.sub(rf"(?<![A-Za-z0-9]){re.escape(b)}(?![A-Za-z0-9]){DRUG_FLAG_RX}", g, body, flags=re.I)
-            def reason(m):
-                return ", reason not included" if any_linked.search(m.group(0)) else m.group(0)
-            body = re.sub(r"\s*\(for [^()]*\)", reason, body)
+            # the medicine points to the cut item, so its stated reason is cut too: 'reason not included'
+            body = re.sub(r"\s*\(for [^()]*\)", ", reason not included", body)
             if any_word:                                 # other linked words on the medication line: only that part goes
                 bare = lambda p: FLAG_ANY.sub("", p)          # hard terms never include a bare generic
                 parts = re.split(r",\s*(?![^\[]*\])(?![^()]*\))", body)       # not inside a flag or bracket

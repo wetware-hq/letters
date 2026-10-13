@@ -1920,7 +1920,6 @@ def test_r8_patient_letter_drug_chart_and_reactions_kept_in_signed_plain_words()
     assert "trimethoprim: itchy rash" in section(md, "Allergies")
 
 
-@pytest.mark.xfail(raises=Refused, strict=True, reason="round 9 step 1: the independent check refuses the cut reason; parser fix follows")
 def test_r8_cut_medicine_with_dose_kept_passes():
     text = R8 + "Drug chart: lithium carbonate 400 mg nocte - mood\nPMHx: bipolar disorder\n"
     md, flags = _r8(text)
@@ -2315,3 +2314,89 @@ def test_r9_patient_sections_checked_too():
     md = _letter([("Your health so far", ["Sensitivities: zorvadol - hallucinations [L2]"]),
                   ("Your medicines now", ["alphavit 1000 mg once a day [L4]"]), ("Allergies", ["Allergies not documented."])])
     assert L.SECTION_ND.format(sec="allergies", lid="L2") in _ck(SEC_NOTES, md, audience="patient")
+
+
+# ---------- round 9: fixes (allergy headings, reasons, actions and owners, question flag) ----------
+@pytest.mark.parametrize("line,want", [
+    ("Sensitivities: zorbamycin (nausea + vomiting)", "zorbamycin: nausea + vomiting"),
+    ("Intolerances - zorvostatin: muscle aches", "zorvostatin: muscle aches"),
+    ("Allergic to: penicillin - hives", "penicillin: hives"),
+    ("Allergy list: sulfur antibiotics -> rash and blistering", "sulfur antibiotics: rash and blistering"),
+    ("Sensitivities: zorvadol - hallucinations", "zorvadol: hallucinations"),
+])
+@pytest.mark.parametrize("aud", [None, "patient"])
+def test_r9_allergy_under_unusual_heading_goes_to_allergies(line, want, aud):
+    notes = f"SYNTH-9931 :: F :: 60\n{line}\n1937-02-01 review.\nMed: alphazole 20 mg daily\n"
+    md, _ = build(notes, "gp-update", "Patient" if aud else "GP", audience=aud)
+    assert want in FLAG_RX.sub("", section(md, "Allergies"))
+    assert "Allergies not documented" not in md
+
+
+@pytest.mark.parametrize("nil", ["none", "nil", "none known", "nil known"])
+def test_r9_nil_allergy_under_unusual_heading(nil):
+    md, _ = build(f"SYNTH-9932 :: F :: 60\nSensitivities: {nil}\n1937-02-01 review.\n", "gp-update", "GP")
+    assert "No known drug allergies [L2]" in md and "Allergies not documented" not in md
+
+
+def test_r9_cut_reason_reads_reason_not_included():
+    notes = ("SYNTH-9933 :: F :: 49\nSensitivities: none\n1937-03-30 discharged after surgery.\nTablets taken:\n"
+             "  lithium carbonate 300 mg twice daily - steadies her\n")
+    md, _ = build(notes, "discharge", "GP")
+    meds = FLAG_RX.sub("", section(md, "Current medicines"))
+    assert "lithium carbonate 300 mg twice daily, reason not included" in meds
+    assert "steadies" not in md and "reason not documented" not in meds
+
+
+def test_r9_sensitive_reason_reads_reason_not_included():
+    notes = "SYNTH-9934 :: F :: 54\n1937-09-17 update.\nCurrent Rx\n* zerotraline 50 mg daily - anxiety\n"
+    md, _ = build(notes, "gp-update", "GP")
+    assert "zerotraline 50 mg daily, reason not included" in FLAG_RX.sub("", md) and "anxiety" not in md
+
+
+@pytest.mark.parametrize("line,reason", [("Ceased: perindopril 1937-05 due to cough", "due to cough"),
+                                         ("Stopped: naproxen 1937-08 because of stomach upset", "because of stomach upset"),
+                                         ("Stop: amlodipine - ankle swelling", "ankle swelling")])
+def test_r9_stated_stop_reason_kept(line, reason):
+    md, _ = build(f"SYNTH-9935 :: F :: 71\n1937-07-19 review.\n{line}\n", "gp-update", "GP")
+    ch = FLAG_RX.sub("", section(md, "Medicine changes"))
+    assert f"Reason for change: {reason}." in ch and "Reason for change: not documented" not in ch
+
+
+@pytest.mark.parametrize("line,who", [("Wound check 1937-04-06 - practice nurse", "practice nurse"),
+                                      ("Recheck in 4 weeks - you can book at the front desk", "you can book at the front desk"),
+                                      ("Your next blood test is 1937-09-17 - practice nurse", "practice nurse")])
+def test_r9_followup_and_owner_go_to_actions(line, who):
+    md, _ = build(f"SYNTH-9936 :: F :: 58\n1937-09-03 review.\n{line}\n", "gp-update", "GP")
+    acts = FLAG_RX.sub("", section(md, "Actions"))
+    assert f"Who: {who}." in acts and "Follow-up actions not documented" not in md
+    assert line.split(" - ")[0].split()[0] not in FLAG_RX.sub("", section(md, "Background"))
+
+
+def test_r9_pending_awaiting_is_not_an_owner():
+    md, _ = build("SYNTH-9937 :: F :: 45\n1937-07-02 seen.\nVitamin B12 sent 1937-07-02 - awaiting lab\n", "gp-update", "GP")
+    p = FLAG_RX.sub("", section(md, "Results still to come"))
+    assert "Who follows up: not documented." in p and "awaiting lab" not in p.split("Who follows up:")[1]
+
+
+def test_r9_pending_named_owner_still_kept():
+    md, _ = build("SYNTH-9938 :: F :: 45\n1937-07-02 seen.\nEcho sent 1937-07-02 - renal fellow to chase\n", "gp-update", "GP")
+    assert "Who follows up: renal fellow to chase." in FLAG_RX.sub("", md)
+
+
+def test_r9_no_question_flag_when_question_cut():
+    notes = "SYNTH-9939 :: F :: 45\n1937-07-02 seen for tremor.\nProblem: tremor\nQuestion: is the lithium level too high?\n"
+    flags = []
+    md, _ = build(notes, "referral", "Neurology", flags=flags)
+    assert "lithium level" not in md and L.QUESTION_FLAG in md and L.QUESTION_NOTICE in flags
+
+
+def test_r9_no_question_flag_when_no_question():
+    flags = []
+    md, _ = build("SYNTH-9940 :: F :: 45\n1937-07-02 seen for tremor.\nProblem: tremor\n", "referral", "Neurology", flags=flags)
+    assert L.QUESTION_FLAG in md and flags.count(L.QUESTION_NOTICE) == 1
+
+
+def test_r9_result_in_a_sentence_is_kept():
+    md, _ = build("SYNTH-9941 :: M :: 58\n1937-02-19 lipid clinic, LDL 1937-02-12 3.6 mmol/L.\nQuestion: target?\n",
+                  "referral", "Cardiology")
+    assert "3.6 mmol/L" in md
