@@ -954,6 +954,27 @@ def split_ids(line):
     return (line[:m.start()], line[m.start():]) if m else (line, "")
 
 
+ROUTE_SLOT = "\x00route\x00"
+
+
+def route_slot(text, ids, plain=False):
+    """([(route, line id)], text with each route slot replaced by ROUTE_SLOT, in order) for a template medicine
+    line, else ([], text). The slot is the route word as written after the dose and frequency. plain: also take
+    the signed plain words that follow it in a patient letter."""
+    found = []
+    for lid in dict.fromkeys(re.findall(r"\bL\d+\b", ids)):
+        route = _ROUTES.get(lid)
+        if not route:
+            continue
+        tail = r"(?:\s+\(" + re.escape(ROUTE_PLAIN[route]) + r"\))?" if plain and route in ROUTE_PLAIN else ""
+        start = (re.search(r"\d", text) or re.match("", text)).end()
+        rm = re.compile(r"(?<![A-Za-z0-9-])" + re.escape(route) + tail + r"(?![A-Za-z0-9-])").search(text, start)
+        if rm:
+            text = text[:rm.start()] + ROUTE_SLOT + text[rm.end():]
+            found.append((route, lid))
+    return found, text
+
+
 def wording(lines, audience, resolved=None, single=None, flags=None):
     resolved, single = resolved or {}, single if single is not None else load_single_meaning()
     flags = [] if flags is None else flags
@@ -965,6 +986,7 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
         if not re.match(r"^(- |\d+\. |\| (?!Test \|))", line):
             out.append(line); continue
         text, ids = split_ids(line)
+        routes, text = route_slot(text, ids) if med else ([], text)   # route slot: never the shorthand flag
         if audience == "patient":
             for pat, rep in PLAIN:
                 text = re.sub(pat, rep, text)
@@ -1006,6 +1028,12 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             flags.append(f"{m.group(0)}{ids.strip(' |') and ' ' + ids.strip(' |')}")
             return f"{m.group(0)} {FLAG}"
         text = DOSE_U.sub(dose, text)
+        for route, lid in routes:
+            shown = render_route(route, audience)
+            if not route_signed(route):
+                shown = f"{route} {ROUTE_FLAG}"
+                flags.append(ROUTE_NOTICE.format(lid=lid))
+            text = text.replace(ROUTE_SLOT, shown, 1)
         if extra and ids:
             ids = re.sub(r"\]", ", " + ", ".join(extra) + "]", ids, count=1)
         out.append(text + ids)
@@ -1049,7 +1077,13 @@ def _source_words(src, single=None):
     for pat, rep in LABEL_REWRITES:
         if pat.search(src):
             words |= _words(rep)
+    for r, plain in ROUTE_PLAIN.items():               # signed route plain words, earned by the route in the line
+        if re.search(rf"(?<![A-Za-z0-9-]){re.escape(r)}(?![A-Za-z0-9-])", src):
+            words |= _words(plain)
     return words
+
+
+ROUTE_SECTIONS = {h[k] for h in HEADINGS.values() for k in ("meds", "med_changes")}
 
 
 def check(md, sources, letter_type):
@@ -1087,6 +1121,8 @@ def check(md, sources, letter_type):
         res = {sources[c][0].split(" = ", 1)[0]: sources[c][0].split(" = ", 1)[1] for c in cited if c.startswith("R")}
         single = load_single_meaning()
         scan = text
+        if section in ROUTE_SECTIONS:
+            scan = route_slot(scan, ids, plain=True)[1].replace(ROUTE_SLOT, "route")   # signed route slot: checked in wording()
         forms = [(f, ab) for ab, d in single.items() for f in (d["clinical"], d["patient"])] + \
                 [(f, ab) for ab, f in res.items()]
         for f, ab in sorted(forms, key=lambda x: -len(x[0])):
@@ -2161,6 +2197,7 @@ def from_template(text):
     Refuses on a missing required field, an unknown or out-of-order field, or a list item without '- '."""
     lines = text.splitlines()
     out, pos, field, seen = [], -1, None, []
+    _ROUTES.clear()
     def bad(n):
         raise Refused(TEMPLATE_REFUSED.format(n=n))
     for n, raw in enumerate(lines, 1):
@@ -2176,6 +2213,8 @@ def from_template(text):
             conv = _template_item(field, item)
             if conv is None:
                 bad(n)
+            if field == "Medicines" and med_item(item)["route"]:
+                _ROUTES[f"L{n}"] = med_item(item)["route"]
             out.append(conv); continue
         if field == "Allergies" and NKA_RX.match(line) and out and out[-1] == "#field Allergies":
             out.append("Allergy: nil known"); continue           # 'No known allergies' / NKDA / nil known, no dash
@@ -2252,7 +2291,7 @@ RECIPIENTS_REFUSED = ("Refused: line L{n} lists more than one recipient. Write a
 RECIPIENT_SPLIT = re.compile(r"[,;&/+]|\band\b|\balso\b|\bplus\b", re.I)
 
 # The medicine-line grammar lives here only (the reason marker may still change):
-# '- drug dose frequency [route] [max X in 24 hours | max X per <period>] [for N days] [reason: <why>]
+# '- drug dose frequency [route: signed list, any other word flagged] [max X in 24 hours | max X per <period>] [for N days] [reason: <why>]
 #    [; stopped|ceased|withheld <date> - <stop reason>]'. Parts in this order; anything else doesn't fit.
 MED_REASON_MARK = "reason:"
 _FREQS = (r"(?:once daily|twice daily|three times daily|four times daily|daily|bd|tds|qid|nocte|mane|prn|weekly|od"
@@ -2263,12 +2302,36 @@ MED_ITEM = re.compile(
     r"(?:\s+(?P<dose>\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?\s?(?:mg|mcg|micrograms?|g|mL|ml|units?|IU|%|puffs?|tablets?|drops?)?"
     r"(?:\s+(?:one|two)\s+puffs?)?))?"
     r"\s+(?P<freq>" + _FREQS + r"(?:\s+and\s+" + _FREQS + r")?)"
-    r"(?:\s+(?P<route>oral|IV|PO|SC|IM|inhaled|topical|sublingual|PR|intravenous|subcutaneous|by mouth))?"
+    r"(?:\s+(?P<route>by mouth|(?!(?:max|maximum|for|reason|and)\b)[A-Za-z][A-Za-z-]*(?![\w:])))?"
     r"(?:\s+(?P<max>max(?:imum)?\s+\d+(?:\.\d+)?\s?(?:mg|mcg|micrograms?|g|mL|ml|units?|tablets?|doses?|puffs?|drops?)?"
     r"\s+(?:in\s+24\s+hours|(?:per|in|every)\s+(?:\d+\s+)?[a-z]+)))?"
     r"(?:\s+(?P<dur>for\s+\d+\s+(?:more\s+)?days?))?"
     r"(?:\s+" + re.escape(MED_REASON_MARK) + r"\s*(?P<reason>(?:(?!\bmax(?:imum)?\s+\d|\bfor\s+\d+\s+(?:more\s+)?days?\b)[^;])+?))?"
     r"(?:\s*;\s*(?P<stop>stopped|ceased|withheld)\s+(?P<sdate>\d{4}-\d{2}-\d{2})(?:\s+-\s+(?P<sreason>.+?))?)?\s*$", re.I)
+
+
+# Signed route list (ruling 14 Oct 2026): kept exactly as written in the route slot of a medicine line. Any other
+# word in that slot is flagged, not refused. Patient letters keep the short form and add the signed plain words.
+ROUTES = ("oral", "IV", "IM", "subcut", "SC", "SL", "inhaled", "nebulised", "topical", "transdermal", "PR", "PV",
+          "nasal", "eye", "ear")
+ROUTE_PLAIN = {"IV": "into a vein", "IM": "into a muscle", "subcut": "under the skin", "SC": "under the skin",
+               "SL": "under the tongue", "PR": "into the back passage", "PV": "into the vagina", "inhaled": "breathed in",
+               "nebulised": "breathed in as a mist", "topical": "on the skin", "transdermal": "as a patch on the skin",
+               "oral": "by mouth", "nasal": "into the nose", "eye": "into the eye", "ear": "into the ear"}
+ROUTE_FLAG = "[flag: route not on the signed list]"
+ROUTE_NOTICE = "Flag: the route on line {lid} isn't on the signed route list. Check it."
+_ROUTES = {}            # 'L<n>' -> route word as written, for template medicine lines of one letter
+
+
+def route_signed(route):
+    return route in ROUTES
+
+
+def render_route(route, audience):
+    """The route as written; a patient letter adds the signed plain words after a signed route."""
+    if audience == "patient" and route in ROUTE_PLAIN:
+        return f"{route} ({ROUTE_PLAIN[route]})"
+    return route
 
 
 def med_item(item):
@@ -2328,7 +2391,7 @@ def build_from_template(text, *a, **k):
     try:
         return build(conv, *a, **k)
     finally:
-        _EMPTY_FIELDS.clear(); _TEMPLATE.clear()
+        _EMPTY_FIELDS.clear(); _TEMPLATE.clear(); _ROUTES.clear()
 
 
 # ---------- held-out harness ----------

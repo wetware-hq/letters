@@ -3319,7 +3319,7 @@ LOCKED_FREQ_MEDS = [
     "methotrexate 15 mg every 2 weeks for 28 days reason: arthritis",
     "methotrexate 15 mg every 2 weeks reason: arthritis; stopped 1934-03-01 - nausea",
     "methotrexate 15 mg every 2 weeks oral max 15 mg per week for 28 days reason: arthritis; ceased 1934-03-01 - nausea",
-    "methotrexate 15 mg every 2 weeks subcutaneous reason: arthritis; withheld 1934-03-01 - infection",
+    "methotrexate 15 mg every 2 weeks subcut reason: arthritis; withheld 1934-03-01 - infection",
     "methotrexate 15 mg every 2 weeks",
     "methotrexate 15 mg every 4 weeks reason: arthritis",
     "methotrexate 15 mg fortnightly reason: arthritis",
@@ -3418,3 +3418,92 @@ def test_r11i_whole_words_only_and_context_unit():
     assert L.flagged_tokens("Ms Brown, interval 480 ms, 480ms") == []
     assert L.flagged_tokens("status permit crawl rapid excess") == []                 # ms, pe, cp, ra, cx only as whole words
     assert L.flagged_tokens("ms noted") == ["ms"] and L.flagged_tokens("Ms noted") == ["Ms"]
+
+
+# ---- round 11 follow-up 12: signed route list (ruling 14 Oct 2026), written from the rule ----
+# Signed routes are kept exactly as written in the route slot of a medicine line and never get the shorthand flag
+# there; any other word in that slot is flagged, not refused; patient letters add the signed plain words.
+ROUTE_NOTES = ("Patient: SYNTH-9310\nDate: 1934-03-12\nRecipients: General practice\nQuestion: Please review.\n"
+               "Problems:\n- rheumatoid arthritis\nHistory: {history}\nMedicines:\n- {med}\nAllergies:\n"
+               "- No known allergies\nResults:\n- {result} 1934-03-12\nPending:\nActions:\n- review in 2 weeks\n")
+SIGNED_ROUTES = [("oral", "by mouth"), ("IV", "into a vein"), ("IM", "into a muscle"), ("subcut", "under the skin"),
+                 ("SC", "under the skin"), ("SL", "under the tongue"), ("inhaled", "breathed in"),
+                 ("nebulised", "breathed in as a mist"), ("topical", "on the skin"),
+                 ("transdermal", "as a patch on the skin"), ("PR", "into the back passage"), ("PV", "into the vagina"),
+                 ("nasal", "into the nose"), ("eye", "into the eye"), ("ear", "into the ear")]
+
+
+def _route_notes(med, history="", result="sodium 140 mmol/L"):
+    return ROUTE_NOTES.format(med=med, history=history, result=result)
+
+
+def test_r11j_signed_route_list_matches_ruling():
+    assert set(L.ROUTES) == {r for r, _ in SIGNED_ROUTES}
+    assert all(L.ROUTE_PLAIN[r] == p for r, p in SIGNED_ROUTES)
+
+
+@pytest.mark.parametrize("route,plain", SIGNED_ROUTES)
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11j_signed_route_checker_and_letters(tmp_path, route, plain, brief):
+    text = _route_notes(f"methotrexate 15 mg every 2 weeks {route} reason: arthritis")
+    c = _check(tmp_path / "chk", text)
+    assert c.returncode == 0 and c.stdout.strip() == L.TEMPLATE_OK, c.stderr
+    r, out = _run_t(tmp_path / "cli", text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    lid = line_of(text, "methotrexate")
+    med = next(l for l in md.splitlines() if lid in l and "methotrexate" in l)
+    if brief.endswith("patient"):
+        assert f"methotrexate 15 mg every 2 weeks {route} ({plain})" in med, med
+    else:
+        assert f"methotrexate 15 mg every 2 weeks {route} (for arthritis)" in med, med
+    assert "[flag" not in med, med
+    assert not any(lid in l for l in r.stderr.splitlines()), r.stderr
+
+
+@pytest.mark.parametrize("brief,want", [("update to GP", "every 2 weeks SC (for arthritis)"),
+                                        ("update to patient", "every 2 weeks SC (under the skin), for arthritis")])
+def test_r11j_every_2_weeks_sc_ruled_example(tmp_path, brief, want):
+    text = _route_notes("methotrexate 15 mg every 2 weeks SC reason: arthritis")
+    assert _check(tmp_path / "chk", text).returncode == 0
+    r, out = _run_t(tmp_path / "cli", text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    assert want in (out / "letter.md").read_text()
+
+
+@pytest.mark.parametrize("route", ["subcutaneous", "intravenous", "PO", "sublingual", "by mouth", "intrathecal"])
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11j_unknown_route_flagged_not_refused(tmp_path, route, brief):
+    text = _route_notes(f"methotrexate 15 mg every 2 weeks {route} reason: arthritis")
+    c = _check(tmp_path / "chk", text)
+    assert c.returncode == 0 and c.stdout.strip() == L.TEMPLATE_OK, c.stderr
+    r, out = _run_t(tmp_path / "cli", text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    lid = line_of(text, "methotrexate")
+    assert L.ROUTE_NOTICE.format(lid=lid) in r.stderr
+    assert f"every 2 weeks {route} {L.ROUTE_FLAG}" in (out / "letter.md").read_text()
+    f = subprocess.run(CLI + [str(tmp_path / "cli" / "n.txt"), "--brief", brief, "--final"],
+                       capture_output=True, text=True)
+    assert f.returncode != 0                                    # a route flag blocks --final
+
+
+@pytest.mark.parametrize("where,kw", [("results", dict(result="ECG PR 160 ms")),
+                                      ("results", dict(result="IV fluid balance 500 mL")),
+                                      ("history", dict(history="Given IV fluids. PR exam normal.")),
+                                      ("reason", dict(med="methotrexate 15 mg every 2 weeks SC reason: PR bleed")),
+                                      ("reason", dict(med="methotrexate 15 mg every 2 weeks SC reason: IV line"))])
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11j_route_words_outside_route_slot_still_flagged(tmp_path, where, kw, brief):
+    kw.setdefault("med", "methotrexate 15 mg every 2 weeks oral reason: arthritis")
+    text = _route_notes(**kw)
+    r, out = _run_t(tmp_path, text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert re.search(r"\b(?:PR|IV) \[flag: abbreviation", md), md
+
+
+def test_r11j_route_slot_only_in_medicine_lines_unit():
+    assert L.flagged_tokens("PR 160 ms") == ["PR"] and L.flagged_tokens("IV fluids") == ["IV"]
+    assert L.med_item("morphine 2 mg every 4 hours IV max 10 mg in 24 hours reason: pain")["route"] == "IV"
+    assert L.med_item("methotrexate 15 mg every 2 weeks reason: arthritis")["route"] is None
+    assert L.med_item("methotrexate 15 mg weekly intrathecal reason: arthritis")["route"] == "intrathecal"
