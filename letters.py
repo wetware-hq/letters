@@ -85,12 +85,14 @@ STIGMA_DROP = [r"\bdrug[- ]seeking\b", r"\bpoor historian\b", r"\bfrequent flyer
 NONCOMPLIANT = re.compile(r"\bnon-?complian(?:t|ce)(?:\s+with\s+([^.;,]+))?", re.I)
 SENSITIVE = {
     "HIV status": [r"\bHIV\b", r"\bantiretroviral"],
+    "PrEP": [r"\bPrEP\b", r"\bpre-exposure prophylaxis"],
     "abuse": [r"\babuse", r"\bassault", r"\bdomestic violence"],
     "psychiatric history": [r"\bdepress", r"\bbipolar", r"\bschizo", r"\bpsychiatr", r"\bpsychos",
                             r"\bself[- ]harm", r"\boverdose", r"\banxiety", r"\bsuicid"],
 }
 RELEVANT = {
     "HIV status": r"infectious|immunolog|hiv|sexual health",
+    "PrEP": r"sexual health|infectious|hiv",
     "abuse": r"social work|safeguarding|psychiatr|mental health",
     "psychiatric history": r"psychiatr|mental health|psycholog",
 }
@@ -1025,6 +1027,11 @@ def _term_re(t):
     return re.compile(rf"(?<![A-Za-z0-9]){re.escape(t)}(?![A-Za-z0-9])", re.I)
 
 
+def _meds_of(items):
+    """Medicine and brand names of the cut items (allowed only on their own medication line)."""
+    return [m for v in items.values() for m in list(v.get("medicines", [])) + list(v.get("brands", {}))]
+
+
 def _cut_items(dropped):
     linked = load_linked()
     return {cat: v for cat, v in linked.items() if any(cat in d for d in dropped)}
@@ -1083,7 +1090,7 @@ def flag_linked_medicines(md, text, dropped, flags):
     items = _cut_items(dropped)
     if not items:
         return md
-    meds = [m for v in items.values() for m in v.get("medicines", [])]
+    meds = _meds_of(items)
     soft = [t for v in items.values() for t in v.get("flag_terms", [])]
     src = _source_lines(text)
     lines = md.split("\n")
@@ -1104,19 +1111,21 @@ def flag_linked_medicines(md, text, dropped, flags):
 
 
 def refuse_linked_terms(md, text, dropped):
+    """Refuse when a cut item's term, or one of its medicine or brand names outside that medicine's own
+    medication line, still appears in the letter. The refusal names the line only."""
     items = _cut_items(dropped)
     if not items:
         return
     terms = [t for v in items.values() for t in v.get("terms", [])]
-    meds = [m for v in items.values() for m in v.get("medicines", [])]
+    meds = _meds_of(items)
     src = _source_lines(text)
     for _, line in _body_lines(md):
         ids = _line_ids(line)
         body = FLAG_ANY.sub("", split_ids(line)[0])
-        if any(i in src and src[i][0] in MED_TAGS for i in ids):
-            for m in meds:                       # medicine names are exempt on medicine lines
-                body = _term_re(m).sub(" ", body)
-        for t in terms:
+        own = [m for m in meds if any(i in src and src[i][0] in MED_TAGS and _term_re(m).search(src[i][1]) for i in ids)]
+        for m in sorted(own, key=len, reverse=True):     # a medicine is allowed on its own medication line
+            body = _term_re(m).sub(" ", body)
+        for t in terms + meds:
             if _term_re(t).search(body):
                 lid = next((i for i in ids if i in src and _term_re(t).search(src[i][1])), ids[0])
                 raise Refused(LINKED_REFUSED.format(lid=lid))
