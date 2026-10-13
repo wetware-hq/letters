@@ -614,6 +614,11 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     return md, dropped
 
 
+def finalise(md):
+    """Remove [Lx] source tags only. The draft mark and draft footer stay until the signing clinician removes them."""
+    return re.sub(r" \[L\d+(?:, L\d+)*\]", "", md)
+
+
 def make_letter(text, letter_type, to, recipient=None, audience=None, template=None, brand=None):
     return build(text, letter_type, to, recipient, audience, template, brand)[0]
 
@@ -666,6 +671,8 @@ def main(argv=None):
     ap.add_argument("--template", help="Markdown file with {{slot}} placeholders")
     ap.add_argument("--brand", help="brand pack folder containing brand.toml")
     ap.add_argument("--out", help="folder to write letter.md into (only the letter is written)")
+    ap.add_argument("--final", action="store_true",
+                    help="remove [Lx] source tags only; the draft mark and footer stay")
     ap.add_argument("--heldout", help="external folder of held-out synthetic notes; reports a failure rate")
     a = ap.parse_args(argv)
     llm_guard()
@@ -694,6 +701,8 @@ def main(argv=None):
         for d in dropped:
             print(f"  - {d}", file=sys.stderr)
     dropped.clear()
+    if a.final:
+        md = finalise(md)
     if a.out:
         out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
         (out / "letter.md").write_text(md, encoding="utf-8")

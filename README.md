@@ -54,8 +54,11 @@ pytest -q
 python letters.py fixtures/chest_pain.txt --brief "referral to cardiology"
 python letters.py fixtures/podiatry_referral.txt --brief "referral to podiatry" \
   --template templates/minimal.md --brand brands/example-clinic --out out/
+python letters.py fixtures/chest_pain.txt --brief "referral to cardiology" --final
 python letters.py --heldout ../heldout-notes   # folder outside this repo; prints counts only
 ```
+
+`--final` removes source tags only. The draft mark stays until the signing clinician removes it.
 
 ## Evaluation
 

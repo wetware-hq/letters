@@ -436,3 +436,40 @@ def test_rewritten_label_not_earned_by_cited_line_refused():
     with pytest.raises(Refused, match="word not in cited lines"):
         check(md.replace("exertional chest pain [L5]", "exertional chest pain, not taking medicines as prescribed [L5]"),
               src, "referral")
+
+
+# ---------- --final: source tags only ----------
+def _cli(*extra):
+    r = subprocess.run(CLI + [str(HERE / "fixtures" / "chest_pain.txt"), "--brief", "referral to cardiology", *extra],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def _draft_intact(md):
+    assert "**DRAFT, unsigned**" in md
+    assert "Signature: [unsigned]" in md
+    assert md.rstrip().endswith("Draft: check against the record before sending.")
+
+
+@pytest.mark.parametrize("brand", [False, True], ids=["no-brand", "brand"])
+def test_final_removes_tags_keeps_draft_mark_and_footer(brand):
+    extra = ["--brand", str(HERE / "brands" / "example-clinic")] if brand else []
+    draft, final = _cli(*extra), _cli(*extra, "--final")
+    assert re.search(r"\[L\d+", draft) and not re.search(r"\[L\d+", final)
+    _draft_intact(draft); _draft_intact(final)
+    if brand:
+        assert re.search(r"logo\]\([^)]*\) \*\*DRAFT, unsigned\*\*", final)
+    assert re.sub(r" \[L\d+(?:, L\d+)*\]", "", draft) == final
+
+
+def test_final_text_otherwise_unchanged():
+    md = make_letter(F("pneumonia_admission.txt"), "discharge", "General practice", audience="gp")
+    fin = L.finalise(md)
+    assert "[L" not in fin and fin.count("\n") == md.count("\n")
+    _draft_intact(fin)
+
+
+def test_readme_describes_final_exactly():
+    assert ("`--final` removes source tags only. The draft mark stays until the signing clinician removes it."
+            in (HERE / "README.md").read_text())
