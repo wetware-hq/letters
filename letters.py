@@ -383,8 +383,13 @@ def render_section(name, st, audience):
 # An abbreviation means different things in different specialties (MS, PE, CP, RA...). Default: keep it as
 # written and flag it. Expand only from the reviewed single-meaning list (ships empty) or a clinician --resolve.
 FLAG = "[flag: abbreviation, meaning not confirmed]"
-ABBR_RE = re.compile(r"(?<![\w/-])(?:c/o|o/e|(?=[A-Za-z0-9]*[A-Z][A-Za-z0-9]*[A-Z])[A-Za-z][A-Za-z0-9]{1,6}|"
-                     r"Hb|bd|tds|qds|nocte|mane|prn|hx|pt|od)(?![\w/-])")
+# Known shorthand is matched in any case (sob, SOB); otherwise a token with 2+ capitals (NSTEMIx, T2DM, eGFR).
+# Units (mg, mL, mmol/L, mg/L, kg) have at most one capital and are never matched.
+# A Roman numeral after stage/grade/class/type/phase/NYHA is a number, not an abbreviation (stage IV).
+_ROMAN_CTX = "|".join(rf"(?<=(?i:{w}) )" for w in ("stage", "grade", "class", "type", "types", "phase", "NYHA"))
+ABBR_RE = re.compile(r"(?<![\w/-])(?!(?:" + _ROMAN_CTX + r")[IVX]+(?![\w/-]))"
+                     r"(?:(?i:c/o|o/e|sob|hx|pt|bd|tds|qds|nocte|mane|prn|od)|Hb|"
+                     r"(?=[A-Za-z0-9]*[A-Z][A-Za-z0-9]*[A-Z])[A-Za-z][A-Za-z0-9]{1,6})(?![\w/-])")
 SINGLE_MEANING_FILE = HERE / "single_meaning.toml"
 # Plain-language swaps for patients: ordinary words only, never abbreviations.
 PLAIN = [(r"\boral\b", "tablets"), (r"\bhypertension\b", "high blood pressure"), (r"\bexertional\b", "when active"),

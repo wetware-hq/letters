@@ -547,3 +547,49 @@ def test_goldens_expand_no_abbreviation():
         t = g.read_text()
         assert "atrial fibrillation" not in t.lower(), g.name
         assert not re.search(r"\w \([A-Za-z0-9/]{2,7}\)", t), g.name   # no "expansion (AB)" anywhere
+
+
+# ---------- abbreviation detection edges ----------
+def _one(line):
+    flags = []
+    md, _ = build(f"Patient: SYNTH-3101\n1937-05-01 Clinic review.\n{line}\nFollow-up: review in 2 weeks",
+                  "gp-update", "General practice", flags=flags)
+    return md, [f.split()[0] for f in flags]
+
+
+def test_lowercase_known_shorthand_flagged():
+    md, flags = _one("Problem: sob on exertion")
+    assert f"sob {L.FLAG} on exertion" in md and "sob" in flags
+    assert "shortness of breath" not in md
+
+
+def test_suffix_shorthand_flagged_not_passed_through():
+    md, flags = _one("PMHx: NSTEMIx")
+    assert f"NSTEMIx {L.FLAG}" in md and "NSTEMIx" in flags
+    with pytest.raises(Refused, match="not flagged"):
+        check(md.replace(f"NSTEMIx {L.FLAG}", "NSTEMIx"),
+              parse("Patient: SYNTH-3101\n1937-05-01 Clinic review.\nPMHx: NSTEMIx\nFollow-up: review in 2 weeks")[1],
+              "gp-update")
+
+
+@pytest.mark.parametrize("line", ["Problem: chronic kidney disease stage IV", "Problem: heart failure NYHA class III",
+                                  "Problem: Stage II pressure injury"])
+def test_roman_numeral_stage_not_flagged(line):
+    md, flags = _one(line)
+    assert not any(re.fullmatch(r"[IVX]+", f) for f in flags)
+    assert not re.search(r"\b[IVX]+ \[flag", md)
+    assert flags == (["NYHA"] if "NYHA" in line else [])
+
+
+def test_iv_route_still_flagged():
+    md, flags = _one("Problem: needs IV antibiotics")
+    assert flags == ["IV"]
+
+
+def test_units_not_flagged():
+    md, flags = _one("Med: ramipril 5 mg daily\nMed: lactulose 10 mL twice a day\nResult: potassium 4.1 mmol/L\n"
+                     "Result: CRP 12 mg/L\nResult: weight 70 kg")
+    assert flags == ["CRP"]
+    for u in ("5 mg", "10 mL", "4.1 mmol/L", "12 mg/L", "70 kg"):
+        assert u in md
+    assert all(not L.abbreviations(u) for u in ("mg", "mL", "mmol/L", "mg/L", "kg"))
