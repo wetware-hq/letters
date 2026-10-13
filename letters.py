@@ -26,9 +26,10 @@ ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 DMY = re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})\b")
 LONGNUM = re.compile(r"(?<![\w.])\+?\d(?:[\s-]?\d){7,}(?![\w.])")
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
-# The synthetic-data tripwire (AGENTS.md: "synthetic only: SYNTH- ids, 1937 dates") is the ONE place a year lives.
-# Every parser below matches any year (DATE); only check_safe() enforces this policy.
-SYNTH_YEAR = "1937"
+# The synthetic-data tripwire: real calendar dates from SYNTH_FIRST to SYNTH_LAST only (approved 13 Oct 2026).
+# Every parser matches any year (DATE); only check_safe() enforces this range.
+SYNTH_FIRST, SYNTH_LAST = "1930-01-01", "1939-12-31"
+SYNTH_RANGE = "1 Jan 1930 to 31 Dec 1939"
 DATE = r"\d{4}-\d{2}-\d{2}"
 
 
@@ -54,11 +55,13 @@ def check_safe(text):
     if len(ids) > 1:
         raise Refused("Refused: notes mention more than one patient identifier.")
     for m in ISO.finditer(text):
-        if m.group(1) != SYNTH_YEAR:
-            raise Refused(INCIDENT + f" (reason: date outside {SYNTH_YEAR})")
+        if not (valid_date(m.group(0)) and SYNTH_FIRST <= m.group(0) <= SYNTH_LAST):
+            raise Refused(INCIDENT + f" (reason: date outside {SYNTH_RANGE})")
     for m in DMY.finditer(text):
-        if m.group(3) not in (SYNTH_YEAR, SYNTH_YEAR[2:]):
-            raise Refused(INCIDENT + f" (reason: date outside {SYNTH_YEAR})")
+        d, mo, y = (int(x) for x in m.groups())
+        y = y + 1900 if y < 100 else y
+        if not (valid_date(f"{y:04d}-{mo:02d}-{d:02d}") and 1930 <= y <= 1939):
+            raise Refused(INCIDENT + f" (reason: date outside {SYNTH_RANGE})")
     if LONGNUM.search(ISO.sub(" ", SYNTH.sub(" ", text))):
         raise Refused(INCIDENT + " (reason: phone- or card-number-like digits)")
     return ids.pop()
@@ -2421,7 +2424,7 @@ def check_template_main(argv=None):
             kind, reader, _, brief_copy = read_brief(open(a.brief, encoding="utf-8").read())
             patient = is_patient_letter(reader, None)
         pre_template_checks(text, None, brief_copy, patient, [x.strip() for x in a.not_copy])
-        from_template(text)
+        check_safe(from_template(text))          # the same synthetic-data safeguard the letter command runs
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2

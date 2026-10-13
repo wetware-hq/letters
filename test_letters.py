@@ -3138,9 +3138,7 @@ def test_r11f_parsers_take_any_year_tripwire_is_the_only_year():
     assert L.OUTDATE.search("on 2 May 1935").group(3) == "1935"
     assert L.V_DATE.match("1939-01-01: x")
     src = pathlib.Path(L.__file__).read_text()
-    assert src.count("1937") == 2 and 'SYNTH_YEAR = "1937"' in src       # comment + the one policy constant
-    with pytest.raises(L.Refused, match="date outside 1937"):
-        L.check_safe("SYNTH-1 seen 1936-05-01")                          # synthetic-data tripwire unchanged
+    assert src.count('"1930-01-01", "1939-12-31"') == 1 and "SYNTH_YEAR" not in src   # range lives in one place
 
 
 @pytest.mark.parametrize("brief,inc", [("referral to podiatry", []),
@@ -3247,3 +3245,35 @@ def test_r11f_gtn_signed_plain_words_no_flag(tmp_path, brief):
     md = (out / "letter.md").read_text()
     assert "glyceryl trinitrate (GTN) 400 mcg" in md and f"GTN {L.FLAG}" not in md
     assert not any(line_of(text, "GTN") in l for l in r.stderr.splitlines()), r.stderr
+
+
+
+@pytest.mark.parametrize("d,ok", [("1930-01-01", True), ("1939-12-31", True), ("1935-06-15", True),
+                                  ("1929-12-31", False), ("1940-01-01", False), ("1936-02-30", False)])
+def test_r11g_safeguard_accepts_1930s_real_dates_only(d, ok):
+    if ok:
+        assert L.check_safe(f"SYNTH-1 seen {d}") == "SYNTH-1"
+    else:
+        with pytest.raises(L.Refused) as e:
+            L.check_safe(f"SYNTH-1 seen {d}")
+        assert "date outside 1 Jan 1930 to 31 Dec 1939" in str(e.value)
+
+
+@pytest.mark.parametrize("d", ["1930-01-01", "1939-12-31", "1929-12-31", "1940-01-01"])
+def test_r11g_checker_and_letter_command_agree_on_dates(tmp_path, d):
+    text = tpl(question="Please review.", problems=("cough",), date=d, actions=("review in 2 weeks, GP",))
+    c = _check(tmp_path / "c", text)
+    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to GP")
+    ok = d.startswith("193")
+    assert (c.returncode == 0) == ok and (r.returncode == 0) == ok, (c.stderr, r.stderr)
+    if not ok:
+        assert c.stderr.strip() == r.stderr.strip() and "1 Jan 1930 to 31 Dec 1939" in c.stderr
+
+
+def test_r11g_checker_calls_the_same_safeguard(monkeypatch, tmp_path):
+    calls = []
+    real = L.check_safe
+    monkeypatch.setattr(L, "check_safe", lambda t: calls.append(1) or real(t))
+    n = tmp_path / "n.txt"; n.write_text(tpl(question="Please review."))
+    assert L.check_template_main([str(n)]) == 0 and calls
+
