@@ -176,7 +176,7 @@ def test_uncertainty_preserved():
 
 
 def test_referral_without_question_fails():
-    with pytest.raises(Refused, match="no 'Question:' line"):
+    with pytest.raises(Refused, match="this referral has no question"):
         make_letter("SYNTH-1\n1937-01-01\nProblem: cough", "referral", "Respiratory")
 
 
@@ -280,7 +280,7 @@ def test_a5_dropped_list_screen_only_and_out_holds_only_letter(tmp_path):
     out = tmp_path / "out"
     r = subprocess.run(CLI + [str(HERE / "fixtures" / "podiatry_referral.txt"), "--brief", "referral to podiatry",
                               "--out", str(out)], capture_output=True, text=True)
-    assert r.returncode == 0 and "Dropped or changed" in r.stderr and "bipolar" in r.stderr
+    assert r.returncode == 0 and re.search(r"^Cut from this letter: L\d+", r.stderr, re.M) and "bipolar" not in r.stderr
     assert [p.name for p in out.iterdir()] == ["letter.md"]
     letter = (out / "letter.md").read_text()
     assert "Dropped" not in letter and "bipolar" not in letter and "historian" not in letter
@@ -546,7 +546,8 @@ def test_ambiguous_abbreviation_flagged_not_expanded_and_final_refused(tmp_path,
     r = subprocess.run(CLI + [str(_notes(tmp_path, ab)), "--type", "gp-update", "--to", "GP", "--final"],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "--final refused" in r.stderr and r.stdout == ""
-    assert f"- {ab} [L3]" in r.stderr or f"  - {ab}" in r.stderr   # flag listed in the terminal
+    assert "Flag: an abbreviation on line L3 has no confirmed meaning." in r.stderr   # listed by line only
+    assert ab not in r.stderr.replace("--resolve", "")
 
 
 def test_single_meaning_list_has_exactly_ten_signed_off_entries():
@@ -1141,7 +1142,7 @@ def test_missing_required_detail_refused_names_line_only(line, lost):
 def test_sensitive_kept_for_relevant_reader():
     flags = []
     md, dropped = build(HIV_NOTES + "PMHx: undetectable VL\n", "gp-update", "Infectious diseases", flags=flags)
-    assert "abacavir" in md and "(HIV" in md and "viral load" in md.lower() and "undetectable VL" in md
+    assert "abacavir" in md and "HIV" in md and "viral load" in md.lower() and "undetectable VL" in md
     assert not any(f.startswith("Flag: a medicine") for f in flags)
     assert not any("HIV status" in d for d in dropped)
 
@@ -1307,7 +1308,7 @@ def test_allergy_extra_wording_flagged_not_not_documented(line):
     assert "not documented" not in al and L.ALLERGY_FLAG in al and ALLERGY_MSG in flags
 
 
-@pytest.mark.parametrize("line", ["echo cardiology arranging", "echo booked by ward team", "ferritin GP chasing"])
+@pytest.mark.parametrize("line", ["echo to be arranged", "ferritin chasing", "urine culture will follow", "echo - next week"])
 def test_pending_owner_wording_flagged_not_not_documented(line):
     text = "Patient: SYNTH-4602\n1937-06-03 Clinic review.\nPending: " + line + "\nFollow-up: review in 2 weeks\n"
     flags = []
@@ -1331,3 +1332,131 @@ def test_checker_messages_line_only_no_letter_text(mutate):
         assert re.fullmatch(r"Refused: [a-z ,0-9;]+ at (line L\d+|letter line \d+)\.( [A-Za-z ,.]+)?", msg), msg
     for tok in ("Synthword", "9", "review", "Clinic", "knee"):
         assert tok not in str(e.value), tok
+
+
+
+# ---------- round 4: line-only printing, pending, reasons, questions, allergies ----------
+REASON_ND = "reason not documented"
+
+
+def _cli_out(tmp_path, notes_text, *args):
+    n = tmp_path / "notes.txt"; n.write_text(notes_text)
+    out = tmp_path / "out"
+    r = subprocess.run(CLI + [str(n), *args, "--out", str(out)], capture_output=True, text=True)
+    return r, out
+
+
+FIXED_OK = set()
+
+
+def _fixed_words():
+    import letters as _L
+    src = " ".join(str(v) for v in vars(_L).values() if isinstance(v, str))
+    return {w.lower() for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9+\-=./]{3,}", src)}
+
+
+SURNAME_NOTES = """Patient: SYNTH-4801
+1937-06-03 Clinic review.
+Problem: knee pain, seen by Dr Quorvex
+PMHx: HIV
+Med: abacavir 600 mg daily (for HIV)
+Med: Zentrolib 5 mg daily
+Allergy: penicillin - rash
+Pending: MRI knee - ortho registrar to chase
+Follow-up: GP review in 2 weeks
+"""
+
+
+@pytest.mark.parametrize("args", [("--type", "gp-update", "--to", "Podiatry"), ("--brief", "update to GP"),
+                                  ("--brief", "update to patient")])
+def test_written_letter_prints_no_note_tokens(tmp_path, args):
+    r, out = _cli_out(tmp_path, SURNAME_NOTES, *args)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "" and (out / "letter.md").exists()
+    fixed = _fixed_words()
+    toks = {w.lower() for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9+\-=./]{3,}", SURNAME_NOTES)}
+    leaked = [w for w in toks - fixed if re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", r.stderr.lower())]
+    assert leaked == []
+    assert "Quorvex" not in r.stderr and "Zentrolib" not in r.stderr
+    for line in r.stderr.splitlines():
+        assert re.fullmatch(r"(Flag|Cut from this letter): .*", line), line
+
+
+def test_cut_list_is_line_ids_only(tmp_path):
+    r, out = _cli_out(tmp_path, SURNAME_NOTES, "--type", "gp-update", "--to", "Podiatry")
+    cut = [l for l in r.stderr.splitlines() if l.startswith("Cut from this letter")]
+    assert cut == ["Cut from this letter: L4, L5."]
+
+
+@pytest.mark.parametrize("line,test,owner", [
+    ("MRI knee renal fellow to chase", "MRI knee", "renal fellow to chase"),
+    ("echo booked by ward team", "echo booked", "ward team"),
+    ("ferritin GP chasing", "ferritin", "GP chasing"),
+    ("bone scan - oncology registrar", "bone scan", "oncology registrar"),
+    ("biopsy (district nurse to collect)", "biopsy", "district nurse to collect"),
+])
+def test_owner_recognition_generalised(line, test, owner):
+    assert L.split_owner(line) == (test, owner)
+
+
+@pytest.mark.parametrize("line", ["Echo pending, renal fellow to chase", "Awaiting blood cultures",
+                                  "Thyroid function still pending", "Biopsy result outstanding - ward team"])
+def test_untagged_pending_goes_to_pending_section(line):
+    text = "Patient: SYNTH-4901\n1937-06-03 Clinic review.\nProblem: knee pain\n" + line + "\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "GP")
+    p = section(md, "Results still to come")
+    assert "No results pending" not in md and "[L4]" in p
+    assert "[L4]" not in section(md, "Background")
+
+
+@pytest.mark.parametrize("line,reason", [
+    ("Med: allopurinol 100 mg daily for gout", "gout"), ("Med: allopurinol 100 mg daily (gout)", "gout"),
+    ("Med: allopurinol 100 mg daily - for gout", "gout"), ("Med: allopurinol 100 mg daily to treat gout", "gout"),
+    ("Med: allopurinol 100 mg daily; indication gout", "gout"), ("Med: allopurinol 100 mg daily (for gout)", "gout"),
+])
+def test_medicine_reason_found_never_reason_not_documented(line, reason):
+    text = "Patient: SYNTH-5001\n1937-06-03 Clinic review.\nProblem: gout\n" + line + "\nFollow-up: review in 2 weeks\n"
+    for aud, to in (("patient", "Patient"), (None, "GP")):
+        md, _ = build(text, "gp-update", to, audience=aud)
+        meds = section(md, "Your medicines now" if aud else "Current medicines")
+        assert reason in meds and REASON_ND not in meds, (aud, meds)
+
+
+@pytest.mark.parametrize("line", ["Med: allopurinol 100 mg daily", "Med: allopurinol 100 mg daily for 2 weeks",
+                                  "Med: allopurinol 100 mg (twice daily)"])
+def test_medicine_reason_missing_says_not_documented_for_patient(line):
+    text = "Patient: SYNTH-5002\n1937-06-03 Clinic review.\nProblem: gout\n" + line + "\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "Patient", audience="patient")
+    assert REASON_ND in section(md, "Your medicines now")
+
+
+def test_patient_hiv_reason_never_with_not_documented():
+    md, _ = build(HIV_NOTES, "gp-update", "Patient", audience="patient")
+    meds = section(md, "Your medicines now")
+    for l in meds.splitlines():
+        assert not ("HIV" in l and REASON_ND in l), l
+
+
+@pytest.mark.parametrize("q", ["Question: is surgery needed?", "Question for cardiology: is surgery needed?",
+                               "Q: is surgery needed?", "Q for renal: is surgery needed?", "Request: please assess",
+                               "Is surgery needed?"])
+def test_referral_question_forms(q):
+    text = "Patient: SYNTH-5101\n1937-06-03 Clinic review.\nProblem: knee pain\n" + q + "\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "referral", "Orthopaedics")
+    assert "[L4]" in md.split("## ")[1]
+
+
+def test_referral_without_question_new_wording(tmp_path):
+    r, out = _cli_out(tmp_path, "Patient: SYNTH-5102\n1937-06-03 Clinic review.\nProblem: knee pain\n",
+                      "--brief", "referral to orthopaedics")
+    assert r.returncode == 2 and r.stderr.strip() == 'Refused: this referral has no question. Add a line starting "Question:".'
+    assert not out.exists() or list(out.iterdir()) == []
+
+
+@pytest.mark.parametrize("line", ["penicillin - none documented", "penicillin (reaction not documented)",
+                                  "penicillin: unknown", "penicillin - nil known", "penicillin - reaction unknown"])
+def test_allergy_no_reaction_text_exact(line):
+    text = "Patient: SYNTH-5201\n1937-06-03 Clinic review.\nAllergy: " + line + "\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "GP")
+    al = section(md, "Allergies")
+    assert al.startswith("- penicillin: reaction not documented [L3]"), al

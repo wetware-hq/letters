@@ -180,6 +180,10 @@ OWNER_SEP = re.compile(r"^\s*(?P<test>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u201
 OWNERISH = re.compile(r"\b(?:to|will|arrang\w*|chas\w*|follow\w*|f/u|team|clinic|GP|by|review\w*|booked|request\w*)\b", re.I)
 
 
+NO_REACTION = re.compile(r"^\s*(?:(?:reaction|reactions)\s+)?(?:none|nil|no|not|unknown|unclear|undocumented|n/?k)\b"
+                         r"[\w\s/]*$", re.I)
+
+
 def split_reaction(part):
     """Return (drug, reaction or None). A documented reaction is always kept as written."""
     m = REACTION.match(part)
@@ -190,14 +194,77 @@ def split_reaction(part):
     return part.strip(), None
 
 
+OWNER_ROLE = re.compile(r"\b(?:fellow|registrar|reg|consultant|team|nurse|GP|clinic|service|SHO|doctor|dr|surgeon|"
+                        r"physician|pharmacist|ward|practice|cardiology|nephrology|renal|oncology|haematology|"
+                        r"respiratory|neurology|gastroenterology|endocrinology|dermatology|rheumatology|urology|"
+                        r"microbiology|micro|lab|physio|dietitian|midwife|patient)\b", re.I)
+OWNER_ACTION = re.compile(r"\b(?:to\s+(?:arrange|chase|follow|review|check|action|phone|call|book|see)|will)\b", re.I)
+OWNER_MOD = {"renal", "cardiology", "ward", "practice", "medical", "surgical", "respiratory", "on-call", "duty",
+             "specialist", "junior", "senior", "oncology", "haematology", "neurology", "urology", "district"}
+OWNER_SEP_ANY = re.compile(r"\s[-\u2013\u2014]+\s|:|\(|,")
+
+
 def split_owner(body):
-    """Return (test, owner or None) for a pending line with the owner written after a dash, colon, bracket or comma."""
+    """Return (test, owner or None). The owner is a role or team, or anyone given an action ('X to chase')."""
     m = OWNER_SEP.match(body)
     if m:
         who = (m.group("p") if m.group("p") is not None else m.group("who")).strip()
-        if who:
+        if who and (OWNER_ROLE.search(who) or OWNER_ACTION.search(who)):
             return m.group("test").strip(), who
+    for r in OWNER_ROLE.finditer(body):
+        start = r.start()
+        before = body[:start].rstrip().split()
+        if before and before[-1].lower() in OWNER_MOD:
+            start = body.rfind(before[-1], 0, start)
+            before = before[:-1]
+        test = re.sub(r"(?:\s+(?:by|with|via|for))+$", "", " ".join(before), flags=re.I).strip(" ,;:-")
+        if test:
+            return test, body[start:].strip(" .")
     return body.strip(), None
+
+
+PENDING_AFTER = re.compile(r"^(?P<test>.+?)\s+(?:(?:is|are|still|results?)\s+)*(?:pending|awaited|outstanding)\b"
+                           r"[\s,;:.-]*(?P<rest>.*?)\s*\.?$", re.I)
+PENDING_BEFORE = re.compile(r"^(?:awaiting|pending|outstanding)\s*:?\s+(?P<test>.+?)\s*\.?$", re.I)
+
+
+def untagged_pending(body):
+    """'echo pending, renal fellow to chase' / 'awaiting echo' -> pending body in 'test - rest' form, else None."""
+    m = PENDING_BEFORE.match(body)
+    if m:
+        return m.group("test")
+    m = PENDING_AFTER.match(body)
+    if m and not NEG.match(body):
+        rest = m.group("rest").strip(" ,;-")
+        return f"{m.group('test').strip()} - {rest}" if rest else m.group("test").strip()
+    return None
+
+
+DURATION = re.compile(r"^(?:\d|(?:a|an|one|two|three|four|five|six|several|another)\s+(?:day|week|month|year)s?\b|"
+                      r"(?:day|week|month|year)s?\b|now\b|life\b|the\s+(?:next|rest)\b)", re.I)
+DOSEISH = re.compile(r"\d|\b(?:mg|mcg|g|ml|units?|daily|nocte|mane|bd|tds|qds|od|prn|weekly|tablets?|puffs?|"
+                     r"once|twice|morning|night|evening)\b", re.I)
+
+
+def med_reason(drug):
+    """Find a reason written another way on the medicine line: 'X 5 mg daily for gout', 'X - for gout',
+    'X 5 mg (gout)', 'X 5 mg to treat gout', 'X 5 mg; indication gout'. Returns (drug text, reason or None)."""
+    m = re.match(r"^(?P<d>.*?)\s*[;,-]?\s*\b(?:for|to treat|treats?|indication:?|reason:?|because of)\s+(?P<r>[^()]+?)\s*$",
+                 drug, re.I)
+    if m and m.group("d").strip() and not DURATION.match(m.group("r")):
+        return m.group("d").strip(" ,;-"), m.group("r").strip(" .")
+    m = re.match(r"^(?P<d>.*?)\s*\((?P<r>[^()]+)\)\s*(?P<tail>.*)$", drug)
+    if m and m.group("d").strip() and not DOSEISH.search(m.group("r")):
+        return f"{m.group('d').strip()} {m.group('tail').strip()}".strip(), m.group("r").strip()
+    return drug, None
+
+
+def tag_kind(tag):
+    """Map a note tag to its kind. 'Question for X', 'Q for X' and 'Request' are questions."""
+    t = re.sub(r"\s+", " ", tag.strip().lower())
+    if re.match(r"^(?:question|q)(?: for .+)?$", t) or t in ("request", "referral question"):
+        return "question"
+    return TAGS.get(t)
 
 
 def _mkey(s):
@@ -224,11 +291,18 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
         for lid, line in e["lines"]:
             ids = [lid]
             m = TAG.match(line)
-            kind = TAGS.get(m.group("tag").strip().lower()) if m else None
+            kind = tag_kind(m.group("tag")) if m else None
             body = m.group("body").strip() if kind else line
             body = clean_text(body, ids, to, dropped, med=kind in ("med", "stop"), keep=keep_indications)
             if not body:
                 continue
+            if not kind and body.rstrip().endswith("?"):
+                st["question"].append((body, ids))
+                continue
+            if not kind:
+                pb = untagged_pending(body)
+                if pb:
+                    kind, body = "pending", pb
             if not kind:
                 neg = NEG.match(body)
                 ro = RULEDOUT.match(body)
@@ -255,6 +329,8 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 drug, kw, val = mm.group("drug").strip(), (mm.group("k") or "").lower(), mm.group("v")
                 ind = val.strip() if val and kw.startswith(("for", "indication")) else None
                 reason = val.strip() if val and kw.startswith("reason") else None
+                if not ind and not reason:
+                    drug, ind = med_reason(drug)
                 if ind:
                     cat = sensitive_cat(ind)
                     if cat and not relevant(cat, to) and not keep_indications:
@@ -407,7 +483,9 @@ def section_items(name, st, audience="specialist"):
                 continue
             for part in re.split(r"[,;](?![^()]*\))", b):
                 drug, react = split_reaction(part)
-                if react:
+                if react and NO_REACTION.match(react):
+                    out.append(f"{drug}: reaction {ND}" + tag(i))
+                elif react:
                     out.append(f"{drug}: {react}" + tag(i))
                 elif len(part.split()) <= 1:              # nothing follows the drug name
                     out.append(f"{part.strip()}: reaction {ND}" + tag(i))
@@ -417,7 +495,7 @@ def section_items(name, st, audience="specialist"):
     if name == "pending":
         out = []
         for b, who, d, i in st["pending"].values():
-            if not who and OWNERISH.search(b):            # follow-up wording not parsed: keep, flag
+            if not who and (OWNERISH.search(b) or OWNER_SEP_ANY.search(b)):   # wording not parsed: keep, flag
                 out.append(f"{b} {OWNER_FLAG}, sent{dt(d) or ' on an undocumented date'}." + tag(i))
                 continue
             out.append(f"{b}, sent{dt(d) or ' on an undocumented date'}. Who follows up: {who or ND}." + tag(i))
@@ -887,7 +965,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     dropped = []
     st = cumsum(entries, to, dropped, keep_indications=(audience == "patient"))
     if letter_type == "referral" and not st["question"]:
-        raise Refused("Referral refused: the notes have no 'Question:' line. A referral must open with its question.")
+        raise Refused(REFERRAL_REFUSED)
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
                 resolved, flags)
     md = flag_long_sentences(md, flags)
@@ -947,7 +1025,7 @@ def _source_lines(text):
     for e in parse(text)[0]:
         for lid, line in e["lines"]:
             m = TAG.match(line)
-            kind = TAGS.get(m.group("tag").strip().lower()) if m else None
+            kind = tag_kind(m.group("tag")) if m else None
             out[lid] = (kind, m.group("body").strip() if kind else line)
     return out
 
@@ -1039,7 +1117,8 @@ def refuse_missing_required(md, text):
     for lid, (kind, body) in _source_lines(text).items():
         need = []
         if kind == "allergy":
-            need = [r for _, r in (split_reaction(p) for p in re.split(r"[,;](?![^()]*\))", body)) if r]
+            need = [r for _, r in (split_reaction(p) for p in re.split(r"[,;](?![^()]*\))", body))
+                    if r and not NO_REACTION.match(r)]
         elif kind == "pending":
             parts = re.split(r";\s*(?:follow-up|who|f/u)\s*:\s*", body, flags=re.I)
             who = parts[1].strip() if len(parts) > 1 else split_owner(parts[0])[1]
@@ -1049,6 +1128,7 @@ def refuse_missing_required(md, text):
                 raise Refused(REQUIRED_REFUSED.format(lid=lid))
 
 
+REFERRAL_REFUSED = 'Refused: this referral has no question. Add a line starting "Question:".'
 FINAL_REFUSED = ("--final refused: {n} flag(s) still open. Confirm each meaning with "
                  '--resolve "AB=meaning" (or edit the notes), then run --final again.')
 
@@ -1128,6 +1208,19 @@ def parse_brief(core):
     return kind, r[:1].upper() + r[1:]
 
 
+def line_only_flag(f):
+    """Print every flag beside a letter as fixed wording plus line ids; never source words."""
+    if f.startswith("Flag: "):
+        return f
+    ids = re.findall(r"\b[LR]\d+\b", f)
+    where = f"on line {', '.join(dict.fromkeys(ids))}" if ids else "in this letter"
+    if "(drug name, check spelling)" in f:
+        return f"Flag: a drug name {where} may be misspelled. Check it."
+    if re.match(r"^\d", f):
+        return f"Flag: a dose unit {where} is easy to misread. Check it."
+    return f"Flag: an abbreviation {where} has no confirmed meaning. Confirm it with --resolve."
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Synthetic notes + brief -> Markdown letter. Nothing else is stored.")
     ap.add_argument("notes", nargs="?", help="notes text file, or - for stdin")
@@ -1181,17 +1274,12 @@ def main(argv=None):
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
-    for f in [f for f in flags if f.startswith("Flag: ")]:
+    for f in dict.fromkeys(line_only_flag(f) for f in flags):
         print(f, file=sys.stderr)
-    flags = [f for f in flags if not f.startswith("Flag: ")]
-    if flags:
-        print("Abbreviations flagged, meaning not confirmed (resolve with --resolve \"AB=meaning\"):", file=sys.stderr)
-        for f in flags:
-            print(f"  - {f}", file=sys.stderr)
     if dropped:
-        print("Dropped or changed (for the clinician only; not saved):", file=sys.stderr)
-        for d in dropped:
-            print(f"  - {d}", file=sys.stderr)
+        cut = list(dict.fromkeys(i for d in dropped for i in re.findall(r"\b[LR]\d+\b", d.split(":")[0])))
+        print(f"Cut from this letter: {', '.join(cut)}." if cut else "Cut from this letter: lines not known.",
+              file=sys.stderr)
     dropped.clear()
     if a.final:
         try:
