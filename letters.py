@@ -84,7 +84,7 @@ def parse(text):
 STIGMA_DROP = [r"\bdrug[- ]seeking\b", r"\bpoor historian\b", r"\bfrequent flyer\b", r"\btime[- ]waster\b"]
 NONCOMPLIANT = re.compile(r"\bnon-?complian(?:t|ce)(?:\s+with\s+([^.;,]+))?", re.I)
 SENSITIVE = {
-    "HIV status": [r"\bHIV\b", r"\bantiretroviral", r"\bviral load", r"\bVL\b", r"\bCD4\b"],
+    "HIV status": [r"\bHIV\b", r"\bantiretroviral"],
     "abuse": [r"\babuse", r"\bassault", r"\bdomestic violence"],
     "psychiatric history": [r"\bdepress", r"\bbipolar", r"\bschizo", r"\bpsychiatr", r"\bpsychos",
                             r"\bself[- ]harm", r"\boverdose", r"\banxiety", r"\bsuicid"],
@@ -649,8 +649,8 @@ def check(md, sources, letter_type):
         text, ids = split_ids(line)
         text = re.sub(r"^(- |\d+\. |\| )", "", text).replace(" | ", " ")
         words_total += len(text.split())
-        for sent in re.split(r"(?<=[.!])\s+", text):
-            if len(sent.split()) > SENTENCE_LIMIT:
+        for sent in re.split(r"(?<=[.!])\s+", FLAG_ANY.sub("", text)):
+            if len(sent.split()) > SENTENCE_LIMIT and SENTENCE_FLAG not in line:
                 problems.append(f"sentence over {SENTENCE_LIMIT} words: {sent[:40]}...")
         if re.search(r"(?<!\w)\?\w", text):
             problems.append(f"banned shorthand: {text[:40]}")
@@ -876,8 +876,142 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         raise Refused("Referral refused: the notes have no 'Question:' line. A referral must open with its question.")
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
                 resolved, flags)
+    md = flag_long_sentences(md, flags)
+    md = flag_linked_medicines(md, text, dropped, flags)
     check(md, sources, letter_type)
+    refuse_linked_terms(md, text, dropped)
+    refuse_missing_required(md, text)
     return md, dropped
+
+
+# ---------- post-write checks: linked terms, required details, long sentences ----------
+LINKED_TERMS_FILE = HERE / "linked_terms.toml"
+SENTENCE_FLAG = "[flag: long sentence]"
+SENTENCE_NOTICE = "Flag: sentence at {lid} is over 25 words. Split it, or keep it as written."
+MED_FLAG = "[flag: medicine may point to something cut]"
+MED_NOTICE = ("Flag: a medicine on line {lid} may tell the reader about something that was cut from this letter. "
+              "Keep it, or explain it to the reader.")
+LINKED_REFUSED = "Refused: line {lid} still mentions something this letter was meant to cut. Nothing was written."
+REQUIRED_REFUSED = ("Refused: line {lid} has an allergy reaction or a follow-up owner that is missing from this letter. "
+                    "Nothing was written.")
+MED_TAGS = ("med", "stop")
+
+
+def load_linked(path=None):
+    p = pathlib.Path(path) if path else LINKED_TERMS_FILE
+    if not p.exists():
+        return {}
+    return dict(tomllib.loads(p.read_text(encoding="utf-8")).get("items", {}))
+
+
+def _term_re(t):
+    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(t)}(?![A-Za-z0-9])", re.I)
+
+
+def _cut_items(dropped):
+    linked = load_linked()
+    return {cat: v for cat, v in linked.items() if any(cat in d for d in dropped)}
+
+
+def _source_lines(text):
+    """{Lx: (tag kind or None, body)} using parse() numbering."""
+    out = {}
+    for e in parse(text)[0]:
+        for lid, line in e["lines"]:
+            m = TAG.match(line)
+            kind = TAGS.get(m.group("tag").strip().lower()) if m else None
+            out[lid] = (kind, m.group("body").strip() if kind else line)
+    return out
+
+
+def _line_ids(line):
+    _, ids = split_ids(line)
+    return [i.strip() for i in ids.strip(" []|").split(",") if i.strip()]
+
+
+def _body_lines(md):
+    """Yield (index, line) for letter body lines that carry source ids."""
+    lines = md.split("\n")
+    for n, line in enumerate(lines):
+        if _line_ids(line):
+            yield n, line
+
+
+def _add_flag(line, flag):
+    text, ids = split_ids(line)
+    return f"{text} {flag}{ids}"
+
+
+def flag_long_sentences(md, flags):
+    lines = md.split("\n")
+    for n, line in list(_body_lines(md)):
+        text, _ = split_ids(line)
+        text = re.sub(r"^(- |\d+\. |\| )", "", FLAG_ANY.sub("", text)).replace(" | ", " ")
+        if any(len(s.split()) > SENTENCE_LIMIT for s in re.split(r"(?<=[.!])\s+", text)):
+            lines[n] = _add_flag(line, SENTENCE_FLAG)
+            if flags is not None:
+                flags.append(SENTENCE_NOTICE.format(lid=_line_ids(line)[-1]))
+    return "\n".join(lines)
+
+
+def _shows_reason(line, meds):
+    """True when the medicine line itself still states the sensitive reason (e.g. a patient's own letter)."""
+    body = FLAG_ANY.sub("", split_ids(line)[0])
+    for m in meds:
+        body = _term_re(m).sub(" ", body)
+    return bool(sensitive_cat(body))
+
+
+def flag_linked_medicines(md, text, dropped, flags):
+    items = _cut_items(dropped)
+    if not items:
+        return md
+    meds = [m for v in items.values() for m in v.get("medicines", [])]
+    src = _source_lines(text)
+    lines = md.split("\n")
+    for n, line in list(_body_lines(md)):
+        hit = [i for i in _line_ids(line) if i in src and src[i][0] in MED_TAGS
+               and any(_term_re(m).search(src[i][1]) for m in meds)]
+        if hit and any(_term_re(m).search(line) for m in meds) and not _shows_reason(line, meds):
+            lines[n] = _add_flag(line, MED_FLAG)
+            if flags is not None:
+                flags.append(MED_NOTICE.format(lid=hit[-1]))
+    return "\n".join(lines)
+
+
+def refuse_linked_terms(md, text, dropped):
+    items = _cut_items(dropped)
+    if not items:
+        return
+    terms = [t for v in items.values() for t in v.get("terms", [])]
+    meds = [m for v in items.values() for m in v.get("medicines", [])]
+    src = _source_lines(text)
+    for _, line in _body_lines(md):
+        ids = _line_ids(line)
+        body = FLAG_ANY.sub("", split_ids(line)[0])
+        if any(i in src and src[i][0] in MED_TAGS for i in ids):
+            for m in meds:                       # medicine names are exempt on medicine lines
+                body = _term_re(m).sub(" ", body)
+        for t in terms:
+            if _term_re(t).search(body):
+                lid = next((i for i in ids if i in src and _term_re(t).search(src[i][1])), ids[0])
+                raise Refused(LINKED_REFUSED.format(lid=lid))
+
+
+def refuse_missing_required(md, text):
+    """Every documented allergy reaction and every named owner of a pending test must reach the letter."""
+    plain = re.sub(r"\s+", " ", FLAG_ANY.sub("", md)).lower()
+    for lid, (kind, body) in _source_lines(text).items():
+        need = []
+        if kind == "allergy":
+            need = [r for _, r in (split_reaction(p) for p in re.split(r"[,;](?![^()]*\))", body)) if r]
+        elif kind == "pending":
+            parts = re.split(r";\s*(?:follow-up|who|f/u)\s*:\s*", body, flags=re.I)
+            who = parts[1].strip() if len(parts) > 1 else split_owner(parts[0])[1]
+            need = [who] if who else []
+        for x in need:
+            if re.sub(r"\s+", " ", x).lower() not in plain:
+                raise Refused(REQUIRED_REFUSED.format(lid=lid))
 
 
 FINAL_REFUSED = ("--final refused: {n} flag(s) still open. Confirm each meaning with "
@@ -986,6 +1120,9 @@ def main(argv=None):
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
+    for f in [f for f in flags if f.startswith("Flag: ")]:
+        print(f, file=sys.stderr)
+    flags = [f for f in flags if not f.startswith("Flag: ")]
     if flags:
         print("Abbreviations flagged, meaning not confirmed (resolve with --resolve \"AB=meaning\"):", file=sys.stderr)
         for f in flags:
