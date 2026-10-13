@@ -1481,6 +1481,7 @@ def test_prep_cut_and_medicine_flagged():
     assert MED_MSG.format("L5") in flags
 
 
+@pytest.mark.xfail(raises=Refused, strict=True, reason="temporary combination-medicine refusal")
 def test_prep_kept_for_relevant_reader_and_patient():
     for to, aud, inc in (("Sexual health", None, ["PrEP"]), ("Patient", "patient", None)):
         md, dropped = build(PREP + "Plan: continue Truvada\n", "gp-update", to, audience=aud, include=inc)
@@ -1595,13 +1596,13 @@ def test_unknown_brand_like_drug_not_refused():
     assert "Tritace" in md
 
 
-@pytest.mark.parametrize("medline", ["Med: Truvada 1 tablet daily", "Med: Descovy 1 tablet daily"])
+@pytest.mark.parametrize("medline", [pytest.param(m, marks=pytest.mark.xfail(raises=Refused, strict=True, reason="temporary combination-medicine refusal")) for m in ["Med: Truvada 1 tablet daily", "Med: Descovy 1 tablet daily"]])
 def test_prep_brand_swapped(medline):
     md, _ = build(PREP.replace("Med: emtricitabine 1 tablet daily (for PrEP)", medline), "gp-update", "Podiatry")
     assert "tenofovir/emtricitabine" in md and medline.split()[1] not in md
 
 
-@pytest.mark.parametrize("extra", ["Plan: continue Truvada", "Plan: emtricitabine supply", "Plan: sexual health clinic in 3 months"])
+@pytest.mark.parametrize("extra", [pytest.param("Plan: continue Truvada", marks=pytest.mark.xfail(raises=Refused, strict=True, reason="temporary combination-medicine refusal")), "Plan: emtricitabine supply", "Plan: sexual health clinic in 3 months"])
 def test_prep_linked_off_med_line_left_out(extra):
     flags = []
     md, _ = build(PREP + extra + "\n", "gp-update", "Podiatry", flags=flags)
@@ -1611,6 +1612,7 @@ def test_prep_linked_off_med_line_left_out(extra):
         assert w not in body, w
 
 
+@pytest.mark.xfail(raises=Refused, strict=True, reason="temporary combination-medicine refusal")
 def test_patient_letters_drop_nothing_for_linked_terms():
     for notes, extra in ((HIV_NOTES, "Plan: repeat CD4 and viral load\n"), (PSY, "Plan: continue Lithicarb\n"),
                          (PREP, "Plan: continue Truvada\n")):
@@ -2075,3 +2077,34 @@ def test_result_missing_from_letter_refused(monkeypatch):
 def test_template_cannot_drop_results():
     md = make_letter(RES_NOTES.format(line="Sodium 138 mmol/L"), "referral", "Renal", template="{{question}}\n")
     assert "138 mmol/L" in md
+
+
+# ---------- temporary combination-medicine refusal (13 Oct 2026) ----------
+COMBO_NOTES = ("Patient: SYNTH-7202\n1937-04-05 Clinic.\nProblem: tiredness\n{line}\nPlan: review in 4 weeks\n")
+COMBO_MSG = "Refused: line L{n} has a combination medicine that letters can't fully list yet. Nothing was written."
+
+
+@pytest.mark.parametrize("brand", ["Biktarvy", "triumeq", "DOVATO", "Genvoya", "Truvada", "descovy"])
+@pytest.mark.parametrize("audience", [None, "patient"])
+def test_combination_brand_refused(brand, audience):
+    with pytest.raises(Refused) as e:
+        make_letter(COMBO_NOTES.format(line=f"Med: {brand} 1 tablet daily"), "gp-update", "GP", audience=audience)
+    assert str(e.value) == COMBO_MSG.format(n=4)
+    assert brand.lower() not in str(e.value).lower()
+
+
+def test_combination_brand_outside_medication_line_refused():
+    notes = COMBO_NOTES.format(line="Med: zorvatide 500 mg daily (for tiredness)") + \
+        "Patient asked whether genvoya could be swapped.\n"
+    with pytest.raises(Refused) as e:
+        make_letter(notes, "referral", "Renal")
+    assert str(e.value) == COMBO_MSG.format(n=6)
+
+
+def test_combination_brand_cli_writes_nothing(tmp_path):
+    notes = tmp_path / "n.txt"; out = tmp_path / "out"
+    notes.write_text(COMBO_NOTES.format(line="Background: on Truvada"))
+    r = subprocess.run([sys.executable, str(HERE / "letters.py"), str(notes), "--brief", "referral to renal",
+                        "--out", str(out)], capture_output=True, text=True)
+    assert r.returncode != 0 and COMBO_MSG.format(n=4) in r.stderr + r.stdout
+    assert not out.exists() or not any(out.iterdir())

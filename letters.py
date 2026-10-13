@@ -1130,10 +1130,29 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         _INCLUDE.clear()
 
 
+# Temporary (13 Oct 2026): combination medicines can't be fully listed yet, so any letter naming one is refused.
+COMBO_BRANDS = ("biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy")
+COMBO_RX = re.compile(r"(?<![a-z0-9])(?:" + "|".join(COMBO_BRANDS) + r")(?![a-z0-9])", re.I)
+COMBO_REFUSED = "Refused: line {lid} has a combination medicine that letters can't fully list yet. Nothing was written."
+
+
+def refuse_combination_brands(text):
+    """Any line, any letter type or audience. Gives the line number only, never the drug name."""
+    if not COMBO_RX.search(text):
+        return
+    for e in parse(text)[0]:
+        for lid, line in e["lines"]:
+            if COMBO_RX.search(line):
+                raise Refused(COMBO_REFUSED.format(lid=lid))
+    n = next(k for k, l in enumerate(text.splitlines(), 1) if COMBO_RX.search(l))
+    raise Refused(COMBO_REFUSED.format(lid=f"L{n}"))
+
+
 def _build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None):
     """Return (markdown, dropped). The dropped list is for the clinician's eyes only; never store it.
     resolve: list of "AB=meaning" from the clinician; each becomes a cited source R1, R2...
     flags: optional list that receives every open abbreviation flag."""
+    refuse_combination_brands(text)
     llm_guard()
     if letter_type not in TYPES:
         raise ValueError(f"unknown type {letter_type}; choose from {', '.join(TYPES)}")
