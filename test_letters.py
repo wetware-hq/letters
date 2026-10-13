@@ -3934,3 +3934,47 @@ def test_r11p_brca_not_matched_inside_other_words(line):
 @pytest.mark.parametrize("w", ["top", "Top", "TOP", "tOp"])
 def test_r11p_top_always_flagged(w):
     assert "top" in L.SHORTHAND and w in L.flagged_tokens(f"{w} of the foot")
+
+
+# ---- signed ruling 14 Oct 2026: changed medicine (dose change) with a cut reason (H22, H29) ----
+# The template grammar has no '; changed' part, so this uses the existing change syntax: the same drug written again
+# at a later date with a new dose and 'reason: <why>'.
+CHANGE_CASES = [
+    ("olanzapine", "community treatment order review", ["community treatment order"]),
+    ("doxycycline", "chlamydia not cleared", ["chlamydia"]),
+    ("misoprostol", "miscarriage incomplete", ["miscarriage"]),
+    ("tamoxifen", "BRCA2 pathogenic variant", ["BRCA", "pathogenic variant"]),
+    ("lithium", "bipolar disorder relapse", ["bipolar"]),
+]
+
+
+@pytest.mark.parametrize("drug,reason,words", CHANGE_CASES)
+def test_h29_cut_change_reason_dropped_change_printed_flag_on_screen(drug, reason, words):
+    # The letter command takes template notes only, so this dated-progress-notes form runs through the library build.
+    text = (f"SYNTH-9400\n1937-06-01 review.\nMed: {drug} 100 mg daily\n1937-06-10 review.\n"
+            f"Med: {drug} 200 mg daily reason: {reason}\nQuestion: is she well?\n")
+    flags = []
+    md, _ = build(text, "gp-update", "GP", flags=flags)
+    ch = FLAG_RX.sub("", next(l for l in md.splitlines() if l.startswith("- Changed")))
+    assert ch == f"- Changed on 10 Jun 1937: from {drug} 100 mg daily. Now: {drug} 200 mg daily. [L3, L5]"   # H29
+    for gone in [reason, *words, "reason not included", "Reason for change", L.MED_FLAG, "may point to something cut"]:
+        assert gone.lower() not in md.lower(), gone
+    assert "reason not documented" not in md.lower()
+    assert L.MED_NOTICE.format(lid="L5") in L.printed_flags(flags, md)                # on screen only
+    with pytest.raises(Refused, match="--final refused"):
+        L.finalise(md, len(L.printed_flags(flags, md)), 1)
+
+
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("reason", ["bipolar relapse", "chlamydia not cleared", "dose review"])
+def test_r11q_template_changed_tail_refused_never_partly_parsed(tmp_path, brief, reason):
+    text = tpl(question="Please review.", problems=("cough",),
+               meds=(f"lithium 10 mg daily; changed 1937-03-01 from 5 mg daily - {reason}",), actions=("review in 2 weeks",))
+    msg = T_MSG.format(n=line_of(text, "lithium")[1:])
+    r, out = _run_t(tmp_path / "r", text, "--brief", brief)
+    assert r.returncode == 2 and r.stderr.strip() == msg and not out.exists() and r.stdout == ""
+    c = _check(tmp_path / "c", text)
+    assert c.returncode == 2 and c.stderr.strip() == msg and c.stdout == ""
+    with pytest.raises(Refused) as e:
+        L.from_template(text)
+    assert str(e.value) == msg

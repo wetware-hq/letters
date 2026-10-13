@@ -618,6 +618,8 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                     change = ("started", drug)
                 if old and not ind:
                     ind = old["ind"]
+                if change and not reason and any(lid in d_.split(":")[0].split(",") and "cut" in d_ for d_ in dropped):
+                    reason = "reason not included"           # a stated reason was cut: dropped later with no marker (H22)
                 if change:
                     st["med_changes"].append({"what": change, "reason": reason, "date": d,
                                               "ids": (old["ids"] if old else []) + ids})
