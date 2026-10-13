@@ -385,10 +385,13 @@ def render_section(name, st, audience):
 FLAG = "[flag: abbreviation, meaning not confirmed]"
 # Fail-safe: a token is flagged unless it is clearly an ordinary word, a unit, or an exact reviewed entry.
 TOKEN = re.compile(r"(?<![A-Za-z0-9.'])(?:c/o|o/e|(?:[A-Za-z]\.){2,}|"
-                   r"(?:mmol|micromol|mcg|mg|g|kg|mL|mU|IU|units?)/(?:L|dL|min|kg|day|h)\b|"
+                   r"(?:mmol|micromol|mcg|mg|g|kg|mL|mU|IU|U|units?)/(?:L|dL|min|kg|day|h)\b|"
                    r"[A-Za-z][A-Za-z0-9]*(?:'[a-z]+)?)")
 UNITS = {"mg", "mcg", "g", "kg", "mL", "L", "dL", "mmol", "micromol", "min", "mU", "h", "units", "unit"}
 ROMAN_CTX = {"stage", "grade", "class", "type", "types", "phase", "nyha"}
+# u/U/iu/IU as a dose unit is a known misreading risk (10u read as 100): always flagged, attached or detached.
+# Lab units such as U/L, mU/L and IU/L stay clean; "10 units" is never flagged.
+DOSE_U = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)( ?)([uU]|[iI][uU])(?![A-Za-z0-9/])")
 SINGLE_MEANING_FILE = HERE / "single_meaning.toml"
 SHORTHAND_FILE = HERE / "shorthand.txt"
 WORDLISTS = [HERE / "wordlists" / "english.txt", HERE / "wordlists" / "medical.txt"]
@@ -507,6 +510,12 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             seen.add(ab)
             return f"{full} ({ab})"
         text = TOKEN.sub(sub, text)
+        def dose(m):
+            if text[m.end():].startswith(" " + FLAG):
+                return m.group(0)
+            flags.append(f"{m.group(0)}{ids.strip(' |') and ' ' + ids.strip(' |')}")
+            return f"{m.group(0)} {FLAG}"
+        text = DOSE_U.sub(dose, text)
         if extra and ids:
             ids = re.sub(r"\]", ", " + ", ".join(extra) + "]", ids, count=1)
         out.append(text + ids)
@@ -598,6 +607,9 @@ def check(md, sources, letter_type):
             if needs_flag(ab, prev, exact) and not scan[m.end():].startswith(" " + FLAG):
                 problems.append(f"abbreviation not flagged or resolved: {ab}")
             prev = ab
+        for m in DOSE_U.finditer(scan):
+            if not scan[m.end():].startswith(" " + FLAG):
+                problems.append(f"dose unit not flagged: {m.group(0)}")
         text = text.replace(" " + FLAG, "")
         for m in OUTDATE.finditer(text):
             iso = f"1937-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"

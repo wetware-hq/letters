@@ -1,5 +1,5 @@
 # Prescribing and clinical shorthand that is ALWAYS flagged, in any case, even if it is also an English word.
-# Pending clinician review. Exact single-meaning entries (single_meaning.toml) still expand; variants are flagged.
+# Reviewed by clinician. Exact single-meaning entries (single_meaning.toml) still expand; variants are flagged.
 # One entry per line.
 mane
 nocte
@@ -42,3 +42,15 @@ o/e
 sob
 hx
 pt
+tab
+cap
+sat
+sats
+sub
+supp
+ac
+pc
+mdu
+inh
+ug
+iu

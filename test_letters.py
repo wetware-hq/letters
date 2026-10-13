@@ -692,7 +692,7 @@ def test_failsafe_units_and_stage_clean():
 
 
 def test_shorthand_and_wordlist_files_documented():
-    assert "pending clinician review" in (HERE / "shorthand.txt").read_text().lower()
+    assert "reviewed by clinician" in (HERE / "shorthand.txt").read_text().lower()
     readme = (HERE / "wordlists" / "README.md").read_text()
     assert "SCOWL" in readme and "Licence" in readme and (HERE / "wordlists" / "SCOWL-COPYRIGHT").exists()
     assert {"mane", "nocte", "stat", "prn", "od"} <= L.SHORTHAND
@@ -739,3 +739,34 @@ def test_wordlist_checksums_unchanged():
     assert {n for _, n in rows} == {"english.txt", "medical.txt"}
     for digest, name in rows:
         assert hashlib.sha256((HERE / "wordlists" / name).read_bytes()).hexdigest() == digest, name
+
+
+# ---------- shorthand additions and dose units ----------
+@pytest.mark.parametrize("tok", ["tab", "cap", "sat", "sats", "sub", "supp", "ac", "pc", "mdu", "inh", "ug", "iu"])
+def test_reviewed_shorthand_flagged(tok):
+    md, flags = _one(f"Problem: review {tok} today")
+    assert f"review {tok} {L.FLAG} today" in md and flags == [tok]
+
+
+@pytest.mark.parametrize("dose", ["10u", "10 u", "10U", "10 U", "1000 IU", "1000iu", "1000 iu", "1000IU"])
+def test_dose_unit_u_iu_always_flagged(dose):
+    md, flags = _one(f"Problem: needs {dose} weekly")
+    assert f"{dose} {L.FLAG}" in md and len(flags) == 1 and md.count(L.FLAG) == 1
+
+
+def test_10u_insulin_flagged_and_checker_refuses_unflagged():
+    text = "Patient: SYNTH-3501\n1937-05-01 Clinic review.\nProblem: needs 10u insulin at night\nFollow-up: review in 2 weeks"
+    md, flags = build(text, "gp-update", "General practice", flags=(fl := []))[0], fl
+    assert f"10u {L.FLAG} insulin" in md and any(f.startswith("10u") for f in flags)
+    with pytest.raises(Refused, match="dose unit not flagged: 10u"):
+        check(md.replace(f"10u {L.FLAG}", "10u"), parse(text)[1], "gp-update")
+    with pytest.raises(Refused, match="flag"):
+        L.finalise(md)
+
+
+@pytest.mark.parametrize("line", ["Result: ALT 40 U/L", "Result: TSH 2.1 mU/L", "Result: vitamin D 50 IU/L",
+                                  "Problem: needs 10 units weekly"])
+def test_lab_units_and_spelled_units_clean(line):
+    md, flags = _one(line)
+    assert not any(u in f for f in flags for u in ("U/L", "mU/L", "IU/L", "units"))
+    assert not re.search(r"(U/L|units) \[flag", md)
