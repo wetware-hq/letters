@@ -876,8 +876,8 @@ def _patient_cli(tmp_path, notes=POD, brief="update to patient", extra=()):
 def _assert_copy_refused(r, out):
     assert r.returncode == 2
     assert r.stderr.strip().endswith(L.COPY_REFUSED)
-    assert L.COPY_REFUSED == ("Refused: a letter to the patient can't be copied to anyone else. "
-                              "Write a separate letter for each other reader.")
+    assert L.COPY_REFUSED == ("Refused: letters can't send copies. Write a separate letter for each reader, "
+                              "so nobody assumes someone was copied in when they weren't.")
     assert r.stdout == "" and (not out.exists() or list(out.iterdir()) == [])
 
 
@@ -898,7 +898,7 @@ def test_patient_letter_copy_via_template_refused(tmp_path, tpl):
 def test_patient_letter_copy_via_notes_refused(tmp_path, line):
     n = tmp_path / "notes.txt"; n.write_text(F("podiatry_referral.txt") + line + "\n")
     _assert_copy_refused(*_patient_cli(tmp_path, notes=n))
-    with pytest.raises(Refused, match="can't be copied"):
+    with pytest.raises(Refused, match="letters can't send copies"):
         build(n.read_text(), "gp-update", "Patient", audience="patient")
 
 
@@ -913,12 +913,66 @@ def test_patient_letter_ends_with_privacy_line(tmp_path):
     assert (HERE / "golden" / "pneumonia_discharge_patient.md").read_text().rstrip("\n").endswith(L.PATIENT_PRIVACY)
 
 
-def test_non_patient_letters_unaffected_by_copy_rule(tmp_path):
+def test_non_patient_letters_refuse_copies_and_have_no_privacy_line(tmp_path):
     n = tmp_path / "notes.txt"; n.write_text(F("podiatry_referral.txt") + "cc: GP\n")
-    md, _ = build(n.read_text(), "referral", "Podiatry")
+    with pytest.raises(Refused, match="letters can't send copies"):
+        build(n.read_text(), "referral", "Podiatry")
+    md, _ = build(F("podiatry_referral.txt"), "referral", "Podiatry")
     assert L.PATIENT_PRIVACY not in md and md.rstrip().endswith("Draft: check against the record before sending.")
-    r = subprocess.run(CLI + [POD, "--brief", "referral to podiatry, cc GP", "--out", str(tmp_path / "o")],
+    o = tmp_path / "o"
+    r = subprocess.run(CLI + [POD, "--brief", "referral to podiatry, cc GP", "--out", str(o)],
                        capture_output=True, text=True)
+    assert r.returncode == 2 and r.stderr.strip() == L.COPY_REFUSED
+    assert not o.exists() or list(o.iterdir()) == []
+
+
+# ---------- every letter: copy requests refused, never dropped silently ----------
+CKD = HERE / "fixtures" / "ckd_update.txt"
+EXACT_COPY = ("Refused: letters can't send copies. Write a separate letter for each reader, "
+              "so nobody assumes someone was copied in when they weren't.")
+
+
+def _gp_cli(tmp_path, notes=CKD, brief="update to GP", extra=()):
+    out = tmp_path / "out"
+    r = subprocess.run(CLI + [str(notes), "--brief", brief, "--out", str(out), *extra],
+                       capture_output=True, text=True)
+    return r, out
+
+
+def _assert_gp_refused(r, out):
+    assert r.returncode == 2
+    assert r.stderr.strip() == EXACT_COPY
+    assert r.stdout == "" and (not out.exists() or list(out.iterdir()) == [])
+
+
+@pytest.mark.parametrize("brief", ["update to GP, cc cardiology", "update to GP copy to renal",
+                                   "update to GP; copied to patient", "update to GP c.c. renal"])
+def test_gp_letter_copy_via_brief_refused(tmp_path, brief):
+    _assert_gp_refused(*_gp_cli(tmp_path, brief=brief))
+
+
+@pytest.mark.parametrize("tpl", ["{{header}}\n{{meds}}\ncc: {{cc}}\n{{footer}}", "{{header}}\n{{copy_to}}\n{{footer}}",
+                                 "{{header}}\nCopy to: renal clinic\n{{footer}}"])
+def test_gp_letter_copy_via_template_refused(tmp_path, tpl):
+    t = tmp_path / "t.md"
+    t.write_text(tpl, encoding="utf-8")
+    _assert_gp_refused(*_gp_cli(tmp_path, extra=("--template", str(t))))
+
+
+@pytest.mark.parametrize("line", ["cc: renal clinic", "Copy to: cardiology", "1937-03-02 cc: SYNTH patient"])
+def test_gp_letter_copy_via_notes_refused(tmp_path, line):
+    n = tmp_path / "n.txt"
+    n.write_text(CKD.read_text(encoding="utf-8").rstrip("\n") + "\n" + line + "\n", encoding="utf-8")
+    _assert_gp_refused(*_gp_cli(tmp_path, notes=n))
+
+
+def test_gp_letter_without_copy_still_written(tmp_path):
+    r, out = _gp_cli(tmp_path)
     assert r.returncode == 0, r.stderr
-    assert (tmp_path / "o" / "letter.md").exists()
-    assert L.PATIENT_PRIVACY not in (tmp_path / "o" / "letter.md").read_text()
+    assert (out / "letter.md").exists()
+
+
+def test_build_refuses_copy_for_gp():
+    text = CKD.read_text(encoding="utf-8") + "\ncc: renal clinic\n"
+    with pytest.raises(Refused, match="letters can't send copies"):
+        build(text, "gp-update", "GP")

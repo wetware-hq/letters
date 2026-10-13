@@ -734,8 +734,8 @@ def llm_guard():
                          "Unset it to run.")
 
 
-COPY_REFUSED = ("Refused: a letter to the patient can't be copied to anyone else. "
-                "Write a separate letter for each other reader.")
+COPY_REFUSED = ("Refused: letters can't send copies. Write a separate letter for each reader, "
+                "so nobody assumes someone was copied in when they weren't.")
 PATIENT_PRIVACY = "This letter includes private details about your health. It's yours to share or keep private."
 COPY_WORDS = re.compile(r"(?<![\w])(?:cc|c\.c\.|copy|copies|copied)(?![\w])", re.I)
 COPY_LINE = re.compile(r"^\s*(?:\d{4}-\d{2}-\d{2}\s+)?(?:cc|c\.c\.|copy|copies|copied)(?:\s+to)?\s*:", re.I | re.M)
@@ -747,7 +747,7 @@ def is_patient_letter(to, audience):
 
 
 def refuse_copies(text, template=None, brief=None):
-    """A patient letter has one reader. Refuse any copy recipient from the brief, the template or the notes."""
+    """Every letter has one reader. Refuse any copy recipient from the brief, the template or the notes."""
     if (brief and COPY_WORDS.search(brief)) or (template and (COPY_SLOT.search(template) or COPY_LINE.search(template))) \
             or COPY_LINE.search(text):
         raise Refused(COPY_REFUSED)
@@ -762,8 +762,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         raise ValueError(f"unknown type {letter_type}; choose from {', '.join(TYPES)}")
     audience = audience or ("gp" if letter_type in ("discharge", "gp-update", "specialist-reply") else "specialist")
     pid = check_safe(text)
-    if is_patient_letter(to, audience):
-        refuse_copies(text, template)
+    refuse_copies(text, template)
     entries, sources = parse(text)
     resolved = resolution_sources(resolve, text)
     for ab, (rid, full) in resolved.items():
@@ -869,12 +868,11 @@ def main(argv=None):
         ap.error("notes, --type and --to are required")
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
     tpl = open(a.template, encoding="utf-8").read() if a.template else None
-    if is_patient_letter(a.to, a.audience):
-        try:
-            refuse_copies(text, tpl, brief_copy)
-        except Refused as e:
-            print(str(e), file=sys.stderr)
-            return 2
+    try:
+        refuse_copies(text, tpl, brief_copy)
+    except Refused as e:
+        print(str(e), file=sys.stderr)
+        return 2
     try:
         flags = []
         md, dropped = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
