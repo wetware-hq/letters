@@ -3,7 +3,7 @@
 **Date:** 10 Feb 1937  
 **To:** Podiatry  
 **Patient:** SYNTH-4004  
-**Letter:** Referral
+**Letter:** Referral [flag: something cut to keep it private]
 
 Dear colleague,
 

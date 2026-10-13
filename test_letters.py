@@ -216,9 +216,11 @@ def test_sensitive_cut_when_irrelevant_and_logged(line, cat):
     assert not re.search(r"HIV|abuse|depression", md) and any(cat in d for d in dropped)
 
 
-def test_sensitive_kept_when_relevant():
+def test_sensitive_kept_only_when_brief_includes_it():
     t = "SYNTH-6\nPMHx: depression\n1937-01-01\nQuestion: Please review mood.\nFollow-up: GP review in 1 week"
-    assert "depression" in make_letter(t, "referral", "Psychiatry")
+    assert "depression" not in make_letter(t, "referral", "Psychiatry")          # default: cut, even for psychiatry
+    md, _ = build(t, "referral", "Psychiatry", include=["psychiatric history"])
+    assert "depression" in md
 
 
 # ---------- Amendment 1: medicines ----------
@@ -1123,7 +1125,8 @@ def test_missing_required_detail_refused_names_line_only(line, lost):
 
 def test_sensitive_kept_for_relevant_reader():
     flags = []
-    md, dropped = build(HIV_NOTES + "PMHx: undetectable VL\n", "gp-update", "Infectious diseases", flags=flags)
+    md, dropped = build(HIV_NOTES + "PMHx: undetectable VL\n", "gp-update", "Infectious diseases", flags=flags,
+                        include=["HIV status"])
     assert "abacavir" in md and "HIV" in md and "viral load" in md.lower() and "undetectable VL" in md
     assert not any(f.startswith("Flag: a medicine") for f in flags)
     assert not any("HIV status" in d for d in dropped)
@@ -1456,8 +1459,9 @@ def test_generic_on_own_medication_line_is_flagged_not_refused():
     assert "lithium" in section(md, "Current medicines") and MED_MSG.format("L5") in flags
 
 
-def test_medicine_names_unchecked_when_item_not_cut():
-    md, dropped = build(PSY.replace("PMHx: bipolar disorder\n", "") + "Plan: continue Lithicarb\n", "gp-update", "Podiatry")
+def test_medicine_names_unchecked_when_item_included():
+    md, dropped = build(PSY.replace("PMHx: bipolar disorder\n", "") + "Plan: continue Lithicarb\n", "gp-update", "Podiatry",
+                        include=["psychiatric history"])
     assert "Lithicarb" in md and not dropped
 
 
@@ -1478,8 +1482,8 @@ def test_prep_cut_and_medicine_flagged():
 
 
 def test_prep_kept_for_relevant_reader_and_patient():
-    for to, aud in (("Sexual health", None), ("Patient", "patient")):
-        md, dropped = build(PREP + "Plan: continue Truvada\n", "gp-update", to, audience=aud)
+    for to, aud, inc in (("Sexual health", None, ["PrEP"]), ("Patient", "patient", None)):
+        md, dropped = build(PREP + "Plan: continue Truvada\n", "gp-update", to, audience=aud, include=inc)
         assert "PrEP" in md and not any("PrEP" in d for d in dropped)
 
 
@@ -1554,11 +1558,16 @@ def test_cut_reason_on_med_line_becomes_reason_not_included():
     assert "reason not included" in meds and "bipolar" not in md and MED_MSG.format("L5") in flags
 
 
+FLAG_RX = re.compile(r" \[flag: [^\]]+\]")
+MED_PART_MSG = ("Flag: part of the medicine entry on line {} was left out to keep something private. "
+                "The medicine and its dose are still listed. Check nothing the reader needs was lost.")
+
+
 def test_other_linked_words_on_med_line_left_out():
     text = PSY.replace("Med: lithium 250 mg twice daily", "Med: lithium 250 mg twice daily, CPMS registered")
     flags = []
     md, _ = build(text, "gp-update", "Podiatry", flags=flags)
-    assert "CPMS" not in md and "lithium" in md and LEFT_MSG.format("L5") in flags
+    assert "CPMS" not in md and "lithium 250 mg twice daily" in md and MED_PART_MSG.format("L5") in flags
 
 
 def test_every_listed_brand_maps_to_a_generic():
@@ -1648,3 +1657,222 @@ def test_no_question_flag_blocks_final_cli(tmp_path):
                       "--brief", "referral to orthopaedics", "--final")
     assert r.returncode == 3 and "Flag: this referral has no clear question. Add one before it's signed." in r.stderr
     assert not out.exists() or list(out.iterdir()) == []
+
+
+# ---------- round 7: cut by default (GP included), include line, every cut flagged ----------
+CUT_MSG = "Flag: something on line {} was cut to keep it private. Check the reader doesn't need it."
+
+
+def test_default_cut_for_gp_and_flagged_blocks_final():
+    flags = []
+    md, _ = build(PSY, "gp-update", "GP", flags=flags)
+    assert "bipolar" not in md and CUT_MSG.format("L4") in flags and L.CUT_FLAG in md
+    with pytest.raises(Refused, match="--final refused"):
+        L.finalise(md)
+
+
+def test_include_line_keeps_item(tmp_path):
+    n = tmp_path / "n.txt"; n.write_text(PSY)
+    out = tmp_path / "o"
+    r = subprocess.run(CLI + [str(n), "--brief", "update to GP\ninclude: psychiatric history", "--out", str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert "bipolar" in md and "Cut from this letter" not in r.stderr and L.CUT_FLAG not in md
+
+
+@pytest.mark.parametrize("brief", ["update to GP\ninclude: Mrs Synthname", "update to GP\nreferral to renal"])
+def test_bad_include_or_two_briefs_refused_without_echo(tmp_path, brief):
+    n = tmp_path / "n.txt"; n.write_text(PSY)
+    r = subprocess.run(CLI + [str(n), "--brief", brief, "--out", str(tmp_path / "o")], capture_output=True, text=True)
+    assert r.returncode == 2 and r.stderr.strip() == BRIEF_MSG and "Synthname" not in r.stderr
+
+
+def test_patient_letters_exempt_from_cut():
+    md, dropped = build(PSY, "gp-update", "Patient", audience="patient")
+    assert "bipolar" in md and not dropped
+
+
+# ---------- round 7: medicine entries ----------
+@pytest.mark.parametrize("medline,keep", [
+    ("Med: lithium 250 mg twice daily (CPMS)", "lithium 250 mg twice daily"),
+    ("Med: clozapine 100 mg daily, clozapine registry", "clozapine 100 mg daily"),
+    ("Med: lithium 250 mg CPMS twice daily", "lithium 250 mg"),
+])
+def test_med_line_drops_only_the_term_part(medline, keep):
+    text = PSY.replace("Med: lithium 250 mg twice daily", medline)
+    flags = []
+    md, _ = build(text, "gp-update", "Podiatry", flags=flags)
+    meds = section(md, "Current medicines")
+    assert keep in FLAG_RX.sub("", meds) and "CPMS" not in md and "registry" not in md
+    assert (MED_PART_MSG.format("L5") in flags or "reason not included" in meds) and MED_MSG.format("L5") in flags
+
+
+def test_med_entry_that_would_disappear_refused():
+    text = PSY.replace("Med: lithium 250 mg twice daily", "Med: antiretroviral 1 tablet daily")
+    with pytest.raises(Refused) as e:
+        build(text, "gp-update", "Podiatry")
+    assert str(e.value) == "Refused: line L5 still mentions something this letter was meant to cut. Nothing was written."
+
+
+@pytest.mark.parametrize("medline,want", [
+    ("Med: lithium 250 mg twice daily (for bipolar disorder)", "reason not included"),
+    ("Med: lithium 250 mg twice daily", "reason not documented"),
+])
+def test_reason_not_included_only_when_a_reason_was_cut(medline, want):
+    md, _ = build(PSY.replace("Med: lithium 250 mg twice daily", medline), "gp-update", "Podiatry")
+    meds = section(md, "Current medicines")
+    assert want in meds and ({"reason not included", "reason not documented"} - {want}).pop() not in meds
+
+
+@pytest.mark.parametrize("medline", ["Med: metformin 500 mg daily, indicated for type 2 diabetes",
+                                     "Med: metformin 500 mg daily used for type 2 diabetes",
+                                     "Med: paracetamol 1 g as needed for pain", "Med: metformin 500 mg daily, taken for type 2 diabetes"])
+def test_reason_phrasings_never_with_not_documented(medline):
+    text = "Patient: SYNTH-6001\n1937-06-03 Clinic review.\nProblem: type 2 diabetes\n" + medline + "\nFollow-up: review in 2 weeks\n"
+    for aud, to in ((None, "GP"), ("patient", "Patient")):
+        md, _ = build(text, "gp-update", to, audience=aud)
+        meds = section(md, "Your medicines now" if aud else "Current medicines")
+        assert "reason not documented" not in meds, meds
+
+
+@pytest.mark.parametrize("drug", ["Tritace", "Zentrolib", "Coversyl"])
+def test_capitalised_unknown_drug_gets_drug_name_flag(drug):
+    text = "Patient: SYNTH-6002\n1937-06-03 Clinic review.\nProblem: high blood pressure\nMed: " + drug + \
+           " 5 mg daily\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "GP")
+    assert f"{drug} {L.DRUG_FLAG}" in md
+
+
+# ---------- round 7: pending, questions, opener, allergies ----------
+@pytest.mark.parametrize("line", ["Echo requested", "MRI knee booked", "Awaiting results of bone scan",
+                                  "Thyroid function has been sent", "Biopsy results to follow"])
+def test_more_pending_phrasings_reach_pending_section(line):
+    text = "Patient: SYNTH-6101\n1937-06-03 Clinic review.\nProblem: knee pain\n" + line + "\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "GP")
+    assert "[L4]" in section(md, "Results still to come") and "No results pending" not in md
+
+
+@pytest.mark.parametrize("q", ["Query whether surgery is needed", "We wonder if surgery would help",
+                               "Could you see her about the knee", "Kindly assess the knee", "Seeking advice on the knee",
+                               "Opinion please on the knee", "For your thoughts on the knee"])
+def test_more_question_forms(q):
+    text = "Patient: SYNTH-6102\n1937-06-03 Clinic review.\nProblem: knee pain\n" + q + "\nFollow-up: review in 2 weeks\n"
+    flags = []
+    build(text, "referral", "Orthopaedics", flags=flags)
+    assert not any("no clear question" in f for f in flags)
+
+
+def test_no_question_opens_with_reason_for_referral():
+    md, _ = build("SYNTH-1\n1937-01-01\nProblem: cough", "referral", "Respiratory")
+    assert "Please answer the question below" not in md and "Please see" not in md
+    assert "Reason for referral: cough [L3]" in md
+
+
+@pytest.mark.parametrize("line,react", [("penicillin = rash", "rash"), ("penicillin / hives", "hives"),
+                                        ("penicillin \u2192 swelling", "swelling")])
+def test_allergy_reaction_separators_kept(line, react):
+    text = "Patient: SYNTH-6103\n1937-06-03 Clinic review.\nAllergy: " + line + "\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "GP")
+    assert f"penicillin: {react}" in section(md, "Allergies")
+
+
+def test_allergy_line_with_linked_brand_never_dropped():
+    text = PSY + "Allergy: Clozaril - neutropenia\n"
+    flags = []
+    md, _ = build(text, "gp-update", "Podiatry", flags=flags)
+    assert "neutropenia" in section(md, "Allergies") and MED_MSG.format("L7") in flags
+
+
+# ---------- permanent regression tests from Physician-scored failures (descriptions only) ----------
+def test_reg_h3_brand_on_med_line_never_leaks():
+    """heldout3: brand names leaked on the medication line when the item was cut."""
+    md, _ = build(PSY.replace("Med: lithium 250 mg twice daily", "Med: Lithicarb 250 mg twice daily"), "gp-update", "GP")
+    assert "Lithicarb" not in md and "lithium 250 mg twice daily" in md
+
+
+def test_reg_h3_registry_and_prescriber_terms_never_leak():
+    """heldout3: registry/prescriber terms leaked."""
+    md, _ = build(PSY + "Plan: clozapine registry updated\n", "gp-update", "GP")
+    assert "registry" not in md
+    md, _ = build(HIV_NOTES + "Plan: see S100 prescriber\n", "gp-update", "GP")
+    assert "S100" not in md
+
+
+def test_reg_h3_cut_diagnosis_on_med_line_never_leaks():
+    """heldout3: a cut diagnosis given as the reason on the medication line leaked."""
+    md, _ = build(PSY.replace("Med: lithium 250 mg twice daily", "Med: lithium 250 mg twice daily (for bipolar disorder)"),
+                  "gp-update", "GP")
+    assert "bipolar" not in md and "reason not included" in md
+
+
+def test_reg_h4_brand_without_diagnosis_still_cut_and_swapped():
+    """heldout4 P01/P02/P04: cut text leaked with no left-out flag and no brand swap when the diagnosis was absent."""
+    notes = PSY.replace("PMHx: bipolar disorder\n", "").replace("Med: lithium 250 mg twice daily",
+                                                                "Med: Clozaril 100 mg daily") + "Plan: continue Clozaril. Review nails.\n"
+    flags = []
+    md, _ = build(notes, "gp-update", "Podiatry", flags=flags)
+    assert "Clozaril" not in md and "clozapine 100 mg daily" in md
+    assert any(f.startswith("Flag: a sentence on line") for f in flags) and any(f.startswith("Flag: a medicine") for f in flags)
+
+
+def test_reg_h4_reason_and_not_documented_never_both():
+    """Physician: a medicine showed its reason together with 'reason not documented'."""
+    text = "Patient: SYNTH-6201\n1937-06-03 Clinic review.\nProblem: gout\nMed: allopurinol 100 mg daily, used for gout\nFollow-up: review\n"
+    md, _ = build(text, "gp-update", "GP")
+    for l in section(md, "Current medicines").splitlines():
+        assert not ("gout" in l and "reason not documented" in l)
+
+
+def test_reg_h4_pending_test_in_pending_section():
+    """Physician: pending tests were missing from the pending section."""
+    text = "Patient: SYNTH-6202\n1937-06-03 Clinic review.\nProblem: knee pain\nMRI knee requested, ortho registrar to chase\nFollow-up: review\n"
+    md, _ = build(text, "gp-update", "GP")
+    p = FLAG_RX.sub("", section(md, "Results still to come"))
+    assert "MRI knee" in p and "ortho registrar to chase" in p
+
+
+def test_reg_h4_unusual_question_found():
+    """Physician: unusual question wording was missed."""
+    text = "Patient: SYNTH-6203\n1937-06-03 Clinic review.\nProblem: knee pain\nWould value your opinion re surgery\nFollow-up: review\n"
+    flags = []
+    build(text, "referral", "Orthopaedics", flags=flags)
+    assert not any("no clear question" in f for f in flags)
+
+
+def test_reg_h4_tritace_like_brand_drug_flag_not_refused():
+    """Physician: an unknown brand like Tritace got an abbreviation flag."""
+    text = "Patient: SYNTH-6204\n1937-06-03 Clinic review.\nProblem: high blood pressure\nMed: Tritace 5 mg daily\nFollow-up: review\n"
+    md, _ = build(text, "gp-update", "GP")
+    assert f"Tritace {L.DRUG_FLAG}" in md
+
+
+def test_reg_h4_medicine_flag_when_brand_swapped():
+    """Physician: medicine flag missing when a brand was swapped or cut on the medication line."""
+    flags = []
+    build(PSY.replace("Med: lithium 250 mg twice daily", "Med: Quilonum 250 mg daily"), "gp-update", "GP", flags=flags)
+    assert MED_MSG.format("L5") in flags
+
+
+def test_reg_h4_allergy_reaction_kept():
+    """Physician: an allergy reaction was lost."""
+    text = "Patient: SYNTH-6205\n1937-06-03 Clinic review.\nAllergy: penicillin = anaphylaxis\nFollow-up: review\n"
+    md, _ = build(text, "gp-update", "GP")
+    assert "penicillin: anaphylaxis" in section(md, "Allergies")
+
+
+def test_reg_h4_p08_no_question_opener():
+    """P08: 'Please answer the question below' with no question."""
+    md, _ = build("SYNTH-1\n1937-01-01\nProblem: rash on arm", "referral", "Dermatology")
+    assert "Please answer the question below" not in md and "Reason for referral: rash on arm" in md
+
+
+def test_include_lines_recorded_on_stderr(tmp_path):
+    n = tmp_path / "n.txt"; n.write_text(PSY + "PMHx: on PrEP\n")
+    out = tmp_path / "o"
+    r = subprocess.run(CLI + [str(n), "--brief", "update to GP\ninclude: Psychiatric History\ninclude: PrEP", "--out", str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    lines = r.stderr.splitlines()
+    assert "Included by the brief: psychiatric history." in lines and "Included by the brief: PrEP." in lines
+    assert [p.name for p in out.iterdir()] == ["letter.md"]

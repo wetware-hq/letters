@@ -106,8 +106,13 @@ def sensitive_cat(s):
     return None
 
 
+_INCLUDE = set()     # items the brief asked to include ('include: <item name>'); set by build() for one letter
+
+
 def relevant(cat, to):
-    return bool(re.search(RELEVANT[cat], to or "", re.I))
+    """An item is kept only when the brief includes it. The default is to cut it for every non-patient reader,
+    including the GP. ('to' is kept for the log wording only.)"""
+    return cat.lower() in _INCLUDE
 
 
 PAREN = re.compile(r"\s*\(([^()]*)\)")
@@ -173,7 +178,7 @@ RULEDOUT = re.compile(r"^(?P<what>.+?)\s+(?:ruled out|excluded)\b", re.I)
 
 
 # "penicillin - rash", "penicillin (rash)", "penicillin: rash", "penicillin -> rash", "penicillin causes rash"
-REACTION = re.compile(r"^\s*(?P<drug>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014]+>?\s*|\s*:\s*|\s*->\s*|"
+REACTION = re.compile(r"^\s*(?P<drug>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014]+>?\s*|\s*:\s*|\s*->\s*|\s*[=\u2192]\s*|\s+/\s+|"
                       r"\s+(?:causes|caused|gives|gave|reaction|reaction:)\s+)(?P<r>.*?)\s*$", re.I)
 # "echo - cardiology to arrange", "echo (cardiology to arrange)", "echo: renal team to chase", "echo, GP to follow up"
 OWNER_SEP = re.compile(r"^\s*(?P<test>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014]+\s*|\s*:\s*|,\s*(?=.*\b(?:to|will)\b))"
@@ -226,9 +231,11 @@ def split_owner(body):
     return body.strip(), None
 
 
-PENDING_AFTER = re.compile(r"^(?P<test>.+?)\s+(?:(?:is|are|still|results?)\s+)*(?:pending|awaited|outstanding)\b"
+PENDING_AFTER = re.compile(r"^(?P<test>.+?)\s+(?:(?:is|are|still|results?|has been|have been)\s+)*"
+                           r"(?:pending|awaited|outstanding|requested|ordered|sent|booked|arranged|to follow)\b"
                            r"[\s,;:.-]*(?P<rest>.*?)\s*\.?$", re.I)
-PENDING_BEFORE = re.compile(r"^(?:awaiting|pending|outstanding)\s*:?\s+(?P<test>.+?)\s*\.?$", re.I)
+PENDING_BEFORE = re.compile(r"^(?:awaiting(?: results? of)?|pending|outstanding|requested|ordered|booked)\s*:?\s+"
+                            r"(?P<test>.+?)\s*\.?$", re.I)
 
 
 def untagged_pending(body):
@@ -252,7 +259,8 @@ DOSEISH = re.compile(r"\d|\b(?:mg|mcg|g|ml|units?|daily|nocte|mane|bd|tds|qds|od
 def med_reason(drug):
     """Find a reason written another way on the medicine line: 'X 5 mg daily for gout', 'X - for gout',
     'X 5 mg (gout)', 'X 5 mg to treat gout', 'X 5 mg; indication gout'. Returns (drug text, reason or None)."""
-    m = re.match(r"^(?P<d>.*?)\s*[;,-]?\s*\b(?:for|to treat|treats?|indication:?|reason:?|because of)\s+(?P<r>[^()]+?)\s*$",
+    m = re.match(r"^(?P<d>.*?)\s*[;,-]?\s*\b(?:(?:indicated|used|taken|prescribed|given|started)\s+for|for|to treat|treats?|"
+                 r"indication:?|reason:?|because of|as needed for)\s+(?P<r>[^()]+?)\s*$",
                  drug, re.I)
     if m and m.group("d").strip() and not DURATION.match(m.group("r")):
         return m.group("d").strip(" ,;-"), m.group("r").strip(" .")
@@ -296,7 +304,9 @@ def split_med_lists(lines):
 QUESTION_UNTAGGED = re.compile(r"\?\s*$|\bplease advise\b|\bwould value your (?:opinion|advice|input)\b|"
                                r"\bfor consideration of\b|\byour (?:opinion|advice) (?:on|re|regarding)\b|"
                                r"\bgrateful if you could\b|\badvice re\b|^(?:please\s+)?(?:assess|evaluate)\b(?!ed)|"
-                               r"\bplease (?:assess|review|see|evaluate)\b|\breview for\b", re.I)
+                               r"\bplease (?:assess|review|see|evaluate)\b|\breview for\b|\bquery whether\b|\bwe wonder (?:if|whether)\b|"
+                               r"\b(?:could|can|would) you\b|\bkindly\b|\bseeking (?:your )?advice\b|\b(?:advice|opinion) please\b|"
+                               r"\bfor your (?:opinion|advice|thoughts)\b|\byour thoughts\b|\bwhether (?:she|he|they) (?:needs?|should)\b", re.I)
 
 
 def tag_kind(tag):
@@ -708,7 +718,8 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             elif ab in single:
                 full = single[ab]["patient" if audience == "patient" else "clinical"]
             elif needs_flag(ab, before, exact):
-                label = DRUG_FLAG if med and ab.islower() and ab not in SHORTHAND and ab.lower() not in WORDS else FLAG
+                label = DRUG_FLAG if med and (ab.islower() or (ab.istitle() and len(ab) > 3)) and ab.lower() not in SHORTHAND \
+                    and ab.lower() not in WORDS else FLAG
                 note = " (drug name, check spelling)" if label == DRUG_FLAG else ""
                 flags.append(f"{ab}{note}{ids.strip(' |') and ' ' + ids.strip(' |')}")
                 return f"{ab} {label}"
@@ -852,6 +863,11 @@ OPENERS = {
     "gp-update": "Update{d}. Actions are numbered at the end.",
     "specialist-reply": "My answer and advice are below.",
 }
+def no_question_opener(st):
+    """No question found: open with the reason for referral (the first current problem), sourced."""
+    for body, _, ids in st["problems"].values():
+        return f"Reason for referral: {body} [{', '.join(ids)}]"
+    return f"Reason for referral {ND}."
 PATIENT_OPENER = "This letter explains your care and what happens next."
 
 
@@ -882,7 +898,8 @@ def render(st, pid, letter_type, to, recipient=None, audience="specialist", temp
         f"**To:** {to}" + (f", attn {recipient}" if recipient else "") + "  ",
         f"**Patient:** {pid}  ", f"**Letter:** {TITLES[letter_type]}", "",
         f"Dear {recipient}," if recipient else ("Dear patient," if audience == "patient" else "Dear colleague,"), "",
-        PATIENT_OPENER if audience == "patient" else OPENERS[letter_type].format(d=dt(st["last"])), ""]
+        PATIENT_OPENER if audience == "patient" else
+        (no_question_opener(st) if letter_type == "referral" and not st["question"] else OPENERS[letter_type].format(d=dt(st["last"]))), ""]
     blocks = OrderedDict((n, render_section(n, st, audience)) for n in SECTIONS[letter_type])
     footer = "\n".join(FOOTER)
     if template is None:
@@ -993,7 +1010,20 @@ def refuse_copies(text, template=None, brief=None, patient=False):
         raise Refused(copy_refusal(where, patient))
 
 
-def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None):
+def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None,
+          include=None):
+    """include: item names the brief asked to keep (see SENSITIVE); everything else sensitive is cut."""
+    unknown = [i for i in (include or []) if i.lower() not in {c.lower() for c in SENSITIVE}]
+    if unknown:
+        raise Refused(BRIEF_REFUSED)
+    _INCLUDE.clear(); _INCLUDE.update(i.lower() for i in (include or []))
+    try:
+        return _build(text, letter_type, to, recipient, audience, template, brand, resolve, flags)
+    finally:
+        _INCLUDE.clear()
+
+
+def _build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None):
     """Return (markdown, dropped). The dropped list is for the clinician's eyes only; never store it.
     resolve: list of "AB=meaning" from the clinician; each becomes a cited source R1, R2...
     flags: optional list that receives every open abbreviation flag."""
@@ -1009,6 +1039,8 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         sources[rid] = (f"{ab} = {full}", None)
     dropped = []
     st = cumsum(entries, to, dropped, keep_indications=(audience == "patient"))
+    if audience != "patient":
+        mark_linked_items(text, to, dropped)
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
                 resolved, flags)
     if letter_type == "referral" and not st["question"]:
@@ -1032,6 +1064,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         raise Refused(PENDING_NONE_REFUSED.format(lid=lid))
     if not patient:
         md = apply_cut_rule(md, text, dropped, flags, TITLES[letter_type])
+        md = flag_cuts(md, dropped, flags, TITLES[letter_type])
     return md, dropped
 
 
@@ -1069,6 +1102,35 @@ def _term_re(t):
 def _meds_of(items):
     """Medicine and brand names of the cut items (allowed only on their own medication line)."""
     return [m for v in items.values() for m in list(v.get("medicines", [])) + list(v.get("brands", {}))]
+
+
+CUT_FLAG = "[flag: something cut to keep it private]"
+CUT_NOTICE = "Flag: something on line {lid} was cut to keep it private. Check the reader doesn't need it."
+
+
+def flag_cuts(md, dropped, flags, title):
+    """Every cut of a sensitive item carries a flag that blocks --final (line ids only)."""
+    lids = list(dict.fromkeys(i for d in dropped if any(c in d for c in SENSITIVE)
+                              for i in re.findall(r"\b[LR]\d+\b", d.split(":")[0])))
+    if not lids:
+        return md
+    if flags is not None:
+        flags.extend(CUT_NOTICE.format(lid=l) for l in lids)
+    head = f"**Letter:** {title}"
+    return md.replace(head, f"{head} {CUT_FLAG}", 1) if head in md else md.replace("\n", f" {CUT_FLAG}\n", 1)
+
+
+def mark_linked_items(text, to, dropped):
+    """A cut item is present even when its diagnosis is worded unusually or absent: any refuse-level term, listed
+    medicine or brand in the notes marks it, for a reader who doesn't need it. Flag-only words never do."""
+    src = _source_lines(text)
+    for cat, v in load_linked().items():
+        if relevant(cat, to):
+            continue
+        names = list(v.get("terms", [])) + list(v.get("medicines", [])) + list(v.get("brands", {}))
+        lids = [lid for lid, (_, body) in src.items() if any(_term_re(w).search(body) for w in names)]
+        if lids and not any(cat in d for d in dropped):
+            dropped.append(f"{','.join(lids)}: {cat} linked words, not relevant to {to}")
 
 
 def _cut_items(dropped):
@@ -1144,6 +1206,9 @@ def flag_linked_medicines(md, text, dropped, flags):
 
 
 LEFT_OUT_FLAG = "[flag: sentence left out]"
+MED_PART_FLAG = "[flag: part of medicine entry left out]"
+MED_PART_NOTICE = ("Flag: part of the medicine entry on line {lid} was left out to keep something private. "
+                   "The medicine and its dose are still listed. Check nothing the reader needs was lost.")
 LEFT_OUT_NOTICE = ("Flag: a sentence on line {lid} was left out to keep something private. "
                    "Check it doesn't hold a safety fact the reader needs.")
 DRUG_FLAG_RX = r"(?: \[flag: [^\]]+\])?"
@@ -1182,7 +1247,7 @@ def apply_cut_rule(md, text, dropped, flags, title=None):
         lead = re.match(r"^(- |\d+\. |\| )?", text_part).group(0)
         body = text_part[len(lead):]
         if any(i in src and src[i][0] in MED_TAGS for i in ids):
-            if not any_linked.search(FLAG_ANY.sub("", body)):
+            if not any_linked.search(FLAG_ANY.sub("", body)) and "reason not included" not in body:
                 continue
             for b, g in brands.items():
                 if re.search(rf"(?<![A-Za-z0-9]){re.escape(b)}(?![A-Za-z0-9])", body, re.I):
@@ -1193,18 +1258,39 @@ def apply_cut_rule(md, text, dropped, flags, title=None):
             def reason(m):
                 return ", reason not included" if any_linked.search(m.group(0)) else m.group(0)
             body = re.sub(r"\s*\(for [^()]*\)", reason, body)
-            if any_word:                                 # other linked words on the medication line: left out
-                parts = re.split(r"(,\s*)", body)
-                bare = lambda p: gen_rx.sub(" ", FLAG_ANY.sub("", p)) if gen_rx else FLAG_ANY.sub("", p)
-                kept = [p for p in parts[::2] if not (any_word.search(bare(p)) and p.strip() != "reason not included")]
-                if len(kept) < len(parts[::2]):
-                    note(ids, any_word)
-                    body = ", ".join(p.strip() for p in kept)
+            if any_word:                                 # other linked words on the medication line: only that part goes
+                bare = lambda p: FLAG_ANY.sub("", p)          # hard terms never include a bare generic
+                parts = re.split(r",\s*(?![^\[]*\])(?![^()]*\))", body)       # not inside a flag or bracket
+                first, rest = parts[0], parts[1:]
+                kept = [p for p in rest if not (any_word.search(bare(p)) and p.strip() != "reason not included")]
+                orig_first = first
+                if any_word.search(bare(first)):
+                    if not any_word.search(first):           # a flag sits inside the term: match on plain text
+                        first = bare(first)
+                    drug_word = FLAG_ANY.sub("", first).split()[0] if FLAG_ANY.sub("", first).split() else ""
+                    first = re.sub(r"\s*\([^()]*\)", lambda m: "" if any_word.search(bare(m.group(0))) else m.group(0), first)
+                    first = re.sub(r"\s+", " ", any_word.sub(lambda m: m.group(0) if gen_rx and gen_rx.fullmatch(m.group(0))
+                                                            else "", first)).strip()
+                    if not drug_word or not re.search(rf"(?<![A-Za-z0-9]){re.escape(drug_word)}(?![A-Za-z0-9])", first):
+                        lid = next((i for i in ids if i in src and src[i][0] in MED_TAGS), ids[0])
+                        raise Refused(LINKED_REFUSED.format(lid=lid))   # the medicine itself would disappear
+                if len(kept) < len(rest) or first != orig_first:
+                    body = ", ".join([first] + [p.strip() for p in kept])
+                    lid = next((i for i in ids if i in src and src[i][0] in MED_TAGS), ids[0])
+                    body = f"{body} {MED_PART_FLAG}"
+                    if flags is not None:
+                        flags.append(MED_PART_NOTICE.format(lid=lid))
             if MED_FLAG not in body:
                 body = f"{body} {MED_FLAG}"
                 if flags is not None:
                     flags.append(MED_NOTICE.format(lid=next((i for i in ids if i in src and src[i][0] in MED_TAGS), ids[0])))
             lines[n] = lead + body + id_part
+            continue
+        if all(src.get(i, (None,))[0] == "allergy" for i in ids):   # allergies are safety facts: never left out
+            if any_linked.search(FLAG_ANY.sub("", body)) and MED_FLAG not in body:
+                lines[n] = lead + body + f" {MED_FLAG}" + id_part
+                if flags is not None:
+                    flags.append(MED_NOTICE.format(lid=ids[0]))
             continue
         sents = re.split(r"(?<=[.!?])\s+", body)
         keep = [x for x in sents if not any_linked.search(FLAG_ANY.sub("", x))]
@@ -1357,10 +1443,18 @@ def main(argv=None):
         heldout(a.heldout)
         return 0
     brief_copy = None
+    include = []
     if a.brief is not None:
-        cut = re.search(r"[,;]?\s*(?:\b(?:cc|copy|copies|copied)\b|c\.c\.).*$", a.brief, re.I)
+        blines = [l.strip() for l in a.brief.splitlines() if l.strip()]
+        include = [m.group(1).strip() for m in (re.match(r"^include\s*:\s*(.+?)\s*\.?$", l, re.I) for l in blines) if m]
+        rest = [l for l in blines if not re.match(r"^include\s*:", l, re.I)]
+        if len(rest) > 1 or any(i.lower() not in {c.lower() for c in SENSITIVE} for i in include):
+            print(BRIEF_REFUSED, file=sys.stderr)
+            return 2
+        brief_text = rest[0] if rest else ""
+        cut = re.search(r"[,;]?\s*(?:\b(?:cc|copy|copies|copied)\b|c\.c\.).*$", brief_text, re.I)
         brief_copy = cut.group(0) if cut else None
-        core = a.brief[:cut.start()] if cut else a.brief
+        core = brief_text[:cut.start()] if cut else brief_text
         kind, reader = parse_brief(core)
         if not kind:
             print(BRIEF_REFUSED, file=sys.stderr)
@@ -1381,7 +1475,7 @@ def main(argv=None):
     try:
         flags = []
         md, dropped = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
-                            a.resolve, flags)
+                            a.resolve, flags, include)
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -1394,6 +1488,8 @@ def main(argv=None):
         cut = list(dict.fromkeys(i for d in dropped for i in re.findall(r"\b[LR]\d+\b", d.split(":")[0])))
         print(f"Cut from this letter: {', '.join(cut)}." if cut else "Cut from this letter: lines not known.",
               file=sys.stderr)
+    for item in dict.fromkeys(c for i in include for c in SENSITIVE if c.lower() == i.lower()):
+        print(f"Included by the brief: {item}.", file=sys.stderr)        # known item names only
     dropped.clear()
     if a.final:
         try:
