@@ -84,7 +84,7 @@ def parse(text):
 STIGMA_DROP = [r"\bdrug[- ]seeking\b", r"\bpoor historian\b", r"\bfrequent flyer\b", r"\btime[- ]waster\b"]
 NONCOMPLIANT = re.compile(r"\bnon-?complian(?:t|ce)(?:\s+with\s+([^.;,]+))?", re.I)
 SENSITIVE = {
-    "HIV status": [r"\bHIV\b", r"\bantiretroviral"],
+    "HIV status": [r"\bHIV\b", r"\bantiretroviral", r"\bviral load", r"\bVL\b", r"\bCD4\b"],
     "abuse": [r"\babuse", r"\bassault", r"\bdomestic violence"],
     "psychiatric history": [r"\bdepress", r"\bbipolar", r"\bschizo", r"\bpsychiatr", r"\bpsychos",
                             r"\bself[- ]harm", r"\boverdose", r"\banxiety", r"\bsuicid"],
@@ -108,8 +108,27 @@ def relevant(cat, to):
     return bool(re.search(RELEVANT[cat], to or "", re.I))
 
 
-def clean_text(body, ids, to, dropped, med=False):
+PAREN = re.compile(r"\s*\(([^()]*)\)")
+
+
+def cut_sensitive_parens(body, ids, to, dropped, keep=False):
+    """Medicine lines: the medicine stays, but a bracketed reason or marker that names an irrelevant
+    sensitive category (e.g. 'antiretroviral (HIV)', '(undetectable VL)') is removed and logged."""
+    def sub(m):
+        cat = sensitive_cat(m.group(1))
+        if cat and not relevant(cat, to) and not keep:
+            drug = body[:m.start()].split()[0].lower() if body[:m.start()].split() else "medicine"
+            dropped.append(f"{','.join(ids)}: indication for {drug} cut ({cat}, not relevant to {to}): "
+                           f"'({m.group(1).strip()})'")
+            return ""
+        return m.group(0)
+    return PAREN.sub(sub, body)
+
+
+def clean_text(body, ids, to, dropped, med=False, keep=False):
     """Rewrite or cut stigmatising labels and irrelevant sensitive clauses. Log every change."""
+    if med:
+        body = cut_sensitive_parens(body, ids, to, dropped, keep)
     def rw(m):
         dropped.append(f"{','.join(ids)}: stigmatising label '{m.group(0).split(' with')[0]}' rewritten")
         return f"not taking {m.group(1).strip()} as prescribed" if m.group(1) else "not taking medicines as prescribed"
@@ -176,7 +195,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
             m = TAG.match(line)
             kind = TAGS.get(m.group("tag").strip().lower()) if m else None
             body = m.group("body").strip() if kind else line
-            body = clean_text(body, ids, to, dropped, med=kind in ("med", "stop"))
+            body = clean_text(body, ids, to, dropped, med=kind in ("med", "stop"), keep=keep_indications)
             if not body:
                 continue
             if not kind:

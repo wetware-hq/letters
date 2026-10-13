@@ -1027,3 +1027,43 @@ def test_cc_daughter_refused_with_line_and_no_name(tmp_path):
     rp, outp = _gp_cli(tmp_path / "p", notes=n, brief="update to patient", extra=("--audience", "patient"))
     assert rp.returncode == 2 and "Jane" not in rp.stdout + rp.stderr
     assert rp.stderr.strip() == f"Refused: copy request {where}. {PATIENT_TAIL}"
+
+
+# ---------- sensitive reason cut everywhere: medicine lines, background, results ----------
+HIV_NOTES = """Patient: SYNTH-4101
+1937-04-02 Clinic review.
+Problem: type 2 diabetes
+PMHx: HIV, undetectable VL
+PMHx: asthma
+Med: antiretroviral (HIV) 1 tablet daily
+Med: dolutegravir 50 mg daily (for HIV)
+Med: tenofovir 245 mg daily (viral load suppressed)
+Stop: zidovudine (HIV, CD4 low)
+Med: metformin 500 mg twice daily (for type 2 diabetes)
+Result: HIV viral load <20 copies/mL
+Result: HbA1c 52 mmol/mol
+Follow-up: review in 3 months
+"""
+CUT_TERMS = ("HIV", "viral load", "VL", "CD4", "undetectable")
+
+
+@pytest.mark.parametrize("letter_type,to", [("gp-update", "Podiatry"), ("referral", "Dermatology"),
+                                            ("gp-update", "GP")])
+def test_sensitive_cut_everywhere_medicine_stays(letter_type, to):
+    text = HIV_NOTES + ("Question: please review\n" if letter_type == "referral" else "")
+    md, dropped = build(text, letter_type, to)
+    for t in CUT_TERMS:
+        assert not re.search(rf"\b{re.escape(t)}\b", md, re.I), t
+    for drug in ("antiretroviral", "dolutegravir", "tenofovir", "metformin"):
+        assert drug in md
+    assert "for type 2 diabetes" in md
+    removed = " ".join(dropped)
+    for t in ("'(HIV)'", "'(for HIV)'", "'(viral load suppressed)'", "'undetectable VL'", "HIV viral load"):
+        assert t in removed, t
+    assert all("HIV status" in d for d in dropped if "HIV" in d or "VL" in d or "viral" in d)
+
+
+def test_sensitive_kept_for_relevant_reader():
+    md, dropped = build(HIV_NOTES, "gp-update", "Infectious diseases")
+    assert "antiretroviral" in md and "(HIV" in md and "viral load" in md.lower() and "undetectable VL" in md
+    assert not any("HIV status" in d for d in dropped)
