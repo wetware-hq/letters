@@ -1,7 +1,7 @@
 Patient: SYNTH-2002
 Date: 1937-06-04
 Recipients: General practice
-Question: none
+Question: Is she safe to drive?
 Problems:
 - community-acquired pneumonia, right lower lobe, with SOB
 History: Fever and productive cough. Improved on antibiotics into a vein, switched to tablets on day 3.

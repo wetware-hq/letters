@@ -9,6 +9,10 @@ Dear colleague,
 
 Discharged on 4 Jun 1937. Actions are numbered at the end.
 
+## What we are asking
+
+- Is she safe to drive? [L21]
+
 ## Why they were admitted
 
 - community-acquired pneumonia, right lower lobe [L4]

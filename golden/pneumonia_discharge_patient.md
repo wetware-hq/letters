@@ -9,6 +9,10 @@ Dear patient,
 
 This letter explains your care and what happens next.
 
+## What we want to find out
+
+- Is she safe to drive? [L21]
+
 ## Why you came to hospital
 
 - community-acquired pneumonia, right lower lobe [L4]

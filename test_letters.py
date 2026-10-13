@@ -552,7 +552,7 @@ SM_EXPECTED = {
 
 
 # ---------- abbreviations: flagged by default, expanded only via reviewed list or clinician --resolve ----------
-AMBIG = "Patient: SYNTH-3001\n1937-05-01 Clinic review.\nProblem: {ab}\nFollow-up: review in 2 weeks"
+AMBIG = "Patient: SYNTH-3001\n1937-05-01 Clinic review.\nProblem: {ab}\nFollow-up: review in 2 weeks\nQuestion: any concerns?"
 
 
 def _notes(tmp_path, ab):
@@ -627,9 +627,9 @@ def test_goldens_expand_no_abbreviation():
 # ---------- abbreviation detection edges ----------
 def _one(line):
     flags = []
-    md, _ = build(f"Patient: SYNTH-3101\n1937-05-01 Clinic review.\n{line}\nFollow-up: review in 2 weeks",
+    md, _ = build(f"Patient: SYNTH-3101\n1937-05-01 Clinic review.\n{line}\nFollow-up: review in 2 weeks\nQuestion: any concerns?",
                   "gp-update", "General practice", flags=flags)
-    return md, [f.split()[0] for f in flags]
+    return md, [f.split()[0] for f in flags if f != L.QUESTION_NOTICE_ANY]   # round 10: no-question flag on every letter
 
 
 def test_lowercase_known_shorthand_flagged():
@@ -671,7 +671,7 @@ def test_units_not_flagged():
 
 
 # ---------- reviewed single-meaning list ----------
-SM_NOTE = "Patient: SYNTH-3201\n1937-05-01 Clinic review.\nProblem: {ab} noted\nFollow-up: review in 2 weeks"
+SM_NOTE = "Patient: SYNTH-3201\n1937-05-01 Clinic review.\nProblem: {ab} noted\nFollow-up: review in 2 weeks\nQuestion: any concerns?"
 
 
 @pytest.mark.parametrize("ab", list(SM_EXPECTED))
@@ -837,7 +837,7 @@ def test_fixed_wording_never_flagged():
 # ---------- drug-name flag label ----------
 def test_non_wordlist_word_on_medicine_line_gets_drug_label():
     flags = []
-    md, _ = build("Patient: SYNTH-3701\n1937-05-01 Clinic review.\nMed: synthopril 5 mg daily", "gp-update", "GP",
+    md, _ = build("Patient: SYNTH-3701\n1937-05-01 Clinic review.\nMed: synthopril 5 mg daily\nQuestion: any concerns?", "gp-update", "GP",
                   flags=flags)
     assert f"synthopril {L.DRUG_FLAG} 5 mg" in md and L.FLAG not in md
     assert flags == ["synthopril (drug name, check spelling) [L3]"]
@@ -1049,7 +1049,7 @@ def test_unclear_cc_heading_refused(tmp_path, line):
 
 
 def test_cc_dose_unit_not_refused_but_flagged(tmp_path):
-    text = "Patient: SYNTH-3502\n1937-05-01 Clinic review.\nProblem: given 5 cc saline flush\nFollow-up: review in 2 weeks"
+    text = "Patient: SYNTH-3502\n1937-05-01 Clinic review.\nProblem: given 5 cc saline flush\nFollow-up: review in 2 weeks\nQuestion: any concerns?"
     flags = []
     md, _ = build(text, "gp-update", "GP", flags=flags)
     assert f"5 cc {L.FLAG}" in md and len(flags) == 1 and md.count(L.FLAG) == 1
@@ -2748,3 +2748,24 @@ def test_r10_no_allergy_statement_inline_on_the_heading(tmp_path):
     r, out = _run_t(tmp_path, t, "--brief", "update to GP")
     assert r.returncode == 0, r.stderr
     assert section((out / "letter.md").read_text(), "Allergies").startswith("- No known drug allergies")
+
+
+# ---------- round 10 item 5: the question line is always kept; none gives the no-question flag ----------
+@pytest.mark.parametrize("brief,head", [("discharge to GP", "What we are asking"), ("update to GP", "What we are asking"),
+                                        ("letter to the patient", "What we want to find out"),
+                                        ("referral to cardiology", "Question")])
+def test_r10_question_kept_in_every_letter(tmp_path, brief, head):
+    r, out = _run_t(tmp_path, tpl(question="Can I swim again?", problems=["asthma"]), "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert "Can I swim again?" in section(md, head) and L.QUESTION_FLAG not in md
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "update to GP", "letter to the patient", "referral to cardiology"])
+def test_r10_no_question_flag_fires_in_every_letter(tmp_path, brief):
+    r, out = _run_t(tmp_path, tpl(question="none", problems=["asthma"]), "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    assert L.QUESTION_FLAG in (out / "letter.md").read_text()
+    assert any(l.startswith("Flag: this") and "no clear question" in l for l in r.stderr.splitlines())
+    r, out = _run_t(tmp_path / "f", tpl(question="none", problems=["asthma"]), "--brief", brief, "--final")
+    assert r.returncode == 3 and not out.exists()

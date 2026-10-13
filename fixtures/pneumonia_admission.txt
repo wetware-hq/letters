@@ -18,3 +18,4 @@ Resolved: CAP
 Pending: sputum culture
 Follow-up: GP review in 1 week; restart metformin if eating normally
 Follow-up: repeat chest X-ray in 6 weeks
+Question: Is she safe to drive?

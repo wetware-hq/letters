@@ -613,8 +613,8 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
 # ---------- 3. group into sections ----------
 SECTIONS = {
     "referral": ["question", "problems", "background", "results", "med_changes", "meds", "allergies", "pending", "followup"],
-    "discharge": ["admission", "course", "problems", "med_changes", "meds", "allergies", "results", "pending", "followup"],
-    "gp-update": ["problems", "background", "results", "med_changes", "meds", "allergies", "pending", "followup"],
+    "discharge": ["question", "admission", "course", "problems", "med_changes", "meds", "allergies", "results", "pending", "followup"],
+    "gp-update": ["question", "problems", "background", "results", "med_changes", "meds", "allergies", "pending", "followup"],
     "specialist-reply": ["question", "exam", "problems", "results", "med_changes", "meds", "allergies", "pending", "followup"],
 }
 HEADINGS = {
@@ -1301,12 +1301,12 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
         mark_linked_items(text, to, dropped)
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
                 resolved, flags)
-    if letter_type == "referral" and not st["question"]:
+    if not st["question"]:                       # every letter keeps its question; none found: the flag fires
         head = f"**Letter:** {TITLES[letter_type]}"
         md = md.replace(head, f"{head} {QUESTION_FLAG}", 1) if head in md else \
             md.replace("\n", f" {QUESTION_FLAG}\n", 1)
         if flags is not None:
-            flags.append(QUESTION_NOTICE)
+            flags.append(QUESTION_NOTICE if letter_type == "referral" else QUESTION_NOTICE_ANY)
     md = flag_long_sentences(md, flags)
     for _, line in _body_lines(md):
         for fl, notice in ((ALLERGY_FLAG, ALLERGY_NOTICE), (OWNER_FLAG, OWNER_NOTICE)):
@@ -1323,11 +1323,11 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
     if not patient:
         md = apply_cut_rule(md, text, dropped, flags, TITLES[letter_type])
         md = flag_cuts(md, dropped, flags, TITLES[letter_type])
-    if letter_type == "referral" and QUESTION_FLAG not in md and not _has_question(md, audience):
+    if QUESTION_FLAG not in md and not _has_question(md, audience):
         head = f"**Letter:** {TITLES[letter_type]}"      # the question was cut or empty: the flag still fires
         md = md.replace(head, f"{head} {QUESTION_FLAG}", 1)
         if flags is not None:
-            flags.append(QUESTION_NOTICE)
+            flags.append(QUESTION_NOTICE if letter_type == "referral" else QUESTION_NOTICE_ANY)
     verify_letter(md, text, audience, _INCLUDE)
     reverse_check(md, text, " ".join([x for x in (to, recipient) if x] + [f for _, f in resolved.values()]))
     return md, dropped
@@ -1673,6 +1673,7 @@ def refuse_missing_required(md, text, pending_ids=None):
 PENDING_NONE_REFUSED = "Refused: line {lid} has a test still pending, but this letter says none are. Nothing was written."
 QUESTION_FLAG = "[flag: no clear question]"
 QUESTION_NOTICE = "Flag: this referral has no clear question. Add one before it's signed."
+QUESTION_NOTICE_ANY = "Flag: this letter has no clear question. Add one before it's signed."
 FINAL_REFUSED = ("--final refused: {n} flag(s) still open. Confirm each meaning with "
                  '--resolve "AB=meaning" (or edit the notes), then run --final again.')
 

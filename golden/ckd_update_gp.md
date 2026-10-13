@@ -9,6 +9,10 @@ Dear colleague,
 
 Update on 1 Sep 1937. Actions are numbered at the end.
 
+## What we are asking
+
+- Should she see renal? [L11]
+
 ## Problems
 
 - chronic kidney disease (CKD) stage 3 [L4]
