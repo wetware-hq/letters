@@ -1,3 +1,4 @@
+import json
 """Regression tests. Each rule has a test that plants its failure. Synthetic data only."""
 import pathlib, re, subprocess, sys
 import pytest
@@ -418,9 +419,6 @@ def _hygiene_hits(p):
     if p == ENGLISH:
         lines = [l for l in lines if l not in TELEGRAM_OK]
     s = "\n".join(lines)
-    if p.name == "linked_terms.toml":       # the signed-off header names its reviewer (room ruling)
-        lines = [l for l in lines if l != "# Version 2 signed off by BIO Physician 13 Oct 2026. Frozen."]
-        s = "\n".join(lines)
     return [bad for bad in ("/workspace", "/home/", "BIO ", "telegram", "patient-store") if bad in s]
 
 
@@ -1119,7 +1117,7 @@ def test_lithium_medicine_flagged_when_reason_cut():
 def test_linked_terms_file_signed_off():
     raw = L.LINKED_TERMS_FILE.read_text()
     assert "Reviewed by clinician; needs fresh sign-off for any change" in raw
-    assert "Version 2 signed off by BIO Physician 13 Oct 2026. Frozen." in raw and "DRAFT" not in raw
+    assert "Version 2 signed off by the clinical reviewer, 13 Oct 2026. Frozen." in raw and "DRAFT" not in raw
     items = L.load_linked()
     hiv, psy, prep = items["HIV status"], items["psychiatric history"], items["PrEP"]
     assert {"HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "CD4", "RVD",
@@ -1574,3 +1572,12 @@ def test_viral_load_and_vl_flag_only_after_signoff(extra):
     flags = []
     md, _ = build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry", flags=flags)
     assert WORD_MSG.format("L12") in flags
+
+
+
+# frozen v2 content (parsed); the header-only edit must not change any term
+FROZEN_V2 = json.loads(r'''{"HIV status": {"brands": {"Biktarvy": "bictegravir", "Dovato": "dolutegravir", "Genvoya": "cobicistat", "Triumeq": "dolutegravir"}, "flag_terms": ["undetectable", "ART", "ritonavir", "lamivudine", "Truvada", "Descovy", "tenofovir", "S100", "viral load", "VL"], "medicines": ["dolutegravir", "emtricitabine", "zidovudine", "abacavir", "bictegravir", "raltegravir", "rilpivirine", "darunavir", "efavirenz", "nevirapine", "cobicistat"], "terms": ["HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "CD4", "RVD", "antiretroviral", "S100 prescriber"]}, "PrEP": {"brands": {"Descovy": "tenofovir/emtricitabine", "Truvada": "tenofovir/emtricitabine"}, "flag_terms": ["sexual health clinic", "tenofovir"], "medicines": ["tenofovir/emtricitabine", "emtricitabine"], "terms": ["PrEP", "pre-exposure prophylaxis"]}, "psychiatric history": {"brands": {"Clopine": "clozapine", "Clozaril": "clozapine", "Lithicarb": "lithium", "Quilonum": "lithium"}, "flag_terms": ["ANC", "bipolar", "psychosis"], "medicines": ["lithium", "clozapine"], "terms": ["lithium level", "serum lithium", "clozapine level", "clozapine monitoring", "ANC monitoring", "lithium toxicity", "Li level", "Li+", "clozapine clinic", "clozapine registry", "CPMS", "schizophrenia", "schizoaffective"]}}''')
+
+
+def test_linked_terms_parsed_identical_to_frozen_v2():
+    assert json.loads(json.dumps(L.load_linked(), sort_keys=True)) == FROZEN_V2

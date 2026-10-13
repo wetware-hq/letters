@@ -1,6 +1,6 @@
 # Linked terms for items this tool may cut from a letter. Version 2.
 # Reviewed by clinician; needs fresh sign-off for any change.
-# Version 2 signed off by BIO Physician 13 Oct 2026. Frozen.
+# Version 2 signed off by the clinical reviewer, 13 Oct 2026. Frozen.
 #
 # For each cut category (names match SENSITIVE in letters.py), checked ONLY when that item is on the
 # letter's dropped list, and never for letters addressed to the patient:
