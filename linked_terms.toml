@@ -1,4 +1,4 @@
-# Linked terms for items this tool may cut from a letter. Version 2.
+# Linked terms for items this tool may cut from a letter. Version 3.
 # Reviewed by clinician; needs fresh sign-off for any change.
 # Version 2 signed off by the clinical reviewer, 13 Oct 2026. Frozen.
 #
@@ -44,3 +44,18 @@ medicines = ["tenofovir/emtricitabine", "emtricitabine"]
 [items."PrEP".brands]
 Truvada = "tenofovir/emtricitabine"
 Descovy = "tenofovir/emtricitabine"
+
+# Version 3: H22 items added from the round 11 signed rulings (clinical reviewer, 14 Oct 2026), one entry per item.
+# terms are the signed detection words (whole word or phrase, any case). CTO and TOP are ambiguous shorthand
+# (shorthand.txt), never detection words; bare "scheduled" and bare "termination" are never detection words.
+[items."Mental Health Act status"]
+terms = ["Mental Health Act", "involuntary patient", "scheduled patient", "community treatment order", "sectioned"]
+
+[items."sexual health"]
+terms = ["STI", "chlamydia", "gonorrhoea", "syphilis", "sexual health clinic"]
+
+[items."pregnancy loss or termination"]
+terms = ["miscarriage", "termination of pregnancy"]
+
+[items."genetic results"]
+terms = ["BRCA", "pathogenic variant", "genetic test result"]

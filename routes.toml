@@ -1,0 +1,26 @@
+# Signed route list (round 11 rulings, clinical reviewer, 14 Oct 2026). Kept exactly as written in the route slot of a
+# medicine line, exempt from the shorthand flag there only. Patient letters add the plain words in brackets after
+# short forms and medical words; a route already in plain words (empty string) stays as written, never doubled.
+# Any other word in the route slot is flagged, not refused.
+[routes]
+"PO" = "by mouth"
+"by mouth" = ""
+"oral" = "by mouth"
+"IV" = "into a vein"
+"intravenous" = "into a vein"
+"IM" = "into a muscle"
+"intramuscular" = "into a muscle"
+"subcut" = "under the skin"
+"SC" = "under the skin"
+"subcutaneous" = "under the skin"
+"SL" = "under the tongue"
+"sublingual" = "under the tongue"
+"PR" = "into the back passage"
+"PV" = "into the vagina"
+"inhaled" = "breathed in"
+"nebulised" = "breathed in as a mist"
+"topical" = "on the skin"
+"transdermal" = "as a patch on the skin"
+"nasal" = "into the nose"
+"eye" = "into the eye"
+"ear" = "into the ear"
