@@ -47,6 +47,32 @@ class Refused(Exception):
     pass
 
 
+# The synthetic-date safeguard. figures keeps its own copy of this same logic; the same boundary tests run in both.
+SCAN_ISO = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
+SCAN_DMY = re.compile(r"(?<![\d.])(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})(?![\d.])")
+DATE_REFUSED = ("Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written.\n"
+                "If these are real notes, delete them and use synthetic data only.")
+
+
+def date_in_range(y, mo, d):
+    """True only for a real calendar date from SYNTH_FIRST to SYNTH_LAST."""
+    v = f"{y:04d}-{mo:02d}-{d:02d}"
+    return valid_date(v) and SYNTH_FIRST <= v <= SYNTH_LAST
+
+
+def first_out_of_range_line(text):
+    """1-based line number (blank lines counted) of the first date outside the range; None if all are inside."""
+    for n, line in enumerate(text.splitlines(), 1):
+        for m in SCAN_ISO.finditer(line):
+            if not date_in_range(*(int(x) for x in m.groups())):
+                return n
+        for m in SCAN_DMY.finditer(line):
+            d, mo, y = (int(x) for x in m.groups())
+            if not date_in_range(y + 1900 if y < 100 else y, mo, d):
+                return n
+    return None
+
+
 # ---------- safety ----------
 def check_safe(text):
     ids = set(SYNTH.findall(text))
@@ -54,14 +80,9 @@ def check_safe(text):
         raise Refused(INCIDENT + " (reason: no SYNTH- identifier)")
     if len(ids) > 1:
         raise Refused("Refused: notes mention more than one patient identifier.")
-    for m in ISO.finditer(text):
-        if not (valid_date(m.group(0)) and SYNTH_FIRST <= m.group(0) <= SYNTH_LAST):
-            raise Refused(INCIDENT + f" (reason: date outside {SYNTH_RANGE})")
-    for m in DMY.finditer(text):
-        d, mo, y = (int(x) for x in m.groups())
-        y = y + 1900 if y < 100 else y
-        if not (valid_date(f"{y:04d}-{mo:02d}-{d:02d}") and 1930 <= y <= 1939):
-            raise Refused(INCIDENT + f" (reason: date outside {SYNTH_RANGE})")
+    n = first_out_of_range_line(text)
+    if n:
+        raise Refused(DATE_REFUSED.format(n=n))
     if LONGNUM.search(ISO.sub(" ", SYNTH.sub(" ", text))):
         raise Refused(INCIDENT + " (reason: phone- or card-number-like digits)")
     return ids.pop()

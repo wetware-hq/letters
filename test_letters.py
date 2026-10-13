@@ -63,7 +63,10 @@ def test_patient_id_appears_once():
 def test_refuses_non_synthetic(text):
     with pytest.raises(Refused) as e:
         make_letter(text, "gp-update", "GP")
-    assert INCIDENT in str(e.value)
+    if "SYNTH-1" in text and re.search(r"\d{4}-\d\d-\d\d|\d+/\d+/\d+", text):
+        assert str(e.value) == L.DATE_REFUSED.format(n=2)     # ruled: dates get the two-line refusal, not the incident text
+    else:
+        assert INCIDENT in str(e.value)
 
 
 def test_two_patients_refused():
@@ -3599,3 +3602,35 @@ def test_r11k_unparseable_brief_still_not_understood(tmp_path, brief):
     with pytest.raises(Refused) as e:
         L.read_brief(brief)
     assert str(e.value) == L.BRIEF_REFUSED
+
+
+# ---------- ruled date refusal (two lines, names the line); same boundary dates as figures ----------
+DATE_LINES = ("Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written.",
+              "If these are real notes, delete them and use synthetic data only.")
+
+
+@pytest.mark.parametrize("d,ok", [("1929-12-31", False), ("1930-01-01", True), ("1939-12-31", True), ("1940-01-01", False)])
+def test_r11h_boundary_dates(d, ok):
+    assert (L.first_out_of_range_line(f"SYNTH-1\n\nseen {d}") is None) == ok
+    if not ok:
+        with pytest.raises(Refused) as e:
+            L.check_safe(f"SYNTH-1\n\nseen {d}")
+        assert str(e.value).splitlines() == [DATE_LINES[0].format(n=3), DATE_LINES[1]]
+        assert INCIDENT not in str(e.value)
+
+
+@pytest.mark.parametrize("d", ["1929-12-31", "1940-01-01"])
+def test_r11h_check_template_and_letter_give_the_two_ruled_lines(tmp_path, d):
+    text = tpl(question="Please review.", problems=("cough",), date=d, actions=("review in 2 weeks, GP",))
+    c = _check(tmp_path / "c", text)
+    r, out = _run_t(tmp_path / "r", text, "--brief", "update to GP")
+    want = [DATE_LINES[0].format(n=2), DATE_LINES[1]]
+    assert c.returncode == 2 and c.stderr.strip().splitlines() == want, c.stderr
+    assert r.returncode == 2 and want[0] in r.stderr and want[1] in r.stderr, r.stderr
+    assert not (out / "letter.md").exists()
+
+
+def test_r11h_date_line_counts_blank_lines_and_iso_with_time():
+    assert L.first_out_of_range_line("SYNTH-1\n\n\n1937-01-01\n1941-02-03T08:00") == 5
+    assert L.first_out_of_range_line("SYNTH-1 31/12/1939 01/01/1930") is None
+    assert L.first_out_of_range_line("SYNTH-1\n1/1/1940") == 2
