@@ -15,23 +15,23 @@ Discharged on 4 Jun 1937. Actions are numbered at the end.
 
 ## What happened in hospital
 
-- improved on intravenous (IV) antibiotics, switched to oral on day 3 [L13]
-- emergency department (ED). Fever, productive cough, shortness of breath. [L3]
+- improved on IV [flag: abbreviation, meaning not confirmed] antibiotics, switched to oral on day 3 [L13]
+- ED [flag: abbreviation, meaning not confirmed]. Fever, productive cough, SOB [flag: abbreviation, meaning not confirmed]. [L3]
 - Ward round. Afebrile, eating. [L10]
 - Discharge. [L14]
 
 ## Problems
 
-- community-acquired pneumonia (CAP): resolved on 4 Jun 1937 [L5, L17]
+- CAP [flag: abbreviation, meaning not confirmed]: resolved on 4 Jun 1937 [L5, L17]
 
 ## Medicine changes
 
-- Stopped on 3 Jun 1937: metformin 500 mg twice a day (bd). Reason for change: not documented. [L8, L12]
-- Changed on 4 Jun 1937: from amoxicillin 1 g IV three times a day (tds). Now: amoxicillin 1 g by mouth (PO) tds for 4 more days. Reason for change: not documented. [L7, L15]
+- Stopped on 3 Jun 1937: metformin 500 mg bd [flag: abbreviation, meaning not confirmed]. Reason for change: not documented. [L8, L12]
+- Changed on 4 Jun 1937: from amoxicillin 1 g IV [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed]. Now: amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed] for 4 more days. Reason for change: not documented. [L7, L15]
 
 ## Current medicines
 
-- amoxicillin 1 g PO tds for 4 more days [L7, L15]
+- amoxicillin 1 g PO [flag: abbreviation, meaning not confirmed] tds [flag: abbreviation, meaning not confirmed] for 4 more days [L7, L15]
 
 ## Allergies
 
@@ -39,7 +39,7 @@ Discharged on 4 Jun 1937. Actions are numbered at the end.
 
 ## Results
 
-- C-reactive protein (CRP): 180 mg/L on 1 Jun 1937, 90 mg/L on 3 Jun 1937, 40 mg/L on 4 Jun 1937 [L6, L11, L16]
+- CRP [flag: abbreviation, meaning not confirmed]: 180 mg/L on 1 Jun 1937, 90 mg/L on 3 Jun 1937, 40 mg/L on 4 Jun 1937 [L6, L11, L16]
 
 ## Results still to come
 
@@ -48,7 +48,7 @@ Discharged on 4 Jun 1937. Actions are numbered at the end.
 
 ## Actions
 
-1. Who: general practitioner (GP). When: in 1 week. Action: GP review in 1 week; restart metformin if eating normally [L19]
+1. Who: GP [flag: abbreviation, meaning not confirmed]. When: in 1 week. Action: GP [flag: abbreviation, meaning not confirmed] review in 1 week; restart metformin if eating normally [L19]
 2. Who: not documented. When: in 6 weeks. Action: repeat chest X-ray in 6 weeks [L20]
 
 ---

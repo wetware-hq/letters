@@ -379,53 +379,79 @@ def render_section(name, st, audience):
     return "\n".join([f"## {head}", ""] + body + [""])
 
 
-# ---------- 4. wording: abbreviations, plain language ----------
-ALWAYS = [(r"\bc/o\b", "reports"), (r"\bSOB\b", "shortness of breath"), (r"\bhx\b", "history"),
-          (r"\bo/e\b", "on examination"), (r"\bpt\b", "patient")]
-ABBR = OrderedDict([
-    ("PE", "pulmonary embolism"), ("CAP", "community-acquired pneumonia"), ("CKD", "chronic kidney disease"),
-    ("T2DM", "type 2 diabetes"), ("eGFR", "estimated glomerular filtration rate"),
-    ("LDL", "low-density lipoprotein cholesterol"), ("CRP", "C-reactive protein"), ("ECG", "electrocardiogram"),
-    ("BP", "blood pressure"), ("IV", "intravenous"), ("PO", "by mouth"), ("ED", "emergency department"),
-    ("AF", "atrial fibrillation"), ("GP", "general practitioner"), ("Hb", "haemoglobin"),
-    ("TSH", "thyroid-stimulating hormone"), ("tds", "three times a day"), ("bd", "twice a day"),
-    ("nocte", "at night"), ("mane", "in the morning"), ("PMHx", "past medical history"),
-])
-PLAIN = [(r"\bIV antibiotics\b", "antibiotics through a drip"), (r"\boral\b", "tablets"),
-         (r"\bhypertension\b", "high blood pressure"), (r"\bexertional\b", "when active"),
-         (r"\bCKD\b", "reduced kidney function"), (r"\bT2DM\b", "type 2 diabetes"),
-         (r"\bCAP\b", "a chest infection (pneumonia)"), (r"\bbd\b", "twice a day"), (r"\btds\b", "three times a day"),
-         (r"\bmane\b", "in the morning"), (r"\bnocte\b", "at night"), (r"\bdaily\b", "once a day"),
-         (r"\bPO\b", "by mouth"), (r"\bIV\b", "through a drip"), (r"\bHb\b", "haemoglobin (blood count)"),
-         (r"\bCRP\b", "CRP (infection marker)"), (r"\beGFR\b", "eGFR (kidney function)"),
-         (r"\bECG\b", "heart tracing (ECG)"), (r"\bGP\b", "your family doctor (GP)"),
-         (r"\bLDL\b", "LDL cholesterol"), (r"\bPE\b", "a blood clot in the lung"), (r"\bED\b", "the emergency department")]
+# ---------- 4. wording: abbreviations are flagged, never guessed; plain language ----------
+# An abbreviation means different things in different specialties (MS, PE, CP, RA...). Default: keep it as
+# written and flag it. Expand only from the reviewed single-meaning list (ships empty) or a clinician --resolve.
+FLAG = "[flag: abbreviation, meaning not confirmed]"
+ABBR_RE = re.compile(r"(?<![\w/-])(?:c/o|o/e|(?=[A-Za-z0-9]*[A-Z][A-Za-z0-9]*[A-Z])[A-Za-z][A-Za-z0-9]{1,6}|"
+                     r"Hb|bd|tds|qds|nocte|mane|prn|hx|pt|od)(?![\w/-])")
+SINGLE_MEANING_FILE = HERE / "single_meaning.toml"
+# Plain-language swaps for patients: ordinary words only, never abbreviations.
+PLAIN = [(r"\boral\b", "tablets"), (r"\bhypertension\b", "high blood pressure"), (r"\bexertional\b", "when active"),
+         (r"\bdaily\b", "once a day")]
+
+
+def load_single_meaning(path=None):
+    p = pathlib.Path(path) if path else SINGLE_MEANING_FILE
+    if not p.exists():
+        return {}
+    return dict(tomllib.loads(p.read_text(encoding="utf-8")).get("abbreviations", {}))
+
+
+def abbreviations(s):
+    return [m.group(0) for m in ABBR_RE.finditer(s)]
+
+
+def resolution_sources(resolve, text):
+    """Turn --resolve "AB=meaning" items into cited sources R1, R2... Refuse an abbreviation not in the notes."""
+    out = OrderedDict()
+    for i, item in enumerate(resolve or [], 1):
+        if "=" not in item:
+            raise ValueError(f'--resolve must look like "MS=multiple sclerosis", got: {item}')
+        ab, full = (x.strip() for x in item.split("=", 1))
+        if not ab or not full:
+            raise ValueError(f'--resolve must look like "MS=multiple sclerosis", got: {item}')
+        if ab not in abbreviations(text):
+            raise ValueError(f"--resolve {ab}: that abbreviation is not in the notes")
+        out[ab] = (f"R{i}", full)
+    return out
 
 
 def split_ids(line):
-    m = re.search(r"( \[L\d+(?:, L\d+)*\])( \|)?$", line)
+    m = re.search(r"( \[[LR]\d+(?:, [LR]\d+)*\])( \|)?$", line)
     return (line[:m.start()], line[m.start():]) if m else (line, "")
 
 
-def wording(lines, audience):
+def wording(lines, audience, resolved=None, single=None, flags=None):
+    resolved, single = resolved or {}, single if single is not None else load_single_meaning()
+    flags = [] if flags is None else flags
     seen, out = set(), []
     for line in lines:
         if not re.match(r"^(- |\d+\. |\| (?!Test \|))", line):
             out.append(line); continue
         text, ids = split_ids(line)
-        for pat, rep in ALWAYS:
-            text = re.sub(pat, rep, text, flags=re.I)
         if audience == "patient":
             for pat, rep in PLAIN:
                 text = re.sub(pat, rep, text)
-        else:
-            for ab, full in ABBR.items():
-                def sub(m, ab=ab, full=full):
-                    if ab in seen:
-                        return ab
-                    seen.add(ab)
-                    return f"{full} ({ab})"
-                text = re.sub(rf"(?<![\w-]){re.escape(ab)}(?![\w-])", sub, text)
+        extra = []
+        def sub(m):
+            ab = m.group(0)
+            if ab in resolved:
+                rid, full = resolved[ab]
+                if rid not in extra:
+                    extra.append(rid)
+            elif ab in single:
+                full = single[ab]
+            else:
+                flags.append(f"{ab}{ids.strip(' |') and ' ' + ids.strip(' |')}")
+                return f"{ab} {FLAG}"
+            if ab in seen:
+                return ab
+            seen.add(ab)
+            return f"{full} ({ab})"
+        text = ABBR_RE.sub(sub, text)
+        if extra and ids:
+            ids = re.sub(r"\]", ", " + ", ".join(extra) + "]", ids, count=1)
         out.append(text + ids)
     return out
 
@@ -453,15 +479,14 @@ def _words(s):
     return {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z-]+", s)}
 
 
-def _source_words(src):
-    """Words a line may use: those in its cited lines, plus expansions/rewrites earned by those same lines only."""
+def _source_words(src, single=None):
+    """Words a line may use: those in its cited lines (including cited R resolutions), plus single-meaning
+    expansions and rewrites earned by those same lines only."""
     words = {w.lower() for w in WORD.findall(src)}
-    for ab, full in ABBR.items():                      # fixed dictionary, abbreviation must be in the cited lines
-        if re.search(rf"(?<![\w-]){re.escape(ab)}(?![\w-])", src):
+    single = load_single_meaning() if single is None else single
+    for ab, full in single.items():                    # reviewed list, abbreviation must be in the cited lines
+        if ab in abbreviations(src):
             words |= _words(full)
-    for pat, rep in ALWAYS:
-        if re.search(pat, src, re.I):
-            words |= _words(rep)
     for pat, rep in PLAIN:
         if re.search(pat, src):
             words |= _words(rep)
@@ -488,7 +513,7 @@ def check(md, sources, letter_type):
         for sent in re.split(r"(?<=[.!])\s+", text):
             if len(sent.split()) > SENTENCE_LIMIT:
                 problems.append(f"sentence over {SENTENCE_LIMIT} words: {sent[:40]}...")
-        if re.search(r"\bc/o\b|\bSOB\b|(?<!\w)\?\w", text):
+        if re.search(r"(?<!\w)\?\w", text):
             problems.append(f"banned shorthand: {text[:40]}")
         if section in ("Results", "Your test results") and DIRECTION.search(text):
             problems.append(f"direction word in results ('{DIRECTION.search(text).group(0)}'): give values with dates")
@@ -502,6 +527,13 @@ def check(md, sources, letter_type):
             problems.append(f"cites unknown line: {ids.strip()}")
             continue
         src = " ".join(sources[c][0] + " " + (sources[c][1] or "") for c in cited)
+        res = {sources[c][0].split(" = ", 1)[0] for c in cited if c.startswith("R")}
+        single = load_single_meaning()
+        for m in ABBR_RE.finditer(text):
+            ab, flagged = m.group(0), text[m.end():].startswith(" " + FLAG)
+            if not (flagged or ab in res or ab in single):
+                problems.append(f"abbreviation not flagged or resolved: {ab}")
+        text = text.replace(" " + FLAG, "")
         for m in OUTDATE.finditer(text):
             iso = f"1937-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
             if iso not in src:
@@ -555,7 +587,8 @@ def brand_block(brand):
             f"**{brand['name']}**  ", brand["address"].strip().replace("\n", "  \n"), ""]
 
 
-def render(st, pid, letter_type, to, recipient=None, audience="specialist", template=None, brand=None, log=None):
+def render(st, pid, letter_type, to, recipient=None, audience="specialist", template=None, brand=None, log=None,
+           resolved=None, flags=None):
     log = [] if log is None else log
     header = brand_block(brand) + [
         f"**Date:** {fdate(st['last']) if st['last'] else ND}  ",
@@ -586,7 +619,7 @@ def render(st, pid, letter_type, to, recipient=None, audience="specialist", temp
             md = md.replace("{{footer}}", extra + "\n\n" + footer)
         else:
             md = md.rstrip("\n") + "\n\n" + extra + "\n\n" + footer
-    md = "\n".join(wording(md.splitlines(), audience))
+    md = "\n".join(wording(md.splitlines(), audience, resolved, flags=flags))
     return re.sub(r"\n{3,}", "\n\n", md).rstrip("\n") + "\n"
 
 
@@ -597,26 +630,40 @@ def llm_guard():
                          "Unset it to run.")
 
 
-def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None):
-    """Return (markdown, dropped). The dropped list is for the clinician's eyes only; never store it."""
+def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None):
+    """Return (markdown, dropped). The dropped list is for the clinician's eyes only; never store it.
+    resolve: list of "AB=meaning" from the clinician; each becomes a cited source R1, R2...
+    flags: optional list that receives every open abbreviation flag."""
     llm_guard()
     if letter_type not in TYPES:
         raise ValueError(f"unknown type {letter_type}; choose from {', '.join(TYPES)}")
     audience = audience or ("gp" if letter_type in ("discharge", "gp-update", "specialist-reply") else "specialist")
     pid = check_safe(text)
     entries, sources = parse(text)
+    resolved = resolution_sources(resolve, text)
+    for ab, (rid, full) in resolved.items():
+        sources[rid] = (f"{ab} = {full}", None)
     dropped = []
     st = cumsum(entries, to, dropped)
     if letter_type == "referral" and not st["question"]:
         raise Refused("Referral refused: the notes have no 'Question:' line. A referral must open with its question.")
-    md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped)
+    md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
+                resolved, flags)
     check(md, sources, letter_type)
     return md, dropped
 
 
+FINAL_REFUSED = ("--final refused: {n} abbreviation flag(s) still open. Confirm each meaning with "
+                 '--resolve "AB=meaning" (or edit the notes), then run --final again.')
+
+
 def finalise(md):
-    """Remove [Lx] source tags only. The draft mark and draft footer stay until the signing clinician removes them."""
-    return re.sub(r" \[L\d+(?:, L\d+)*\]", "", md)
+    """Remove [Lx]/[Rx] source tags only. Refused while any abbreviation flag is open.
+    The draft mark and draft footer stay until the signing clinician removes them."""
+    n = md.count(FLAG)
+    if n:
+        raise Refused(FINAL_REFUSED.format(n=n))
+    return re.sub(r" \[[LR]\d+(?:, [LR]\d+)*\]", "", md)
 
 
 def make_letter(text, letter_type, to, recipient=None, audience=None, template=None, brand=None):
@@ -672,7 +719,9 @@ def main(argv=None):
     ap.add_argument("--brand", help="brand pack folder containing brand.toml")
     ap.add_argument("--out", help="folder to write letter.md into (only the letter is written)")
     ap.add_argument("--final", action="store_true",
-                    help="remove [Lx] source tags only; the draft mark and footer stay")
+                    help="remove source tags only; the draft mark and footer stay; refused while a flag is open")
+    ap.add_argument("--resolve", action="append", default=[], metavar='"AB=meaning"',
+                    help='confirm an abbreviation\'s meaning, e.g. "MS=multiple sclerosis" (repeatable)')
     ap.add_argument("--heldout", help="external folder of held-out synthetic notes; reports a failure rate")
     a = ap.parse_args(argv)
     llm_guard()
@@ -692,17 +741,30 @@ def main(argv=None):
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
     tpl = open(a.template, encoding="utf-8").read() if a.template else None
     try:
-        md, dropped = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None)
+        flags = []
+        md, dropped = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
+                            a.resolve, flags)
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    if flags:
+        print("Abbreviations flagged, meaning not confirmed (resolve with --resolve \"AB=meaning\"):", file=sys.stderr)
+        for f in flags:
+            print(f"  - {f}", file=sys.stderr)
     if dropped:
         print("Dropped or changed (for the clinician only; not saved):", file=sys.stderr)
         for d in dropped:
             print(f"  - {d}", file=sys.stderr)
     dropped.clear()
     if a.final:
-        md = finalise(md)
+        try:
+            md = finalise(md)
+        except Refused as e:
+            print(str(e), file=sys.stderr)
+            return 3
     if a.out:
         out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
         (out / "letter.md").write_text(md, encoding="utf-8")

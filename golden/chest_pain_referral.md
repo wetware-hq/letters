@@ -20,12 +20,12 @@ Please answer the question below.
 ## Background
 
 - hypertension, ex-smoker [L2]
-- 2 Mar 1937: general practitioner (GP) review. Three weeks of exertional chest tightness, settles with rest. [L4]
+- 2 Mar 1937: GP [flag: abbreviation, meaning not confirmed] review. Three weeks of exertional chest tightness, settles with rest. [L4]
 - 16 Mar 1937: Review. Symptoms unchanged. [L10]
 
 ## Results
 
-- low-density lipoprotein cholesterol (LDL): 4.1 mmol/L on 2 Mar 1937, 3.2 mmol/L on 16 Mar 1937 [L8, L13]
+- LDL [flag: abbreviation, meaning not confirmed]: 4.1 mmol/L on 2 Mar 1937, 3.2 mmol/L on 16 Mar 1937 [L8, L13]
 
 ## Medicine changes
 
@@ -35,7 +35,7 @@ Please answer the question below.
 
 - aspirin 100 mg daily [L6]
 - ramipril 5 mg daily [L7, L11]
-- atorvastatin 40 mg at night (nocte) [L12]
+- atorvastatin 40 mg nocte [flag: abbreviation, meaning not confirmed] [L12]
 
 ## Allergies
 
@@ -43,7 +43,7 @@ Please answer the question below.
 
 ## Pending results
 
-- exercise electrocardiogram (ECG), sent on 2 Mar 1937. Who follows up: not documented. [L9]
+- exercise ECG [flag: abbreviation, meaning not confirmed], sent on 2 Mar 1937. Who follows up: not documented. [L9]
 
 ## Actions
 

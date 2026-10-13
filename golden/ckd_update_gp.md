@@ -11,17 +11,17 @@ Update on 1 Sep 1937. Actions are numbered at the end.
 
 ## Problems
 
-- chronic kidney disease (CKD) stage 3 [L4]
+- CKD [flag: abbreviation, meaning not confirmed] stage 3 [L4]
 
 ## Background
 
-- type 2 diabetes (T2DM) [L2]
+- T2DM [flag: abbreviation, meaning not confirmed] [L2]
 - 1 Aug 1937: Clinic. [L3]
 - 1 Sep 1937: Clinic. [L7]
 
 ## Results
 
-- estimated glomerular filtration rate (eGFR): 52 mL/min on 1 Aug 1937, 48 mL/min on 1 Sep 1937 [L5, L8]
+- eGFR [flag: abbreviation, meaning not confirmed]: 52 mL/min on 1 Aug 1937, 48 mL/min on 1 Sep 1937 [L5, L8]
 
 ## Medicine changes
 
@@ -41,7 +41,7 @@ Update on 1 Sep 1937. Actions are numbered at the end.
 
 ## Actions
 
-1. Who: not documented. When: in 3 months. Action: recheck eGFR in 3 months [L10]
+1. Who: not documented. When: in 3 months. Action: recheck eGFR [flag: abbreviation, meaning not confirmed] in 3 months [L10]
 
 ---
 

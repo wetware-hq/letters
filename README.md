@@ -42,7 +42,8 @@ The output folder holds only the letter. Identical input gives an identical lett
 - **Trends** are written as values with dates, never as a direction.
 - **Sensitive details** the reader doesn't need are cut. A medicine stays on the list, but its reason is cut when it's sensitive.
 - **Labels** such as "non-compliant" become a plain description or are dropped. Write as if the patient will read it.
-- **Style.** Abbreviations are spelled out on first use, sentences are short, and every number has a unit. A letter is about one page.
+- **Abbreviations.** An abbreviation is spelled out only if it's on a short reviewed list of abbreviations with one meaning in every specialty. Every other abbreviation stays as written and is flagged for the signing clinician. `--final` won't run while a flag is open.
+- **Style.** Sentences are short, and every number has a unit. A letter is about one page.
 - **Footer.** Every letter ends with an unsigned clinician block and "Draft: check against the record before sending."
 - **No model calls** in v0.1. An optional model rewrite may come later, off by default, and must pass the same checker.
 
@@ -54,7 +55,9 @@ pytest -q
 python letters.py fixtures/chest_pain.txt --brief "referral to cardiology"
 python letters.py fixtures/podiatry_referral.txt --brief "referral to podiatry" \
   --template templates/minimal.md --brand brands/example-clinic --out out/
-python letters.py fixtures/chest_pain.txt --brief "referral to cardiology" --final
+python letters.py fixtures/chest_pain.txt --brief "referral to cardiology" \
+  --resolve "GP=general practitioner" --resolve "LDL=low-density lipoprotein cholesterol" \
+  --resolve "nocte=at night" --resolve "ECG=electrocardiogram" --final   # refused while any flag is open
 python letters.py --heldout ../heldout-notes   # folder outside this repo; prints counts only
 ```
 

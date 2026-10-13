@@ -99,7 +99,7 @@ def test_planted_added_certainty_refused():
     text = "SYNTH-7\n1937-04-01\nProblem: ?PE\nFollow-up: GP review in 1 week"
     md, _ = build(text, "gp-update", "GP")
     with pytest.raises(Refused):
-        check(md.replace("possible pulmonary", "confirmed pulmonary"), parse(text)[1], "gp-update")
+        check(md.replace("possible PE", "confirmed PE"), parse(text)[1], "gp-update")
 
 
 # ---------- latest state and negation ----------
@@ -145,7 +145,7 @@ def test_never_cut_sections_present_even_when_empty():
 def test_med_change_reason_kept_or_not_documented():
     t = "SYNTH-9\n1937-01-01\nMed: ramipril 2.5 mg daily\n1937-02-01\nMed: ramipril 5 mg daily (reason: BP above target)"
     md = make_letter(t, "gp-update", "GP")
-    assert "Reason for change: blood pressure (BP) above target" in md
+    assert f"Reason for change: BP {L.FLAG} above target" in md
     md2 = make_letter(F("chest_pain.txt"), "referral", "Cardiology")
     assert f"Reason for change: {ND}" in md2
 
@@ -153,7 +153,7 @@ def test_med_change_reason_kept_or_not_documented():
 def test_pending_shows_who_follows_up():
     t = "SYNTH-9\n1937-01-01\nPending: TSH; follow-up: GP\nPending: ferritin"
     md = make_letter(t, "gp-update", "GP")
-    assert "Who follows up: general practitioner (GP)" in md and f"ferritin, sent on 1 Jan 1937. Who follows up: {ND}" in md
+    assert f"Who follows up: GP {L.FLAG}" in md and f"ferritin, sent on 1 Jan 1937. Who follows up: {ND}" in md
 
 
 def test_pending_cleared_by_result():
@@ -164,7 +164,7 @@ def test_pending_cleared_by_result():
 def test_followup_numbered_with_who_and_when():
     md = make_letter(F("pneumonia_admission.txt"), "discharge", "GP")
     acts = section(md, "Actions")
-    assert acts.startswith("1. Who: general practitioner (GP). When: in 1 week.")
+    assert acts.startswith(f"1. Who: GP {L.FLAG}. When: in 1 week.")
     assert f"2. Who: {ND}. When: in 6 weeks." in acts
 
 
@@ -172,7 +172,7 @@ def test_followup_numbered_with_who_and_when():
 def test_uncertainty_preserved():
     t = "SYNTH-7\n1937-04-01\nProblem: ?PE\nProblem: likely viral illness\nFollow-up: GP review in 1 week"
     md = make_letter(t, "gp-update", "GP")
-    assert "possible pulmonary embolism (PE)" in md and "likely viral illness" in md and "?PE" not in md
+    assert f"possible PE {L.FLAG}" in md and "pulmonary embolism" not in md and "likely viral illness" in md and "?PE" not in md
 
 
 def test_referral_without_question_fails():
@@ -333,22 +333,22 @@ def test_a7_no_heldout_notes_in_repo():
 
 
 # ---------- Educator style ----------
-def test_abbreviation_expanded_on_first_use_only():
-    md = make_letter(F("pneumonia_admission.txt"), "discharge", "GP")
+def test_resolved_abbreviation_expanded_on_first_use_only():
+    md, _ = build(F("pneumonia_admission.txt"), "discharge", "GP", resolve=["tds=three times a day"])
     assert md.count("three times a day (tds)") == 1 and "tds for 4 more days" in md
 
 
 def test_no_banned_shorthand():
     t = "SYNTH-4\n1937-01-01\nc/o SOB on exertion, ?AF\nFollow-up: GP review in 1 week"
     md = make_letter(t, "gp-update", "GP")
-    assert "c/o" not in md and "SOB" not in md and "?AF" not in md
-    assert "reports shortness of breath" in md and "possible atrial fibrillation (AF)" in md
+    assert "?AF" not in md and "atrial fibrillation" not in md and "shortness of breath" not in md
+    assert f"c/o {L.FLAG} SOB {L.FLAG} on exertion, possible AF {L.FLAG}" in md
 
 
 def test_planted_shorthand_refused():
     text = F("ckd_update.txt")
     md, _ = build(text, "gp-update", "GP")
-    with pytest.raises(Refused, match="shorthand"):
+    with pytest.raises(Refused, match="abbreviation not flagged or resolved: c/o"):
         check(md.replace("Clinic. [L3]", "Clinic, c/o SOB. [L3]"), parse(text)[1], "gp-update")
 
 
@@ -386,7 +386,7 @@ def test_planted_overlong_letter_refused_but_discharge_exempt():
 
 def test_patient_wording():
     md = make_letter(F("pneumonia_admission.txt"), "discharge", "Patient", audience="patient")
-    assert "three times a day" in md and " tds" not in md and "Why you came to hospital" in md
+    assert f"tds {L.FLAG}" in md and "three times a day" not in md and "Why you came to hospital" in md
 
 
 # ---------- repo hygiene ----------
@@ -424,11 +424,10 @@ def test_expansion_whose_abbreviation_is_in_uncited_line_refused():
         check(md.replace(line, line.replace("palpitations", "palpitations, atrial fibrillation")), src, "gp-update")
 
 
-def test_legit_expansion_still_passes():
+def test_legit_expansion_still_passes_via_resolution():
     text = ("Patient: SYNTH-2002\n1937-04-01 Clinic review.\nProblem: AF\nFollow-up: GP review in 2 weeks")
-    md, _ = build(text, "gp-update", "General practice")
-    assert "atrial fibrillation (AF)" in md
-    assert check(md, parse(text)[1], "gp-update")
+    md, _ = build(text, "gp-update", "General practice", resolve=["AF=atrial fibrillation"])
+    assert "atrial fibrillation (AF) [L3, R1]" in md
 
 
 def test_rewritten_label_not_earned_by_cited_line_refused():
@@ -439,8 +438,13 @@ def test_rewritten_label_not_earned_by_cited_line_refused():
 
 
 # ---------- --final: source tags only ----------
+CHEST_RESOLVE = ["--resolve", "GP=general practitioner", "--resolve", "LDL=low-density lipoprotein cholesterol",
+                 "--resolve", "nocte=at night", "--resolve", "ECG=electrocardiogram"]
+
+
 def _cli(*extra):
-    r = subprocess.run(CLI + [str(HERE / "fixtures" / "chest_pain.txt"), "--brief", "referral to cardiology", *extra],
+    r = subprocess.run(CLI + [str(HERE / "fixtures" / "chest_pain.txt"), "--brief", "referral to cardiology",
+                              *CHEST_RESOLVE, *extra],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     return r.stdout
@@ -456,15 +460,19 @@ def _draft_intact(md):
 def test_final_removes_tags_keeps_draft_mark_and_footer(brand):
     extra = ["--brand", str(HERE / "brands" / "example-clinic")] if brand else []
     draft, final = _cli(*extra), _cli(*extra, "--final")
-    assert re.search(r"\[L\d+", draft) and not re.search(r"\[L\d+", final)
+    assert re.search(r"\[L\d+", draft) and not re.search(r"\[[LR]\d+", final)
     _draft_intact(draft); _draft_intact(final)
     if brand:
         assert re.search(r"logo\]\([^)]*\) \*\*DRAFT, unsigned\*\*", final)
-    assert re.sub(r" \[L\d+(?:, L\d+)*\]", "", draft) == final
+    assert re.sub(r" \[[LR]\d+(?:, [LR]\d+)*\]", "", draft) == final
 
 
 def test_final_text_otherwise_unchanged():
-    md = make_letter(F("pneumonia_admission.txt"), "discharge", "General practice", audience="gp")
+    text = F("pneumonia_admission.txt")
+    flags = []
+    build(text, "discharge", "General practice", audience="gp", flags=flags)
+    res = sorted({f.split()[0] + "=meaning of " + f.split()[0] for f in flags})
+    md, _ = build(text, "discharge", "General practice", audience="gp", resolve=res)
     fin = L.finalise(md)
     assert "[L" not in fin and fin.count("\n") == md.count("\n")
     _draft_intact(fin)
@@ -473,3 +481,69 @@ def test_final_text_otherwise_unchanged():
 def test_readme_describes_final_exactly():
     assert ("`--final` removes source tags only. The draft mark stays until the signing clinician removes it."
             in (HERE / "README.md").read_text())
+
+
+# ---------- abbreviations: flagged by default, expanded only via reviewed list or clinician --resolve ----------
+AMBIG = "Patient: SYNTH-3001\n1937-05-01 Clinic review.\nProblem: {ab}\nFollow-up: review in 2 weeks"
+
+
+def _notes(tmp_path, ab):
+    p = tmp_path / "notes.txt"; p.write_text(AMBIG.format(ab=ab)); return p
+
+
+@pytest.mark.parametrize("ab,guesses", [("MS", ["multiple sclerosis", "mitral stenosis"]),
+                                        ("PE", ["pulmonary embolism", "pleural effusion"]),
+                                        ("CP", ["chest pain", "cerebral palsy"]),
+                                        ("RA", ["rheumatoid arthritis", "right atrium"])])
+def test_ambiguous_abbreviation_flagged_not_expanded_and_final_refused(tmp_path, ab, guesses):
+    flags = []
+    md, _ = build(AMBIG.format(ab=ab), "gp-update", "General practice", flags=flags)
+    assert f"- {ab} {L.FLAG} [L3]" in md and any(f.startswith(ab) for f in flags)
+    assert not any(g in md.lower() for g in guesses)
+    with pytest.raises(Refused, match="flag"):
+        L.finalise(md)
+    r = subprocess.run(CLI + [str(_notes(tmp_path, ab)), "--type", "gp-update", "--to", "GP", "--final"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0 and "--final refused" in r.stderr and r.stdout == ""
+    assert f"- {ab} [L3]" in r.stderr or f"  - {ab}" in r.stderr   # flag listed in the terminal
+
+
+def test_single_meaning_list_ships_empty_with_signoff_note():
+    p = HERE / "single_meaning.toml"
+    assert L.load_single_meaning(p) == {} and "sign-off" in p.read_text()
+
+
+def test_resolve_closes_flag_cites_r1_and_final_runs(tmp_path):
+    text = AMBIG.format(ab="MS")
+    md, _ = build(text, "gp-update", "General practice", resolve=["MS=multiple sclerosis"])
+    assert "- multiple sclerosis (MS) [L3, R1]" in md and L.FLAG not in md
+    assert L.finalise(md).count("multiple sclerosis (MS)") == 1
+    r = subprocess.run(CLI + [str(_notes(tmp_path, "MS")), "--type", "gp-update", "--to", "GP",
+                              "--resolve", "MS=multiple sclerosis", "--final"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "multiple sclerosis (MS)" in r.stdout and "[R1]" not in r.stdout and "**DRAFT, unsigned**" in r.stdout
+
+
+def test_checker_accepts_expansion_only_via_cited_resolution():
+    text = AMBIG.format(ab="MS")
+    md, _ = build(text, "gp-update", "General practice", resolve=["MS=multiple sclerosis"])
+    src = parse(text)[1]
+    src["R1"] = ("MS = multiple sclerosis", None)
+    assert check(md, src, "gp-update")
+    with pytest.raises(Refused):            # same expansion, resolution not cited
+        check(md.replace("[L3, R1]", "[L3]"), src, "gp-update")
+
+
+def test_resolve_for_abbreviation_not_in_notes_rejected(tmp_path):
+    with pytest.raises(ValueError, match="not in the notes"):
+        build(AMBIG.format(ab="MS"), "gp-update", "GP", resolve=["AF=atrial fibrillation"])
+    r = subprocess.run(CLI + [str(_notes(tmp_path, "MS")), "--type", "gp-update", "--to", "GP",
+                              "--resolve", "AF=atrial fibrillation"], capture_output=True, text=True)
+    assert r.returncode != 0 and "not in the notes" in r.stderr
+
+
+def test_goldens_expand_no_abbreviation():
+    for g in (HERE / "golden").glob("*.md"):
+        t = g.read_text()
+        assert "atrial fibrillation" not in t.lower(), g.name
+        assert not re.search(r"\w \([A-Za-z0-9/]{2,7}\)", t), g.name   # no "expansion (AB)" anywhere

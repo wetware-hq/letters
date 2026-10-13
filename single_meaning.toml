@@ -1,0 +1,10 @@
+# Reviewed single-meaning abbreviations: ones with exactly one meaning in every specialty.
+# Only these are spelled out automatically; every other abbreviation is kept as written and flagged.
+# Each entry needs clinician sign-off (name, role, date in the commit message) before it is added.
+# Ships empty on purpose.
+#
+# Format:
+# [abbreviations]
+# XYZ = "meaning"
+
+[abbreviations]

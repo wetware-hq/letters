@@ -24,7 +24,7 @@ Please answer the question below.
 
 ## Results
 
-- HbA1c: 7.9 % on 10 Feb 1937 [L8]
+- HbA1c [flag: abbreviation, meaning not confirmed]: 7.9 % on 10 Feb 1937 [L8]
 
 ## Medicine changes
 
@@ -32,8 +32,8 @@ Please answer the question below.
 
 ## Current medicines
 
-- lithium 400 mg at night (nocte) [L6]
-- metformin 500 mg twice a day (bd) [L7]
+- lithium 400 mg nocte [flag: abbreviation, meaning not confirmed] [L6]
+- metformin 500 mg bd [flag: abbreviation, meaning not confirmed] [L7]
 
 ## Allergies
 
@@ -45,7 +45,7 @@ Please answer the question below.
 
 ## Actions
 
-1. Who: general practitioner (GP). When: in 4 weeks. Action: GP review in 4 weeks [L10]
+1. Who: GP [flag: abbreviation, meaning not confirmed]. When: in 4 weeks. Action: GP [flag: abbreviation, meaning not confirmed] review in 4 weeks [L10]
 
 ---
 
