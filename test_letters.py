@@ -1550,7 +1550,9 @@ def test_linked_terms_parsed_identical_to_frozen_v2():
     """Version 3 keeps every version 2 entry unchanged and adds exactly one entry per H22 item."""
     got = json.loads(json.dumps(L.load_linked(), sort_keys=True))
     assert {k: v for k, v in got.items() if k in FROZEN_V2} == FROZEN_V2
-    assert {k: v for k, v in got.items() if k not in FROZEN_V2} == {k: {"terms": v} for k, v in H22_SIGNED_TERMS.items()}
+    want = {k: {"terms": v} for k, v in H22_SIGNED_TERMS.items()}
+    want["genetic results"]["numbered"] = ["BRCA"]                 # signed 14 Oct 2026: BRCA1, BRCA 1, BRCA-1 ...
+    assert {k: v for k, v in got.items() if k not in FROZEN_V2} == want
 
 
 
@@ -2816,7 +2818,7 @@ def test_r10_cut_stop_reason_each_trigger_word_non_patient(line):
     t = f"SYNTH-9301\n1937-06-01 review.\n{line}\nQuestion: is she well?\n"
     md, _ = build(t, "gp-update", "GP", flags=flags)
     ch = section(md, "Medicine changes")
-    assert "Reason for change: reason not included." in ch and L.MED_FLAG not in md     # H22: flag on screen only
+    assert "Reason for change" not in ch and "zorbaline" in ch and L.MED_FLAG not in md     # H22/H29: no marker
     assert any(f.startswith("Flag: a medicine on line") for f in flags)
     assert "schizophrenia" not in md.lower() and "not documented" not in ch
     pmd, _ = build(t, "gp-update", "Patient", audience="patient")       # patient letters keep everything
@@ -2828,7 +2830,7 @@ def test_r10_cut_stop_reason_in_template_line():
     flags = []
     md, _ = L.build_from_template(t, "gp-update", "GP", flags=flags)
     ch = section(md, "Medicine changes")
-    assert "Reason for change: reason not included." in ch and L.MED_FLAG not in md and "schizophrenia" not in md.lower()
+    assert "Reason for change" not in ch and "zorbaline" in ch and L.MED_FLAG not in md and "schizophrenia" not in md.lower()
     assert any(f.startswith("Flag: a medicine on line") for f in flags)                 # H22: on screen only
 
 
@@ -3772,10 +3774,29 @@ def test_r11n_keep_out_clears_only_that_flag_and_adds_nothing(tmp_path):
     assert f.returncode == 0, f.stderr
 
 
-def test_r11n_keep_out_other_line_leaves_flag(tmp_path):
-    other = line_of(SENS_RES_NOTES, "sodium")
-    r, _ = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to GP", "--keep-out", other)
-    assert SENS_FLAG.format(lid=SENS_LID) in r.stderr and "Kept out by the clinician" not in r.stderr
+@pytest.mark.parametrize("which", ["sodium", "paracetamol", "Question"])
+def test_r11n_keep_out_on_line_without_sensitive_cut_refused(tmp_path, which):
+    lid = line_of(SENS_RES_NOTES, which)
+    msg = f"Refused: line {lid} has no sensitive cut to keep out. Nothing was written."
+    r, out = _run_t(tmp_path / "r", SENS_RES_NOTES, "--brief", "update to GP", "--keep-out", lid)
+    assert r.returncode == 2 and r.stderr.strip() == msg and not out.exists() and r.stdout == ""
+    c = _check(tmp_path / "c", SENS_RES_NOTES, "--keep-out", lid)
+    assert c.returncode == 2 and c.stderr.strip() == msg
+
+
+def test_r11n_keep_out_refused_when_brief_includes_or_patient(tmp_path):
+    msg = f"Refused: line {SENS_LID} has no sensitive cut to keep out. Nothing was written."
+    for brief in ("update to GP\nInclude: sexual health", "update to patient"):
+        r, out = _run_t(tmp_path / brief[-3:], SENS_RES_NOTES, "--brief", brief, "--keep-out", SENS_LID)
+        assert r.returncode == 2 and r.stderr.strip() == msg and not out.exists()
+        b = tmp_path / f"{brief[-3:]}.txt"; b.write_text(brief)
+        c = _check(tmp_path / f"c{brief[-3:]}", SENS_RES_NOTES, "--brief", str(b), "--keep-out", SENS_LID)
+        assert c.returncode == 2 and c.stderr.strip() == msg
+
+
+def test_r11n_checker_accepts_keep_out_on_sensitive_cut(tmp_path):
+    c = _check(tmp_path, SENS_RES_NOTES, "--keep-out", SENS_LID)
+    assert c.returncode == 0 and c.stdout.strip() == L.TEMPLATE_OK, c.stderr
 
 
 def test_r11n_not_copy_never_clears_sensitive_flag(tmp_path):
@@ -3804,8 +3825,6 @@ def test_r11n_result_missing_without_cut_record_still_refused_h03():
     assert _ck(CK_BLOCK, md) == [L.RESULT_MISSING.format(lid="L3")]
 
 
-@pytest.mark.xfail(strict=True, reason="found 14 Oct 2026: the independent check doesn't read template-format results "
-                                       "('name date value unit'), so a lost template result isn't refused yet")
 def test_r11n_template_result_missing_without_cut_record_refused_h03():
     text = L.from_template(SENS_RES_NOTES)
     md, _ = build(text, "gp-update", "GP")
@@ -3864,3 +3883,54 @@ def test_h22_cut_medicine_reason_dropped_flag_on_screen_only(tmp_path, drug, med
     assert L.MED_NOTICE.format(lid=line_of(text, drug)) in r.stderr.splitlines()
     f = subprocess.run(CLI + [str(tmp_path / "n.txt"), "--brief", "update to GP", "--final"], capture_output=True, text=True)
     assert f.returncode == 3                                     # the screen-only flag still blocks --final
+
+
+# ---- signed ruling 14 Oct 2026: stopped or changed medicine with a cut reason (H22, H29) ----
+STOP_CASES = [
+    ("olanzapine", "community treatment order ended", ["community treatment order"]),
+    ("doxycycline", "chlamydia treated", ["chlamydia"]),
+    ("misoprostol", "miscarriage complete", ["miscarriage"]),
+    ("tamoxifen", "BRCA2 pathogenic variant review", ["BRCA", "pathogenic variant"]),
+    ("lithium", "bipolar disorder review", ["bipolar"]),
+]
+
+
+@pytest.mark.parametrize("drug,reason,words", STOP_CASES)
+def test_h29_cut_stop_reason_dropped_stop_printed_flag_on_screen(tmp_path, drug, reason, words):
+    text = tpl(question="Please review.", problems=("cough",), meds=(f"{drug} 10 mg daily; ceased 1937-06-01 - {reason}",),
+               actions=("review in 2 weeks",))
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    lid = line_of(text, drug)
+    ch = FLAG_RX.sub("", next(l for l in md.splitlines() if drug in l))
+    assert f"{drug} 10 mg daily" in ch and "Stopped" in ch and "1 Jun 1937" in ch and lid in ch       # H29: in full
+    for gone in [reason, *words, "reason not included", "Reason for change", L.MED_FLAG, "may point to something cut"]:
+        assert gone.lower() not in md.lower(), gone
+    assert L.MED_NOTICE.format(lid=lid) in r.stderr.splitlines()
+
+
+# ---- signed ruling 14 Oct 2026: BRCA with optional space or hyphen and digit, any case ----
+@pytest.mark.parametrize("line", ["BRCA", "BRCA1", "BRCA2", "BRCA 1", "BRCA-1", "brca2", "BRCA1/2", "BRCA1/BRCA2"])
+def test_r11p_brca_forms_detected_on_their_own_line(line):
+    assert L.sensitive_cat(line) == "genetic results"
+    assert L._term_re("BRCA").search(line)
+
+
+@pytest.mark.parametrize("line", ["BRCA1", "BRCA 1", "brca2", "BRCA1/BRCA2"])
+def test_r11p_brca_forms_cut_from_gp_letter(tmp_path, line):
+    text = H22_NOTES.format(hist=f"{line} carrier")
+    r, out = _run_t(tmp_path, text, "--brief", "referral to podiatry")
+    assert r.returncode == 0, r.stderr
+    assert "brca" not in (out / "letter.md").read_text().lower()
+
+
+@pytest.mark.parametrize("line", ["BRCAX", "XBRCA1", "BRCA12"])
+def test_r11p_brca_not_matched_inside_other_words(line):
+    assert L.sensitive_cat(line) is None
+
+
+# ---- signed ruling 14 Oct 2026: "top" stays flagged in any case ----
+@pytest.mark.parametrize("w", ["top", "Top", "TOP", "tOp"])
+def test_r11p_top_always_flagged(w):
+    assert "top" in L.SHORTHAND and w in L.flagged_tokens(f"{w} of the foot")

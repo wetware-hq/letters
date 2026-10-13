@@ -59,3 +59,5 @@ terms = ["miscarriage", "termination of pregnancy"]
 
 [items."genetic results"]
 terms = ["BRCA", "pathogenic variant", "genetic test result"]
+# numbered: terms that also match with an optional space or hyphen and one digit (BRCA1, BRCA 1, BRCA-1), any case.
+numbered = ["BRCA"]

@@ -169,8 +169,17 @@ RELEVANT = {
 # H22 items (round 11 signed rulings): detection words come from linked_terms.toml only, whole word or phrase, any case.
 H22_ITEMS = ("Mental Health Act status", "sexual health", "pregnancy loss or termination", "genetic results")
 _LT = tomllib.loads((HERE / "linked_terms.toml").read_text(encoding="utf-8")).get("items", {})
+NUMBERED_TERMS = {t.lower() for v in _LT.values() for t in v.get("numbered", [])}
+
+
+def term_pattern(t):
+    """Whole word or phrase, any case; a 'numbered' term also takes an optional space or hyphen and one digit."""
+    tail = r"(?:[ -]?\d)?" if t.lower() in NUMBERED_TERMS else ""
+    return rf"(?<![A-Za-z0-9]){re.escape(t)}{tail}(?![A-Za-z0-9])"
+
+
 for _cat in H22_ITEMS:
-    SENSITIVE[_cat] = [rf"(?<![A-Za-z0-9]){re.escape(t)}(?![A-Za-z0-9])" for t in _LT[_cat]["terms"]]
+    SENSITIVE[_cat] = [term_pattern(t) for t in _LT[_cat]["terms"]]
 CLAUSE = re.compile(r"[^,;.]+[,;.]?")
 
 
@@ -1477,6 +1486,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
         raise Refused(PENDING_NONE_REFUSED.format(lid=lid))
     if not patient:
         md = apply_cut_rule(md, text, dropped, flags, TITLES[letter_type])
+        md = drop_cut_change_reasons(md, flags)
         md = flag_cuts(md, dropped, flags, TITLES[letter_type], text)
     if QUESTION_FLAG not in md and not _has_question(md, audience):
         head = f"**Letter:** {TITLES[letter_type]}"      # the question was cut or empty: the flag still fires
@@ -1594,7 +1604,7 @@ def load_linked(path=None):
 
 
 def _term_re(t):
-    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(t)}(?![A-Za-z0-9])", re.I)
+    return re.compile(term_pattern(t), re.I)
 
 
 def _meds_of(items):
@@ -1614,6 +1624,27 @@ KEPT_OUT_RECORD = "Kept out by the clinician: line {lid}."
 _KEEP_OUT = []          # '--keep-out L<n>' lines for one letter
 _SENS_CUTS = []         # result lines cut as sensitive in the last letter built (screen only)
 _KEPT_OUT = []          # of those, the lines whose flag --keep-out cleared (screen only)
+
+
+KEEP_OUT_REFUSED = "Refused: line {lid} has no sensitive cut to keep out. Nothing was written."
+
+
+def sensitive_result_lines(text, include=(), patient=False):
+    """Results lines a clinician letter would cut as sensitive (for check_template's --keep-out check)."""
+    if patient:
+        return []
+    inc = {i.lower() for i in include}
+    linked = load_linked()
+    out = []
+    for lid, (kind, body) in _source_lines(text).items():
+        if kind != "result":
+            continue
+        cats = {sensitive_cat(c) for c in CLAUSE.findall(body)} - {None}
+        cats |= {c for c, v in linked.items() for w in list(v.get("terms", [])) + list(v.get("medicines", []))
+                 + list(v.get("brands", {})) if _term_re(w).search(body)}
+        if any(c.lower() not in inc for c in cats):
+            out.append(lid)
+    return out
 
 
 def flag_cuts(md, dropped, flags, title, text=None):
@@ -1738,6 +1769,23 @@ def _brand_map(items):
     return {b: g for v in items.values() for b, g in v.get("brands", {}).items()}
 
 
+CUT_CHANGE_REASON = " Reason for change: reason not included."
+
+
+def drop_cut_change_reasons(md, flags):
+    """H22/H29: a stop or change whose reason was cut prints in full with no reason and no marker; the medicine
+    flag is on screen only."""
+    out = []
+    for line in md.split("\n"):
+        if CUT_CHANGE_REASON in line:
+            line = line.replace(CUT_CHANGE_REASON, "")
+            ids = _line_ids(line)
+            if flags is not None and ids:
+                flags.append(MED_NOTICE.format(lid=ids[-1]))
+        out.append(line)
+    return "\n".join(out)
+
+
 def apply_cut_rule(md, text, dropped, flags, title=None):
     """For a cut item (never in patient letters):
     - medication line: a listed brand becomes its generic; a reason naming the cut item becomes 'reason not included';
@@ -1757,7 +1805,7 @@ def apply_cut_rule(md, text, dropped, flags, title=None):
     hard = [t for v in items.values() for t in v.get("terms", [])]
     words = hard + [t for v in items.values() for t in v.get("flag_terms", [])]
     linked = sorted(set(words + generics + list(brands)), key=len, reverse=True)
-    rx = lambda ws: re.compile("|".join(rf"(?<![A-Za-z0-9]){re.escape(w)}(?![A-Za-z0-9])" for w in ws), re.I)
+    rx = lambda ws: re.compile("|".join(term_pattern(w) for w in ws), re.I)
     any_linked = rx(linked)
     any_word = rx(sorted(set(hard), key=len, reverse=True)) if hard else None      # left out even on a medication line
     gen_rx = rx(sorted(set(generics + list(brands.values())), key=len, reverse=True)) if generics or brands else None
@@ -2013,6 +2061,10 @@ def read_notes(text):
                 and not drugs_in(line):
             head, body = line, ""
         kind = None
+        if head is not None and TAGS.get(head.lower()) == "result" and V_RESULT.search(body):
+            out.append((lid, "result", body))            # H03: a tagged per-litre result (template Results: field)
+            block = False
+            continue
         if head is not None and TAGS.get(head.lower()) not in (None, "med", "stop", "allergy"):
             out.append((lid, None, line))            # a known non-medicine heading (Problem, Plan, Pending...)
             block = False
@@ -2573,12 +2625,18 @@ def check_template_main(argv=None):
         if any(not re.fullmatch(r"L\d+", x.strip()) for x in a.keep_out):
             raise Refused("Refused: --keep-out takes one line, like L3. Nothing was written.")
         text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
-        brief_copy, patient = None, False
+        brief_copy, patient, include = None, False, []
         if a.brief:
-            kind, reader, _, brief_copy = read_brief(open(a.brief, encoding="utf-8").read())
+            kind, reader, include, brief_copy = read_brief(open(a.brief, encoding="utf-8").read())
             patient = is_patient_letter(reader, None)
         pre_template_checks(text, None, brief_copy, patient, [x.strip() for x in a.not_copy])
-        check_safe(from_template(text))          # the same synthetic-data safeguard the letter command runs
+        converted = from_template(text)
+        check_safe(converted)                    # the same synthetic-data safeguard the letter command runs
+        if a.keep_out:
+            cuts = sensitive_result_lines(converted, include, patient)
+            for x in a.keep_out:
+                if x.strip() not in cuts:
+                    raise Refused(KEEP_OUT_REFUSED.format(lid=x.strip()))
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -2663,6 +2721,10 @@ def main(argv=None):
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
+    for lid in keep_out:
+        if lid not in _SENS_CUTS:                                       # nothing written, no letter printed
+            print(KEEP_OUT_REFUSED.format(lid=lid), file=sys.stderr)
+            return 2
     shown = printed_flags(flags, md)
     for f in shown:
         print(f, file=sys.stderr)
