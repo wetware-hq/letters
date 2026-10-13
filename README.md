@@ -55,9 +55,10 @@ pytest -q
 python letters.py fixtures/chest_pain.txt --brief "referral to cardiology"
 python letters.py fixtures/podiatry_referral.txt --brief "referral to podiatry" \
   --template templates/minimal.md --brand brands/example-clinic --out out/
-python letters.py fixtures/chest_pain.txt --brief "referral to cardiology" \
-  --resolve "GP=general practitioner" --resolve "LDL=low-density lipoprotein cholesterol" \
-  --resolve "nocte=at night" --resolve "ECG=electrocardiogram" --final   # refused while any flag is open
+python letters.py fixtures/pneumonia_admission.txt --brief "discharge to general practice" \
+  --resolve "SOB=shortness of breath" --resolve "ED=emergency department" --resolve "IV=intravenous" \
+  --resolve "PO=by mouth" --resolve "CAP=community-acquired pneumonia" --resolve "GP=general practitioner" \
+  --final   # refused while any flag is open
 python letters.py --heldout ../heldout-notes   # folder outside this repo; prints counts only
 ```
 

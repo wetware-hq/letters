@@ -699,3 +699,14 @@ def test_patient_plain_words_first_use_then_plain_alone():
 def test_patient_golden_tds_plain_after_first_use():
     md = (HERE / "golden" / "pneumonia_discharge_patient.md").read_text()
     assert md.count("three times a day (tds)") == 1 and " tds" not in md.replace("(tds)", "")
+
+
+def test_readme_quickstart_final_command_exits_zero():
+    import shlex
+    block = (HERE / "README.md").read_text().split("```bash", 1)[1].split("```", 1)[0].replace("\\\n", " ")
+    cmd = next(l for l in block.splitlines() if "--final" in l and "--resolve" in l)
+    args = shlex.split(cmd.split("#")[0])[2:]
+    assert '"SOB=shortness of breath"' in cmd and "ECG=" not in cmd
+    r = subprocess.run(CLI + args, capture_output=True, text=True, cwd=HERE)
+    assert r.returncode == 0, r.stderr
+    assert "shortness of breath (SOB)" in r.stdout and L.FLAG not in r.stdout
