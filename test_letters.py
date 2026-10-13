@@ -3905,6 +3905,7 @@ def test_h29_cut_stop_reason_dropped_stop_printed_flag_on_screen(tmp_path, drug,
     lid = line_of(text, drug)
     ch = FLAG_RX.sub("", next(l for l in md.splitlines() if drug in l))
     assert f"{drug} 10 mg daily" in ch and "Stopped" in ch and "1 Jun 1937" in ch and lid in ch       # H29: in full
+    assert_no_empty_reason_label(ch)
     for gone in [reason, *words, "reason not included", "Reason for change", L.MED_FLAG, "may point to something cut"]:
         assert gone.lower() not in md.lower(), gone
     assert L.MED_NOTICE.format(lid=lid) in r.stderr.splitlines()
@@ -3936,6 +3937,15 @@ def test_r11p_top_always_flagged(w):
     assert "top" in L.SHORTHAND and w in L.flagged_tokens(f"{w} of the foot")
 
 
+EMPTY_LABEL = re.compile(r"\b(?:Reason for change|Reason|Why|Because|Indication)\s*:\s*(?:\[|\.|$)", re.I)
+
+
+def assert_no_empty_reason_label(line):
+    """No reason label left with nothing after it (before the source tag or at the end of the line)."""
+    assert not EMPTY_LABEL.search(L.FLAG_ANY.sub("", line)), line
+    assert "Reason for change" not in line and not re.search(r"\breason\s*:", line, re.I), line
+
+
 # ---- signed ruling 14 Oct 2026: changed medicine (dose change) with a cut reason (H22, H29) ----
 # The template grammar has no '; changed' part, so this uses the existing change syntax: the same drug written again
 # at a later date with a new dose and 'reason: <why>'.
@@ -3949,14 +3959,17 @@ CHANGE_CASES = [
 
 
 @pytest.mark.parametrize("drug,reason,words", CHANGE_CASES)
-def test_h29_cut_change_reason_dropped_change_printed_flag_on_screen(drug, reason, words):
+def test_h29_cut_change_reason_dropped_change_printed_flag_on_screen(drug, reason, words, monkeypatch):
     # The letter command takes template notes only, so this dated-progress-notes form runs through the library build.
+    monkeypatch.setattr(L, "_TEMPLATE", [])          # free-text notes: no template state left by an earlier in-process run
+    monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
     text = (f"SYNTH-9400\n1937-06-01 review.\nMed: {drug} 100 mg daily\n1937-06-10 review.\n"
             f"Med: {drug} 200 mg daily reason: {reason}\nQuestion: is she well?\n")
     flags = []
     md, _ = build(text, "gp-update", "GP", flags=flags)
     ch = FLAG_RX.sub("", next(l for l in md.splitlines() if l.startswith("- Changed")))
     assert ch == f"- Changed on 10 Jun 1937: from {drug} 100 mg daily. Now: {drug} 200 mg daily. [L3, L5]"   # H29
+    assert_no_empty_reason_label(ch)
     for gone in [reason, *words, "reason not included", "Reason for change", L.MED_FLAG, "may point to something cut"]:
         assert gone.lower() not in md.lower(), gone
     assert "reason not documented" not in md.lower()
