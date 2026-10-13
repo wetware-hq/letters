@@ -557,7 +557,8 @@ AMBIG = "Patient: SYNTH-3001\n1937-05-01 Clinic review.\nProblem: {ab}\nFollow-u
 
 def _notes(tmp_path, ab):
     p = tmp_path / "notes.txt"
-    p.write_text(tpl(question="Is this getting worse?", problems=[ab], actions=["review in 2 weeks, practice nurse"]))
+    p.write_text(tpl(question="Is this getting worse?", problems=[ab], meds=["aspirin 100 mg daily reason: heart"],
+                     actions=["review in 2 weeks, practice nurse"]))
     return p
 
 
@@ -2894,3 +2895,37 @@ def test_r10_dropped_course_length_build_refuses(monkeypatch):
     monkeypatch.setattr(L, "render", (lambda f: lambda *a, **k: f(*a, **k).replace(" for 5 days", ""))(L.render))
     with pytest.raises(Refused, match="course length"):
         L.build_from_template(COURSE_T, "gp-update", "GP")
+
+
+# ---------- round 10 E: empty Allergies or Medicines field ----------
+EMPTY_T = tpl(question="Is it the joint?", problems=["knee pain"], meds=(), allergies=())
+
+
+@pytest.mark.parametrize("brief", ["update to GP", "referral to cardiology", "discharge to GP"])
+def test_r10_empty_allergies_and_medicines_non_patient(tmp_path, brief):
+    r, out = _run_t(tmp_path, EMPTY_T, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert section(md, "Allergies").strip() == "- none recorded." and section(md, "Current medicines").strip() == "- none recorded."
+    a, m = line_of(EMPTY_T, "Allergies:"), line_of(EMPTY_T, "Medicines:")
+    assert f"Flag: the allergies field on line {a} is empty. Check allergies before this letter is used." in r.stderr.splitlines()
+    assert f"Flag: the medicines field on line {m} is empty. Check medicines before this letter is used." in r.stderr.splitlines()
+    assert "No known" not in md
+    r, out = _run_t(tmp_path / "f", EMPTY_T, "--brief", brief, "--final")
+    assert r.returncode == 3 and not out.exists()
+
+
+def test_r10_empty_allergies_and_medicines_patient_wording(tmp_path):
+    r, out = _run_t(tmp_path, EMPTY_T, "--brief", "letter to the patient")
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert section(md, "Allergies").strip() == "- No allergies were written in your notes. If you have any, tell your next doctor."
+    assert section(md, "Your medicines now").strip() == (
+        "- No medicines were written in your notes. If you take any, tell your next doctor.")
+    assert "none recorded" not in section(md, "Allergies") + section(md, "Your medicines now")
+    assert any(l.startswith("Flag: the allergies field on line") for l in r.stderr.splitlines())
+    assert any(l.startswith("Flag: the medicines field on line") for l in r.stderr.splitlines())
+    r, out = _run_t(tmp_path / "f", EMPTY_T, "--brief", "letter to the patient", "--final")
+    assert r.returncode == 3 and not out.exists()
+    m = re.search(r"--final refused: (\d+) flag", r.stderr)
+    assert int(m.group(1)) == len([l for l in r.stderr.splitlines() if l.startswith("Flag: ")])

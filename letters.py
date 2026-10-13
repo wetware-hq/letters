@@ -766,7 +766,7 @@ def render_section(name, st, audience):
         body = [f"- {x}" for x in items]
     if not body:
         if name in _EMPTY_FIELDS:
-            body = [f"- {NONE_RECORDED}"]
+            body = [f"- {EMPTY_PATIENT.get(name, NONE_RECORDED) if audience == 'patient' else NONE_RECORDED}"]
         elif name in EMPTY:
             body = [f"- {EMPTY[name]}"]
         else:
@@ -998,7 +998,7 @@ def check(md, sources, letter_type):
         if section in ("Results", "Your test results") and DIRECTION.search(text):
             problems.append(f"Refused: direction word in results at {at}. Give values with dates.")
         if not cited:
-            if text.strip() in EMPTY.values() or text.strip() == NONE_RECORDED:
+            if text.strip() in EMPTY.values() or text.strip() == NONE_RECORDED or text.strip() in EMPTY_PATIENT.values():
                 continue
             problems.append(f"Refused: unsourced sentence at {at}.")
             continue
@@ -1310,6 +1310,12 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
         if flags is not None:
             flags.append(QUESTION_NOTICE if letter_type == "referral" else QUESTION_NOTICE_ANY)
     md = flag_long_sentences(md, flags)
+    for sec in ("allergies", "meds"):                   # an empty allergies or medicines field blocks --final
+        if sec in _EMPTY_FIELDS and sec in SECTIONS[letter_type]:
+            head = f"**Letter:** {TITLES[letter_type]}"
+            md = md.replace(head, f"{head} {EMPTY_FIELD_FLAG}", 1)
+            if flags is not None:
+                flags.append(EMPTY_FIELD_NOTICE[sec].format(lid=_EMPTY_LINES.get(sec, "L?")))
     for _, line in _body_lines(md):
         for fl, notice in ((ALLERGY_FLAG, ALLERGY_NOTICE), (OWNER_FLAG, OWNER_NOTICE)):
             if fl in line and flags is not None:
@@ -2136,17 +2142,26 @@ def from_template(text):
 TEMPLATE_SECTIONS = {"Problems": ("problems",), "Medicines": ("meds",), "Allergies": ("allergies",),
                      "Results": ("results",), "Pending": ("pending",), "Actions": ("followup",)}
 NONE_RECORDED = "none recorded."
+EMPTY_PATIENT = {"allergies": "No allergies were written in your notes. If you have any, tell your next doctor.",
+                 "meds": "No medicines were written in your notes. If you take any, tell your next doctor."}
+EMPTY_FIELD_FLAG = "[flag: field empty]"
+EMPTY_FIELD_NOTICE = {"allergies": "Flag: the allergies field on line {lid} is empty. Check allergies before this letter is used.",
+                      "meds": "Flag: the medicines field on line {lid} is empty. Check medicines before this letter is used."}
+_EMPTY_LINES = {}       # section -> 'L<n>' of its empty template heading
 
 
 def empty_template_sections(converted):
     """Sections whose template list field has a heading and no items: the letter says 'none recorded'."""
     lines = converted.splitlines()
     out = set()
+    _EMPTY_LINES.clear()
     for i, l in enumerate(lines):
         if l.startswith("#field "):
             nxt = next((x for x in lines[i + 1:] if x.strip()), "")
             if nxt.startswith("#") or not nxt or nxt.startswith("1937-"):
                 out.update(TEMPLATE_SECTIONS[l.split(" ", 1)[1]])
+                for sec in TEMPLATE_SECTIONS[l.split(" ", 1)[1]]:
+                    _EMPTY_LINES[sec] = f"L{i + 1}"
     return out
 
 
