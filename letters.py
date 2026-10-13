@@ -2265,6 +2265,23 @@ def _template_item(field, item):
     return item
 
 
+RECIPIENTS_LINE = re.compile(r"^\s*recipients?\s*:\s*(?P<v>.*)$", re.I)
+
+
+def pre_template_checks(raw, template=None, brief=None, patient=False, not_copy=()):
+    """Copy, send and recipient checks on the raw notes. They run BEFORE the template check, so a template error
+    can never hide them. The Recipients line is checked for one reader and then blanked (it is never a copy).
+    Returns the --not-copy lines covered."""
+    lines = raw.splitlines()
+    for n, l in enumerate(lines, 1):
+        m = RECIPIENTS_LINE.match(l)
+        if m:
+            if RECIPIENT_SPLIT.search(m.group("v")):
+                raise Refused(RECIPIENTS_REFUSED.format(n=n))
+            lines[n - 1] = "#"
+    return refuse_copies("\n".join(lines) + "\n", template, brief, patient, not_copy)
+
+
 def build_from_template(text, *a, **k):
     conv = from_template(text)
     _EMPTY_FIELDS.clear(); _EMPTY_FIELDS.update(empty_template_sections(conv))
@@ -2402,6 +2419,12 @@ def main(argv=None):
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
     tpl = open(a.template, encoding="utf-8").read() if a.template else None
     try:
+        not_copy = []
+        for x in a.not_copy:
+            if not re.fullmatch(r"L\d+", x.strip()):
+                raise Refused("Refused: --not-copy takes one line, like L3. Nothing was written.")
+            not_copy.append(x.strip())
+        pre_template_checks(text, tpl, brief_copy, is_patient_letter(a.to, a.audience), not_copy)   # before the template
         text = from_template(text)
         _EMPTY_FIELDS.update(empty_template_sections(text))
         _TEMPLATE[:] = [True]
@@ -2409,11 +2432,6 @@ def main(argv=None):
         print(str(e), file=sys.stderr)
         return 2
     try:
-        not_copy = []
-        for x in a.not_copy:
-            if not re.fullmatch(r"L\d+", x.strip()):
-                raise Refused("Refused: --not-copy takes one line, like L3. Nothing was written.")
-            not_copy.append(x.strip())
         covered = refuse_copies(text, tpl, brief_copy, is_patient_letter(a.to, a.audience), not_copy)
     except Refused as e:
         print(str(e), file=sys.stderr)

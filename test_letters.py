@@ -3025,3 +3025,29 @@ def test_r11_common_generics_do_not_flag(tmp_path, drug):
     r, out = _run_t(tmp_path / drug, text, "--brief", "update to GP")
     assert r.returncode == 0, r.stderr
     assert "misspelled" not in r.stderr and L.DRUG_FLAG not in (out / "letter.md").read_text()
+
+
+def test_r11_copy_refusal_wins_over_template_error(tmp_path):
+    text = tpl(question="Please review.", problems=("cough",), meds=("amlodipine 5 mg daily",),
+               actions=("review in 2 weeks, GP",))
+    text = text.replace("History:", "History: please send a copy of this letter to her son")
+    text = text.replace("Medicines:\n- amlodipine 5 mg daily", "Medicines:\namlodipine 5 mg daily")   # template error
+    assert "Refused: line" in str(pytest.raises(L.Refused, L.from_template, text).value)
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    assert r.returncode == 2 and not out.exists()
+    n = int(line_of(text, "History:")[1:])
+    assert r.stderr.strip() == L.NOTE_COPY_REFUSED.format(n=n) or r.stderr.strip() == L.NOT_COPY_REFUSED.format(n=n)
+    assert "template" not in r.stderr
+
+
+def test_r11_recipient_refusal_wins_over_template_error(tmp_path):
+    text = tpl(question="Please review.", problems=("cough",), recipient="GP and cardiology",
+               actions=("review in 2 weeks, GP",)).replace("Problems:\n- cough", "Problems:\ncough")
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    assert r.returncode == 2 and r.stderr.strip() == L.RECIPIENTS_REFUSED.format(n=3)
+
+
+def test_r11_brief_copy_wins_over_template_error(tmp_path):
+    text = tpl(question="Please review.", problems=("cough",)).replace("Problems:\n- cough", "Problems:\ncough")
+    r, out = _run_t(tmp_path, text, "--brief", "update to GP, cc cardiology")
+    assert r.returncode == 2 and r.stderr.startswith("Refused: copy request in the brief.")
