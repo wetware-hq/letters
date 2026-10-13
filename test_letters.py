@@ -3634,3 +3634,36 @@ def test_r11h_date_line_counts_blank_lines_and_iso_with_time():
     assert L.first_out_of_range_line("SYNTH-1\n\n\n1937-01-01\n1941-02-03T08:00") == 5
     assert L.first_out_of_range_line("SYNTH-1 31/12/1939 01/01/1930") is None
     assert L.first_out_of_range_line("SYNTH-1\n1/1/1940") == 2
+
+
+# ---- round 11 ruling: dates with a time joined on, both directions, both forms (same cases as figures) ----
+TIMED = [("1937-02-03T08:00", True), ("1937-02-03 08:00", True), ("1941-02-03T08:00", False), ("1941-02-03 08:00", False)]
+DATE_TWO_LINES = ["Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written.",
+                  "If these are real notes, delete them and use synthetic data only."]
+
+
+@pytest.mark.parametrize("ts,ok", TIMED)
+def test_r11i_safeguard_dates_with_time_joined_on(ts, ok):
+    text = f"SYNTH-1\nseen {ts}"
+    if ok:
+        assert L.check_safe(text) == "SYNTH-1"
+    else:
+        with pytest.raises(L.Refused) as e:
+            L.check_safe(text)
+        assert str(e.value).splitlines() == [DATE_TWO_LINES[0].format(n=2), DATE_TWO_LINES[1]]
+
+
+@pytest.mark.parametrize("ts,ok", TIMED)
+def test_r11i_checker_and_letter_command_dates_with_time(tmp_path, ts, ok):
+    text = tpl(question="Please review.", problems=("cough",), actions=("review in 2 weeks, GP",))
+    text = text.replace("Question: Please review.", f"Question: Please review. Seen {ts}.")
+    n = line_of(text, "Seen ")[1:]
+    c = _check(tmp_path / "c", text)
+    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to GP")
+    if ok:
+        assert c.returncode == 0 and r.returncode == 0, (c.stderr, r.stderr)
+        assert DATE_TWO_LINES[1] not in c.stderr + r.stderr
+    else:
+        assert c.returncode != 0 and r.returncode != 0
+        assert c.stderr.strip() == r.stderr.strip()
+        assert c.stderr.strip().splitlines()[-2:] == [DATE_TWO_LINES[0].format(n=n), DATE_TWO_LINES[1]]
