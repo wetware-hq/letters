@@ -2175,7 +2175,9 @@ RECIPIENT_SPLIT = re.compile(r"[,;&/+]|\band\b|\balso\b|\bplus\b", re.I)
 # '- drug dose frequency [route] [max X in 24 hours | max X per <period>] [for N days] [reason: <why>]
 #    [; stopped|ceased|withheld <date> - <stop reason>]'. Parts in this order; anything else doesn't fit.
 MED_REASON_MARK = "reason:"
-_FREQS = r"(?:once daily|twice daily|three times daily|four times daily|daily|bd|tds|qid|nocte|mane|prn|weekly|od)"
+_FREQS = (r"(?:once daily|twice daily|three times daily|four times daily|daily|bd|tds|qid|nocte|mane|prn|weekly|od"
+          r"|fortnightly|monthly|every\s+(?:other\s+)?(?:\d+\s+)?(?:hours?|days?|weeks?|months?)"
+          r"|once\s+a\s+(?:week|month|fortnight))")   # off-list frequencies are kept as written, never flagged
 MED_ITEM = re.compile(
     r"^(?P<drug>[A-Za-z][\w/-]*(?:\s+(?!\d)[A-Za-z][\w/-]*)*?)"
     r"(?:\s+(?P<dose>\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?\s?(?:mg|mcg|micrograms?|g|mL|ml|units?|IU|%|puffs?|tablets?|drops?)?"

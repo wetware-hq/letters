@@ -2941,3 +2941,16 @@ def test_r11_no_dash_no_known_allergies_line_accepted(tmp_path, nka):
     md = (out / "letter.md").read_text()
     assert "No known drug allergies" in md
     assert "allergies field" not in r.stderr and "Refused" not in r.stderr
+
+
+@pytest.mark.parametrize("freq", ["every 2 weeks", "weekly", "fortnightly", "once a month", "every other day"])
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11_off_list_frequency_kept_as_written_no_flag(tmp_path, freq, brief):
+    text = tpl(question="Please review.", problems=("rheumatoid arthritis",),
+               meds=(f"methotrexate 10 mg {freq}",), actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path / freq.replace(" ", "_"), text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert f"methotrexate 10 mg {freq}" in md
+    lid = line_of(text, "methotrexate")
+    assert not any(lid in l for l in r.stderr.splitlines()), r.stderr
