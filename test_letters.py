@@ -2400,3 +2400,34 @@ def test_r9_result_in_a_sentence_is_kept():
     md, _ = build("SYNTH-9941 :: M :: 58\n1937-02-19 lipid clinic, LDL 1937-02-12 3.6 mmol/L.\nQuestion: target?\n",
                   "referral", "Cardiology")
     assert "3.6 mmol/L" in md
+
+
+# ---------- round 9: copy-request regression (root cause: 'copy' had to be followed straight by 'to') ----------
+COPY_SENTENCES = ["Please send a copy of this to her son as well.", "Copies of this letter to the practice please.",
+                  "Can you copy her daughter in?", "Forward a copy to the physio.", "Daughter would like a copy."]
+COPY_BASE = "SYNTH-9951 :: F :: 81\nAllergy: zorvadol - hallucinations\n1937-05-14 falls review.\nMed: alphavit 1000 mg daily\n"
+
+
+@pytest.mark.parametrize("sentence", COPY_SENTENCES)
+@pytest.mark.parametrize("brief,tail", [("letter to the patient", L.PATIENT_COPY_TAIL), ("update to GP", L.COPY_TAIL)])
+@pytest.mark.parametrize("final", [False, True])
+def test_r9_copy_request_in_a_sentence_refused_exit_2_nothing_written(tmp_path, sentence, brief, tail, final):
+    n = tmp_path / "notes.txt"; out = tmp_path / "out"
+    n.write_text(COPY_BASE + sentence + "\n")
+    r = subprocess.run(CLI + [str(n), "--brief", brief, "--out", str(out)] + (["--final"] if final else []),
+                       capture_output=True, text=True)
+    assert r.returncode == 2, (r.returncode, r.stderr)
+    assert r.stderr.strip() == f"Refused: copy request at L5. {tail}" and r.stdout == ""
+    assert not out.exists()
+    assert "son" not in r.stderr and "daughter" not in r.stderr.lower()
+
+
+@pytest.mark.parametrize("sentence", COPY_SENTENCES)
+def test_r9_copy_request_in_a_sentence_refused_by_build(sentence):
+    with pytest.raises(Refused, match=r"^Refused: copy request at L5\. "):
+        build(COPY_BASE + sentence + "\n", "gp-update", "Patient", audience="patient")
+
+
+def test_r9_copies_as_a_lab_unit_is_not_a_copy_request():
+    md, _ = build(COPY_BASE + "Result: viral load <20 copies/mL\n", "gp-update", "Patient", audience="patient")
+    assert "copies/mL" in md

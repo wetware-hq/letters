@@ -1115,7 +1115,10 @@ COPY_LINE = re.compile(r"^\s*(?:\d{4}-\d{2}-\d{2}\s+)?(?:cc|c\.c\.|copy|copies|c
 COPY_SLOT = re.compile(r"\{\{\s*(?:cc|copy|copies|copy_to)\s*\}\}", re.I)
 # In notes: a cc dose unit is removed first; a "CC:" chief-complaint heading is allowed only when clearly a symptom.
 DOSE_CC = re.compile(r"(?<![A-Za-z0-9.])\d+(?:\.\d+)? ?[cC][cC](?![A-Za-z0-9/])")
-NOTE_COPY = re.compile(r"(?<![\w.])(?:cc|c\.c\.)(?![\w])|\bcop(?:y|ies|ied)\s+(?:in\s+)?to\b", re.I)
+# Any copy word in the notes is a copy request ('send a copy of this to her son', 'copies to', 'cc'd'): when unclear,
+# it counts. (Round 9: the earlier pattern needed 'to' straight after 'copy', so a sentence request slipped through.)
+NOTE_COPY = re.compile(r"(?<![\w.])(?:cc|c\.c\.|cc'd|cop(?:y|ies|ied|ying))(?![\w])", re.I)
+VIRAL_COPIES = re.compile(r"[<>]?\d[\d,.]*\s*copies\b(?:\s*/\s*\w+)?|\bcopies\s*/\s*\w+", re.I)
 CHIEF_COMPLAINT = re.compile(r"^CC\s*:\s*(.+)$")
 NOT_A_SYMPTOM = {"dr", "doctor", "gp", "patient", "pt", "clinic", "team", "nurse", "carer", "family", "daughter", "son",
                  "wife", "husband", "partner", "mother", "father", "mum", "dad", "sister", "brother", "friend", "and",
@@ -1144,6 +1147,7 @@ def copy_where(text):
         if m:
             line = m.group(2).strip()
         line = DOSE_CC.sub(" ", line)
+        line = VIRAL_COPIES.sub(" ", line)                 # '<20 copies/mL' is a lab unit, not a copy request
         cc = CHIEF_COMPLAINT.match(line)
         if cc:
             words = re.findall(r"[A-Za-z']+|\S", cc.group(1))
