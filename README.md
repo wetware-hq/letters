@@ -117,3 +117,35 @@ Regression tests plant each failure: an unsourced fact, a stopped medicine, a ne
 ## License
 
 MIT.
+
+## Notes template (round 10)
+
+`letters` reads notes only in this fixed template. Fields start a line, in this order, and every heading must be there:
+
+```
+Patient: SYNTH-0000
+Date: 1937-01-01
+Recipients: <exactly one reader>
+Question: <free text, or none>
+Problems:
+- <one per line>
+History: <free text>
+Medicines:
+- drug dose frequency [route] [max X in 24 hours | max X per <period>] [for N days] [reason: <why>] [; stopped|ceased|withheld <date> - <stop reason>]
+Allergies:
+- allergen: reaction      (or '- allergen', or the single line 'No known allergies')
+Results:
+- test value unit date
+Pending:
+- test, sent <date>, owner
+Actions:
+- action, owner
+```
+
+A list may be empty: the letter says "none recorded". An empty Allergies or Medicines field is also flagged and blocks `--final`.
+Anything else is refused, naming the first line that doesn't fit.
+
+`--not-copy L<n>` is a recorded override, not a way around the copy check. When a line is refused because it looks like
+a copy request but isn't one, rerun with `--not-copy L<n>` (one line per flag). It prints
+"Line L<n> marked as not a copy request" beside the cut list and still never sends a copy. It can't be used on a line
+that names someone to send the letter to. Don't edit clinical notes to get past a check.
