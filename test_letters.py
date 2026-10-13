@@ -3127,3 +3127,14 @@ def test_r11f_template_date_invalid_refused(d):
     with pytest.raises(L.Refused) as e:
         L.from_template(text)
     assert str(e.value) == L.TEMPLATE_REFUSED.format(n=2)
+
+
+def test_r11f_parsers_take_any_year_tripwire_is_the_only_year():
+    assert L.HEAD.match("1936-05-01 seen in clinic").group(1) == "1936-05-01"
+    assert L.med_item("aspirin 100 mg daily; stopped 1938-01-02 - bleeding")["sdate"] == "1938-01-02"
+    assert L.OUTDATE.search("on 2 May 1935").group(3) == "1935"
+    assert L.V_DATE.match("1939-01-01: x")
+    src = pathlib.Path(L.__file__).read_text()
+    assert src.count("1937") == 2 and 'SYNTH_YEAR = "1937"' in src       # comment + the one policy constant
+    with pytest.raises(L.Refused, match="date outside 1937"):
+        L.check_safe("SYNTH-1 seen 1936-05-01")                          # synthetic-data tripwire unchanged

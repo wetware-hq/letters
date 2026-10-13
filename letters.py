@@ -26,6 +26,9 @@ ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 DMY = re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})\b")
 LONGNUM = re.compile(r"(?<![\w.])\+?\d(?:[\s-]?\d){7,}(?![\w.])")
 MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+# The synthetic-data tripwire (AGENTS.md: "synthetic only: SYNTH- ids, 1937 dates") is the ONE place a year lives.
+# Every parser below matches any year (DATE); only check_safe() enforces this policy.
+SYNTH_YEAR = "1937"
 DATE = r"\d{4}-\d{2}-\d{2}"
 
 
@@ -51,11 +54,11 @@ def check_safe(text):
     if len(ids) > 1:
         raise Refused("Refused: notes mention more than one patient identifier.")
     for m in ISO.finditer(text):
-        if m.group(1) != "1937":
-            raise Refused(INCIDENT + " (reason: date outside 1937)")
+        if m.group(1) != SYNTH_YEAR:
+            raise Refused(INCIDENT + f" (reason: date outside {SYNTH_YEAR})")
     for m in DMY.finditer(text):
-        if m.group(3) not in ("1937", "37"):
-            raise Refused(INCIDENT + " (reason: date outside 1937)")
+        if m.group(3) not in (SYNTH_YEAR, SYNTH_YEAR[2:]):
+            raise Refused(INCIDENT + f" (reason: date outside {SYNTH_YEAR})")
     if LONGNUM.search(ISO.sub(" ", SYNTH.sub(" ", text))):
         raise Refused(INCIDENT + " (reason: phone- or card-number-like digits)")
     return ids.pop()
@@ -67,7 +70,7 @@ def fdate(iso):
 
 
 # ---------- 1. parse (every line keeps its id) ----------
-HEAD = re.compile(r"^\s*(1937-\d{2}-\d{2})\b[\s:,-]*(.*)$")
+HEAD = re.compile(r"^\s*(\d{4}-\d{2}-\d{2})\b[\s:,-]*(.*)$")
 
 
 BULLET = re.compile(r"^(?:[*\u2022\u00b7]|-(?=\s))\s*")
@@ -82,7 +85,7 @@ def _med_block_head(line):
 
 
 def parse(text):
-    """Return (entries, sources). A line starting with a 1937 date opens an entry. Ids are L<line number>.
+    """Return (entries, sources). A line starting with a date opens an entry. Ids are L<line number>.
     Every line stays on its own: nothing is ever joined with the line before or after it. Under a short medicine
     heading with nothing after it, each indented or bulleted line is read as one medicine line."""
     entries, sources, cur = [], {}, {"date": None, "lines": []}
@@ -293,7 +296,7 @@ def untagged_pending(body):
     m = PENDING_AFTER.match(body)
     if m and not NEG.match(body):
         rest = m.group("rest").strip(" ,;-")
-        rest = re.sub(r"^(?:on\s+)?1937-\d{2}-\d{2}\b[\s,;:.\-\u2013\u2014]*", "", rest)
+        rest = re.sub(r"^(?:on\s+)?\d{4}-\d{2}-\d{2}\b[\s,;:.\-\u2013\u2014]*", "", rest)
         rest = re.sub(r"^(?:await(?:ed|ing)?|pending|outstanding|results? to follow)\b[\s.]*$", "", rest, flags=re.I).strip(" ,;-")
         return f"{m.group('test').strip()} - {rest}" if rest else m.group("test").strip()
     return None
@@ -607,9 +610,9 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 h = st["results"].setdefault(k, {"name": name, "values": []})
                 h["values"].append((rd.group(0) if rd else (None if _TEMPLATE else d), r.group("val"), r.group("unit"), r.group("note").strip(), lid))
             elif kind == "pending":
-                sm = re.search(r";\s*sent:\s*(1937-\d{2}-\d{2})", body)
+                sm = re.search(r";\s*sent:\s*(\d{4}-\d{2}-\d{2})", body)
                 sent = sm.group(1) if sm else None
-                body = re.sub(r";\s*sent:\s*1937-\d{2}-\d{2}", "", body)
+                body = re.sub(r";\s*sent:\s*\d{4}-\d{2}-\d{2}", "", body)
                 parts = re.split(r";\s*(?:follow-up|who|f/u)\s*:\s*", body, flags=re.I)
                 test, who = (parts[0].strip(), parts[1].strip()) if len(parts) > 1 else split_owner(parts[0])
                 k = test.lower()
@@ -648,7 +651,7 @@ HEADINGS = {
 }
 WHO = re.compile(r"\b(GP|general practitioner|patient|you|cardiology|renal|endocrinology|podiatry|clinic|"
                  r"ward|nurse|pharmacist|physiotherapy|team|surgeon|specialist|outpatients)\b", re.I)
-WHEN = re.compile(r"\b(?:in|within|after)\s+\d+\s+(?:day|week|month|year)s?\b|\b1937-\d{2}-\d{2}\b|"
+WHEN = re.compile(r"\b(?:in|within|after)\s+\d+\s+(?:day|week|month|year)s?\b|\b\d{4}-\d{2}-\d{2}\b|"
                   r"\b(?:today|tomorrow|at discharge|next visit|at next review)\b", re.I)
 
 
@@ -995,7 +998,7 @@ for _s in _FIXED:   # only fixed scaffolding; expansions and rewrites are earned
     VOCAB.update(w.lower() for w in re.findall(r"[A-Za-z][A-Za-z-]+", _s))
 WORD = re.compile(r"[A-Za-z][A-Za-z-]{3,}")
 NUM = re.compile(r"\d+(?:\.\d+)?")
-OUTDATE = re.compile(r"\b(\d{1,2}) (" + "|".join(MONTHS) + r") (1937)\b")
+OUTDATE = re.compile(r"\b(\d{1,2}) (" + "|".join(MONTHS) + r") (\d{4})\b")
 
 
 # Fixed list of label rewrites: (pattern that must appear in the cited lines, wording it may become).
@@ -1077,7 +1080,7 @@ def check(md, sources, letter_type):
                 problems.append(f"Refused: dose unit not flagged at {at}.")
         text = FLAG_ANY.sub("", text)
         for m in OUTDATE.finditer(text):
-            iso = f"1937-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
+            iso = f"{m.group(3)}-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
             if iso not in src:
                 problems.append(f"Refused: date not in cited lines at {at}.")
         rest = OUTDATE.sub(" ", text)
@@ -1395,7 +1398,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
 
 # ---------- reverse check: every date, number, name and owner in the letter is in the notes or the brief ----------
 REVERSE_REFUSED = "Refused: line L{n} of this letter has a date, number or name that isn't in the notes. Nothing was written."
-_LETTER_DATE = re.compile(r"\b(\d{1,2}) (" + "|".join(MONTHS) + r") (1937)\b")
+_LETTER_DATE = re.compile(r"\b(\d{1,2}) (" + "|".join(MONTHS) + r") (\d{4})\b")
 
 
 def _tool_words():
@@ -1443,7 +1446,7 @@ def reverse_check(md, text, extra="", template=None):
         t = re.sub(r"^(?:- |\d+\. |\| )", "", FLAG_ANY.sub("", split_ids(line)[0]))
         bad = False
         for m in _LETTER_DATE.finditer(t):
-            iso = f"1937-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
+            iso = f"{m.group(3)}-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
             if iso not in src:
                 bad = True
         for m in ISO.finditer(t):
@@ -1850,7 +1853,7 @@ def make_letter(text, letter_type, to, recipient=None, audience=None, template=N
 # Reads the notes with its own line reader. It never uses parse(), classify(), cumsum() or any parser output, so
 # a parser bug (a merged line, a misread heading) cannot hide from it. Only fixed vocabularies are shared
 # (drug names, dose and frequency patterns, linked terms).
-V_DATE = re.compile(r"^\s*1937-\d{2}-\d{2}\b[\s:,-]*")
+V_DATE = re.compile(r"^\s*\d{4}-\d{2}-\d{2}\b[\s:,-]*")
 V_BULLET = re.compile(r"^\s*(?:[*\u2022\u00b7]|-(?=\s))\s*")
 V_HEAD = re.compile(r"^(?P<h>[A-Za-z][A-Za-z /'-]{0,40}?)\s*(?::|\s[-\u2013\u2014]+(?=\s|$)|\s*(?:->|[\u2192\u279d]))\s*(?P<b>.*)$")
 V_ALLERGY_HEAD = re.compile(r"\b(?:allerg\w*|sensitivit\w*|intoleran\w*|reactions?|anaphyla\w*|adverse)\b", re.I)
@@ -2172,7 +2175,7 @@ def from_template(text):
                 bad(n)
             out.append(f"Patient: {v}")
         elif f == "Date":
-            if not valid_date(v):        # any valid calendar date; the year policy lives in check_safe() only
+            if not valid_date(v):
                 bad(n)
             out.append(v)
         elif f == "Recipients":
@@ -2240,7 +2243,7 @@ MED_ITEM = re.compile(
     r"\s+(?:in\s+24\s+hours|(?:per|in|every)\s+(?:\d+\s+)?[a-z]+)))?"
     r"(?:\s+(?P<dur>for\s+\d+\s+(?:more\s+)?days?))?"
     r"(?:\s+" + re.escape(MED_REASON_MARK) + r"\s*(?P<reason>(?:(?!\bmax(?:imum)?\s+\d|\bfor\s+\d+\s+(?:more\s+)?days?\b)[^;])+?))?"
-    r"(?:\s*;\s*(?P<stop>stopped|ceased|withheld)\s+(?P<sdate>1937-\d{2}-\d{2})(?:\s+-\s+(?P<sreason>.+?))?)?\s*$", re.I)
+    r"(?:\s*;\s*(?P<stop>stopped|ceased|withheld)\s+(?P<sdate>\d{4}-\d{2}-\d{2})(?:\s+-\s+(?P<sreason>.+?))?)?\s*$", re.I)
 
 
 def med_item(item):
