@@ -1068,6 +1068,31 @@ def heldout(path):
     return stats["fail"] / n
 
 
+BRIEF_REFUSED = ('Refused: brief not understood. Write it as "<kind> to <reader>", for example '
+                 '"discharge to GP" or "update to patient".')
+BRIEF_KINDS = {
+    "referral": "referral", "refer": "referral", "referral letter": "referral",
+    "discharge": "discharge", "discharge summary": "discharge", "discharge letter": "discharge",
+    "update": "gp-update", "gp update": "gp-update", "gp-update": "gp-update", "progress update": "gp-update",
+    "clinic letter": "gp-update", "clinic update": "gp-update", "letter": "gp-update",
+    "reply": "specialist-reply", "specialist reply": "specialist-reply", "specialist-reply": "specialist-reply",
+    "response": "specialist-reply", "answer": "specialist-reply",
+}
+
+
+def parse_brief(core):
+    """'<kind> to <reader>' -> (type, Reader), or (None, None). Never echoes the brief."""
+    m = re.match(r"^\s*(?:an?\s+)?(?P<kind>[A-Za-z -]+?)\s+(?:to|for)\s+(?:the\s+(?=patient\b))?(?P<reader>\S.*?)\s*\.?\s*$",
+                 core or "", re.I)
+    if not m:
+        return None, None
+    kind = BRIEF_KINDS.get(re.sub(r"\s+", " ", m.group("kind").strip().lower()))
+    if not kind:
+        return None, None
+    r = m.group("reader")
+    return kind, r[:1].upper() + r[1:]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Synthetic notes + brief -> Markdown letter. Nothing else is stored.")
     ap.add_argument("notes", nargs="?", help="notes text file, or - for stdin")
@@ -1090,17 +1115,18 @@ def main(argv=None):
         heldout(a.heldout)
         return 0
     brief_copy = None
-    if a.brief:
+    if a.brief is not None:
         cut = re.search(r"[,;]?\s*(?:\b(?:cc|copy|copies|copied)\b|c\.c\.).*$", a.brief, re.I)
         brief_copy = cut.group(0) if cut else None
         core = a.brief[:cut.start()] if cut else a.brief
-        m = re.match(r"^\s*(referral|discharge|gp[- ]update|update|specialist[- ]reply|reply)\s+(?:to|for)\s+(.+?)\s*$",
-                     core, re.I)
-        if not m:
-            ap.error('--brief must look like "referral to cardiology"')
-        t = m.group(1).lower().replace(" ", "-")
-        a.type = a.type or {"update": "gp-update", "reply": "specialist-reply"}.get(t, t)
-        a.to = a.to or m.group(2)[:1].upper() + m.group(2)[1:]
+        kind, reader = parse_brief(core)
+        if not kind:
+            print(BRIEF_REFUSED, file=sys.stderr)
+            return 2
+        a.type = a.type or kind
+        a.to = a.to or reader
+        if is_patient_letter(a.to, None) and not a.audience:
+            a.audience = "patient"
     if not (a.notes and a.type and a.to):
         ap.error("notes, --type and --to are required")
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()

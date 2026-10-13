@@ -1180,3 +1180,43 @@ def test_pending_owner_kept(line, test, owner):
 def test_pending_without_owner_still_not_documented():
     md, _ = _two("Pending: echo")
     assert "Who follows up: not documented" in section(md, "Results still to come")
+
+
+# ---------- brief parser ----------
+BRIEF_MSG = ('Refused: brief not understood. Write it as "<kind> to <reader>", for example '
+             '"discharge to GP" or "update to patient".')
+
+
+@pytest.mark.parametrize("brief,kind,reader", [
+    ("referral to cardiology", "referral", "Cardiology"), ("discharge to GP", "discharge", "GP"),
+    ("update to GP", "gp-update", "GP"), ("reply to GP", "specialist-reply", "GP"),
+    ("discharge summary for GP", "discharge", "GP"), ("a referral to renal", "referral", "Renal"),
+    ("specialist reply to cardiology", "specialist-reply", "Cardiology"), ("update to the patient", "gp-update", "Patient"),
+])
+def test_brief_kinds(brief, kind, reader):
+    assert L.parse_brief(brief) == (kind, reader)
+
+
+@pytest.mark.parametrize("brief", ["please write something for Mrs Synthname", "Mrs Synthname", "summary of Mrs Synthname",
+                                   "poem to Mrs Synthname", "", "to GP"])
+def test_unknown_brief_refused_without_echo(tmp_path, brief):
+    out = tmp_path / "o"
+    r = subprocess.run(CLI + [str(CKD), "--brief", brief, "--out", str(out)], capture_output=True, text=True)
+    assert r.returncode == 2 and r.stderr.strip() == BRIEF_MSG and r.stdout == ""
+    assert "Synthname" not in r.stdout + r.stderr
+    assert not out.exists() or list(out.iterdir()) == []
+
+
+def test_update_to_patient_brief_is_patient_letter(tmp_path):
+    out = tmp_path / "o"
+    r = subprocess.run(CLI + [POD, "--brief", "update to patient", "--out", str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert (out / "letter.md").read_text().rstrip("\n").endswith(L.PATIENT_PRIVACY)
+    r = subprocess.run(CLI + [POD, "--brief", "update to patient, cc GP", "--out", str(tmp_path / "p")],
+                       capture_output=True, text=True)
+    assert r.returncode == 2 and r.stderr.strip() == f"Refused: copy request in the brief. {PATIENT_TAIL}"
+
+
+def test_copy_refusal_in_any_brief_kind(tmp_path):
+    r, out = _gp_cli(tmp_path, brief="discharge summary to GP, cc renal")
+    _assert_gp_refused(r, out, "in the brief")
