@@ -55,3 +55,8 @@ inh
 ug
 iu
 cc
+# shorthand with more than one meaning (ruling 13 Oct 2026): flagged whatever its case
+ms
+pe
+cp
+ra

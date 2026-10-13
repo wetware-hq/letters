@@ -872,6 +872,16 @@ def reason_start(text):
     return m.end() if m else None
 
 
+def reason_flag(tok, prev="", exact=()):
+    """Inside a medicine reason (ruling 13 Oct 2026): flag any shorthand.txt term whatever its case (unless it has
+    signed plain words), plus all-capital words that aren't recognised. Never flag any other lowercase word."""
+    if tok in exact or tok in TOOL_WORDS or tok.lower() in drug_names() or tok.lower() in drug_words():
+        return False
+    if tok.lower() in SHORTHAND:
+        return needs_flag(tok, prev, exact)
+    return len(tok) >= 2 and tok.isupper() and needs_flag(tok, prev, exact)
+
+
 def needs_flag(tok, prev="", exact=()):
     """True if tok must be flagged. exact: abbreviations that may expand as written (reviewed list, resolutions)."""
     if tok in exact or tok in TOOL_WORDS:
@@ -956,7 +966,7 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             ab, before = m.group(0), prev[0]
             prev[0] = ab
             in_reason = rs is not None and m.start() >= rs   # a reason: never the misspelling flag; abbreviations
-            if in_reason and ab not in resolved and ab not in single and not needs_flag(ab, before, exact):
+            if in_reason and ab not in resolved and ab not in single and not reason_flag(ab, before, exact):
                 return ab                                    # ordinary English reason: kept as written, no flag
             if ab in resolved:
                 rid, full = resolved[ab]
@@ -1072,9 +1082,11 @@ def check(md, sources, letter_type):
             scan = scan.replace(f"{f} ({ab})", ab).replace(f, ab)
         exact = tuple(res) + tuple(single)
         prev = ""
+        rs = reason_start(scan)
         for m in TOKEN.finditer(scan):
             ab = m.group(0)
-            if needs_flag(ab, prev, exact) and not FLAG_ANY.match(scan, m.end()):
+            flag = reason_flag if rs is not None and m.start() >= rs else needs_flag
+            if flag(ab, prev, exact) and not FLAG_ANY.match(scan, m.end()):
                 problems.append(f"Refused: abbreviation not flagged or resolved at {at}.")
             prev = ab
         for m in DOSE_U.finditer(scan):

@@ -3173,13 +3173,13 @@ def test_r11f_multi_meaning_shorthand_flagged_inside_medicine_reason(tmp_path, a
     assert any("abbreviation on line " + line_of(text, "amlodipine") in l for l in r.stderr.splitlines())
 
 
-def test_r11f_unknown_word_in_reason_flagged_single_meaning_exempt(tmp_path):
+def test_r11f_unknown_lowercase_word_in_reason_not_flagged_single_meaning_exempt(tmp_path):
     text = tpl(question="Please review.", problems=("review",),
                meds=("amlodipine 5 mg daily reason: cx", "metformin 500 mg bd reason: CKD"),
                actions=("review in 2 weeks, GP",))
     r, out = _run_t(tmp_path, text, "--brief", "update to GP")
     md = (out / "letter.md").read_text()
-    assert f"cx {L.FLAG}" in md and L.DRUG_FLAG not in md            # abbreviation flag, never the misspelling flag
+    assert f"cx {L.FLAG}" not in md and L.DRUG_FLAG not in md        # ruling 13 Oct: other lowercase words never flagged
     assert "chronic kidney disease (CKD)" in md and f"CKD {L.FLAG}" not in md
 
 
@@ -3277,3 +3277,28 @@ def test_r11g_checker_calls_the_same_safeguard(monkeypatch, tmp_path):
     n = tmp_path / "n.txt"; n.write_text(tpl(question="Please review."))
     assert L.check_template_main([str(n)]) == 0 and calls
 
+
+@pytest.mark.parametrize("ab", ["ms", "pe", "MS", "Pe"])
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11g_shorthand_flagged_in_reason_whatever_case(tmp_path, ab, brief):
+    text = tpl(question="Please review.", problems=("review",), meds=(f"amlodipine 5 mg daily reason: {ab}",),
+               actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path / ab, text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    assert f"{ab} {L.FLAG}" in (out / "letter.md").read_text()
+
+
+@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+def test_r11g_reflux_in_reason_not_flagged(tmp_path, brief):
+    text = tpl(question="Please review.", problems=("review",), meds=("omeprazole 20 mg daily reason: reflux",),
+               actions=("review in 2 weeks, GP",))
+    r, out = _run_t(tmp_path, text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert "for reflux" in md and f"reflux {L.FLAG}" not in md and L.DRUG_FLAG not in md and L.REASON_FLAG not in md
+    assert not any(line_of(text, "omeprazole") in l for l in r.stderr.splitlines()), r.stderr
+
+
+def test_r11g_reason_flag_rule_unit():
+    assert all(L.reason_flag(t) for t in ("ms", "pe", "MS", "QZX"))
+    assert not any(L.reason_flag(t) for t in ("reflux", "heartburn", "cx"))
