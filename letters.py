@@ -409,8 +409,9 @@ TOKEN = re.compile(r"(?<![A-Za-z0-9.'])(?:c/o|o/e|(?:[A-Za-z]\.){2,}|"
 UNITS = {"mg", "mcg", "g", "kg", "mL", "L", "dL", "mmol", "micromol", "min", "mU", "h", "units", "unit"}
 ROMAN_CTX = {"stage", "grade", "class", "type", "types", "phase", "nyha"}
 # u/U/iu/IU as a dose unit is a known misreading risk (10u read as 100): always flagged, attached or detached.
+# cc as a dose unit ("5 cc saline") follows the same rule (Physician-requested); it is never a copy request.
 # Lab units such as U/L, mU/L and IU/L stay clean; "10 units" is never flagged.
-DOSE_U = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)( ?)([uU]|[iI][uU])(?![A-Za-z0-9/])")
+DOSE_U = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)( ?)([uU]|[iI][uU]|[cC][cC])(?![A-Za-z0-9/])")
 TOOL_WORDS = {"DRAFT"}        # the tool's own fixed wording ("DRAFT, unsigned") is never flagged
 SINGLE_MEANING_FILE = HERE / "single_meaning.toml"
 SHORTHAND_FILE = HERE / "shorthand.txt"
@@ -734,23 +735,78 @@ def llm_guard():
                          "Unset it to run.")
 
 
-COPY_REFUSED = ("Refused: letters can't send copies. Write a separate letter for each reader, "
-                "so nobody assumes someone was copied in when they weren't.")
+COPY_TAIL = ("letters can't send copies. Write a separate letter for each reader, "
+             "so nobody assumes someone was copied in when they weren't.")
+COPY_REFUSED = COPY_TAIL  # stable tail; the full message is "Refused: copy request <where>. " + COPY_TAIL
 PATIENT_PRIVACY = "This letter includes private details about your health. It's yours to share or keep private."
 COPY_WORDS = re.compile(r"(?<![\w])(?:cc|c\.c\.|copy|copies|copied)(?![\w])", re.I)
 COPY_LINE = re.compile(r"^\s*(?:\d{4}-\d{2}-\d{2}\s+)?(?:cc|c\.c\.|copy|copies|copied)(?:\s+to)?\s*:", re.I | re.M)
 COPY_SLOT = re.compile(r"\{\{\s*(?:cc|copy|copies|copy_to)\s*\}\}", re.I)
+# In notes: a cc dose unit is removed first; a "CC:" chief-complaint heading is allowed only when clearly a symptom.
+DOSE_CC = re.compile(r"(?<![A-Za-z0-9.])\d+(?:\.\d+)? ?[cC][cC](?![A-Za-z0-9/])")
+NOTE_COPY = re.compile(r"(?<![\w.])(?:cc|c\.c\.)(?![\w])|\bcop(?:y|ies|ied)\s+(?:in\s+)?to\b", re.I)
+CHIEF_COMPLAINT = re.compile(r"^CC\s*:\s*(.+)$")
+NOT_A_SYMPTOM = {"dr", "doctor", "gp", "patient", "pt", "clinic", "team", "nurse", "carer", "family", "daughter", "son",
+                 "wife", "husband", "partner", "mother", "father", "mum", "dad", "sister", "brother", "friend", "and",
+                 "mr", "mrs", "ms", "miss", "prof", "consultant", "department", "dept", "ward", "hospital", "service",
+                 "cardiology", "renal", "podiatry", "neurology", "oncology", "respiratory", "physio", "pharmacy",
+                 "social", "worker", "solicitor", "lawyer", "insurer", "employer", "school", "next", "kin", "nok"}
+
+
+_KNOWN = []
+
+
+def _known_words():
+    if not _KNOWN:
+        _KNOWN.append(_lines(WORDLISTS[0]) | _lines(WORDLISTS[1]))
+    return _KNOWN[0]
+
+
+def copy_where(text):
+    """Return 'at L<n>' for the first copy request in the notes, else None. Never returns the line text.
+    Line ids match parse(). When unclear, it counts as a copy request."""
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = HEAD.match(line)
+        if m:
+            line = m.group(2).strip()
+        line = DOSE_CC.sub(" ", line)
+        cc = CHIEF_COMPLAINT.match(line)
+        if cc:
+            words = re.findall(r"[A-Za-z']+|\S", cc.group(1))
+            known = _known_words()
+            symptom = words and all(w.isalpha() and w == w.lower() and w in known and w not in NOT_A_SYMPTOM
+                                    for w in words if w not in (",", "."))
+            if symptom and not NOTE_COPY.search(cc.group(1)):
+                continue
+            return f"at L{n}"
+        if NOTE_COPY.search(line) or COPY_LINE.search(line):
+            return f"at L{n}"
+    return None
+
+
+PATIENT_COPY_TAIL = "A letter to the patient can't be copied to anyone else. Write a separate letter for each other reader."
+
+
+def copy_refusal(where, patient=False):
+    return f"Refused: copy request {where}. {PATIENT_COPY_TAIL if patient else COPY_TAIL}"
 
 
 def is_patient_letter(to, audience):
     return audience == "patient" or (to or "").strip().lower() in ("patient", "the patient")
 
 
-def refuse_copies(text, template=None, brief=None):
+def refuse_copies(text, template=None, brief=None, patient=False):
     """Every letter has one reader. Refuse any copy recipient from the brief, the template or the notes."""
-    if (brief and COPY_WORDS.search(brief)) or (template and (COPY_SLOT.search(template) or COPY_LINE.search(template))) \
-            or COPY_LINE.search(text):
-        raise Refused(COPY_REFUSED)
+    if brief and COPY_WORDS.search(brief):
+        raise Refused(copy_refusal("in the brief", patient))
+    if template and (COPY_SLOT.search(template) or COPY_LINE.search(template)):
+        raise Refused(copy_refusal("in the template", patient))
+    where = copy_where(text)
+    if where:
+        raise Refused(copy_refusal(where, patient))
 
 
 def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None):
@@ -762,7 +818,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         raise ValueError(f"unknown type {letter_type}; choose from {', '.join(TYPES)}")
     audience = audience or ("gp" if letter_type in ("discharge", "gp-update", "specialist-reply") else "specialist")
     pid = check_safe(text)
-    refuse_copies(text, template)
+    refuse_copies(text, template, patient=is_patient_letter(to, audience))
     entries, sources = parse(text)
     resolved = resolution_sources(resolve, text)
     for ab, (rid, full) in resolved.items():
@@ -869,7 +925,7 @@ def main(argv=None):
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
     tpl = open(a.template, encoding="utf-8").read() if a.template else None
     try:
-        refuse_copies(text, tpl, brief_copy)
+        refuse_copies(text, tpl, brief_copy, is_patient_letter(a.to, a.audience))
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2
