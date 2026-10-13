@@ -169,6 +169,34 @@ NEG = re.compile(r"^(?:no|denies|nil)\s+(?P<what>.+)$", re.I)
 RULEDOUT = re.compile(r"^(?P<what>.+?)\s+(?:ruled out|excluded)\b", re.I)
 
 
+# "penicillin - rash", "penicillin (rash)", "penicillin: rash", "penicillin -> rash", "penicillin causes rash"
+REACTION = re.compile(r"^\s*(?P<drug>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014]+>?\s*|\s*:\s*|\s*->\s*|"
+                      r"\s+(?:causes|caused|gives|gave|reaction|reaction:)\s+)(?P<r>.*?)\s*$", re.I)
+# "echo - cardiology to arrange", "echo (cardiology to arrange)", "echo: renal team to chase", "echo, GP to follow up"
+OWNER_SEP = re.compile(r"^\s*(?P<test>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014]+\s*|\s*:\s*|,\s*(?=.*\b(?:to|will)\b))"
+                       r"(?P<who>.*?)\s*$")
+
+
+def split_reaction(part):
+    """Return (drug, reaction or None). A documented reaction is always kept as written."""
+    m = REACTION.match(part)
+    if m:
+        r = (m.group("p") if m.group("p") is not None else m.group("r")).strip()
+        if r:
+            return m.group("drug").strip(), r
+    return part.strip(), None
+
+
+def split_owner(body):
+    """Return (test, owner or None) for a pending line with the owner written after a dash, colon, bracket or comma."""
+    m = OWNER_SEP.match(body)
+    if m:
+        who = (m.group("p") if m.group("p") is not None else m.group("who")).strip()
+        if who:
+            return m.group("test").strip(), who
+    return body.strip(), None
+
+
 def _mkey(s):
     return s.split()[0].lower() if s.split() else s.lower()
 
@@ -267,9 +295,10 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 h["values"].append((d, r.group("val"), r.group("unit"), r.group("note").strip(), lid))
             elif kind == "pending":
                 parts = re.split(r";\s*(?:follow-up|who|f/u)\s*:\s*", body, flags=re.I)
-                k = parts[0].strip().lower()
+                test, who = (parts[0].strip(), parts[1].strip()) if len(parts) > 1 else split_owner(parts[0])
+                k = test.lower()
                 if k not in st["results"]:
-                    st["pending"][k] = (parts[0].strip(), parts[1].strip() if len(parts) > 1 else None, d, ids)
+                    st["pending"][k] = (test, who, d, ids)
             elif kind == "admission":
                 st["admission"].append((body, ids))
                 st["admit"] = st["admit"] or d
@@ -374,9 +403,8 @@ def section_items(name, st, audience="specialist"):
                 out.append("No known drug allergies" + tag(i))
                 continue
             for part in re.split(r"[,;](?![^()]*\))", b):
-                mm = re.match(r"^\s*(?P<drug>[^(]+?)\s*(?:\((?P<r>[^)]*)\))?\s*$", part)
-                drug = mm.group("drug")
-                out.append(f"{drug}: {mm.group('r') if mm.group('r') else 'reaction ' + ND}" + tag(i))
+                drug, react = split_reaction(part)
+                out.append(f"{drug}: {react or 'reaction ' + ND}" + tag(i))
         return out
     if name == "pending":
         return [f"{b}, sent{dt(d) or ' on an undocumented date'}. Who follows up: {who or ND}." + tag(i)

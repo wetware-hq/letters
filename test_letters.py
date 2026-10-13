@@ -1067,3 +1067,45 @@ def test_sensitive_kept_for_relevant_reader():
     md, dropped = build(HIV_NOTES, "gp-update", "Infectious diseases")
     assert "antiretroviral" in md and "(HIV" in md and "viral load" in md.lower() and "undetectable VL" in md
     assert not any("HIV status" in d for d in dropped)
+
+
+# ---------- documented allergy reactions and pending owners are kept ----------
+def _two(lines):
+    text = "Patient: SYNTH-4201\n1937-06-03 Clinic review.\n" + lines + "\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "GP")
+    return md, text
+
+
+@pytest.mark.parametrize("line,drug,react", [
+    ("penicillin - rash", "penicillin", "rash"), ("penicillin (rash)", "penicillin", "rash"),
+    ("amoxicillin \u2013 hives", "amoxicillin", "hives"), ("penicillin -> swelling", "penicillin", "swelling"),
+    ("aspirin causes wheeze", "aspirin", "wheeze"), ("codeine: vomiting", "codeine", "vomiting"),
+])
+def test_allergy_reaction_kept(line, drug, react):
+    md, _ = _two(f"Allergy: {line}")
+    al = section(md, "Allergies")
+    assert f"{drug}: {react}" in al and "reaction not documented" not in al
+
+
+def test_allergy_without_reaction_still_says_not_documented():
+    md, _ = _two("Allergy: penicillin")
+    assert "penicillin: reaction not documented" in section(md, "Allergies")
+
+
+@pytest.mark.parametrize("line,test,owner", [
+    ("echo - cardiology to arrange", "echo", "cardiology to arrange"),
+    ("echo (cardiology to arrange)", "echo", "cardiology to arrange"),
+    ("chest X-ray \u2013 respiratory team to chase", "chest", "respiratory team to chase"),
+    ("ferritin, practice nurse to follow up", "ferritin", "practice nurse to follow up"),
+    ("urine culture: ward team will chase", "urine culture", "ward team will chase"),
+    ("echo; who: cardiology", "echo", "cardiology"),
+])
+def test_pending_owner_kept(line, test, owner):
+    md, _ = _two(f"Pending: {line}")
+    p = section(md, "Results still to come")
+    assert p.lstrip("- ").startswith(test) and owner in p and "Who follows up: not documented" not in p
+
+
+def test_pending_without_owner_still_not_documented():
+    md, _ = _two("Pending: echo")
+    assert "Who follows up: not documented" in section(md, "Results still to come")
