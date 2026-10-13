@@ -2449,7 +2449,7 @@ def main(argv=None):
     ap.add_argument("notes", nargs="?", help="notes text file, or - for stdin")
     ap.add_argument("--type", choices=TYPES)
     ap.add_argument("--to", help="audience or specialty, e.g. Cardiology")
-    ap.add_argument("--brief", help='e.g. "referral to cardiology" (sets --type and --to)')
+    ap.add_argument("--brief", help='e.g. "referral to cardiology", or a file holding the brief (sets --type and --to)')
     ap.add_argument("--recipient")
     ap.add_argument("--audience", choices=AUDIENCES)
     ap.add_argument("--template", help="Markdown file with {{slot}} placeholders")
@@ -2471,7 +2471,10 @@ def main(argv=None):
     include = []
     if a.brief is not None:
         try:
-            kind, reader, include, brief_copy = read_brief(a.brief)
+            btxt = a.brief
+            if "\n" not in btxt and os.path.isfile(btxt):        # a brief file, as the checker takes it
+                btxt = open(btxt, encoding="utf-8").read()
+            kind, reader, include, brief_copy = read_brief(btxt)
         except Refused as e:
             print(str(e), file=sys.stderr)
             return 2

@@ -3347,3 +3347,30 @@ def test_r11h_locked_off_list_frequency_letter_and_checker(tmp_path, med, brief)
     lid = line_of(text, "methotrexate")
     assert not any(lid in l for l in r.stderr.splitlines()), r.stderr
 
+
+
+# ---- round 11 follow-up 10: two-line brief, Include: straight after the kind-and-reader line ----
+PODIATRY_NOTES = ("Patient: SYNTH-9301\nDate: 1938-11-20\nRecipients: Podiatry clinic\n"
+                  "Question: Please assess the left forefoot callus.\nProblems:\n- left forefoot callus\n"
+                  "History: bipolar disorder, HIV on antiretrovirals. Painful callus left forefoot.\nMedicines:\n"
+                  "- lithium 400 mg nocte reason: bipolar disorder\nAllergies:\n- No known allergies\nResults:\n"
+                  "Pending:\nActions:\n- review in 4 weeks\n")
+TWO_LINE_BRIEFS = [(f"referral to podiatry\n{blank}{word} {items}", inc)
+                   for blank in ("", "\n")
+                   for word in ("Include:", "include:", "INCLUDE:")
+                   for items, inc in (("psychiatric history", ["psychiatric history"]),
+                                      ("psychiatric history, HIV status", ["psychiatric history", "HIV status"]),
+                                      ("psychiatric history and HIV status", ["psychiatric history", "HIV status"]))]
+
+
+@pytest.mark.parametrize("brief,inc", TWO_LINE_BRIEFS)
+def test_r11h_two_line_brief_letter_and_checker(tmp_path, brief, inc):
+    assert L.read_brief(brief)[:3] == ("referral", "Podiatry", inc)
+    b = tmp_path / "b.txt"; b.write_text(brief)
+    c = _check(tmp_path / "chk", PODIATRY_NOTES, "--brief", str(b))
+    assert c.returncode == 0 and c.stdout.strip() == L.TEMPLATE_OK, c.stderr
+    for how, arg in (("text", brief), ("file", str(b))):
+        r, out = _run_t(tmp_path / how, PODIATRY_NOTES, "--brief", arg)
+        assert r.returncode == 0, (how, r.stderr)
+        for item in inc:
+            assert f"Included by the brief: " in r.stdout + r.stderr and item in r.stdout + r.stderr
