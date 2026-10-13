@@ -770,3 +770,27 @@ def test_lab_units_and_spelled_units_clean(line):
     md, flags = _one(line)
     assert not any(u in f for f in flags for u in ("U/L", "mU/L", "IU/L", "units"))
     assert not re.search(r"(U/L|units) \[flag", md)
+
+
+# ---------- clashes: signed entries and the tool's own wording are never flagged ----------
+@pytest.mark.parametrize("ab", ["eGFR", "HbA1c", "COPD"])
+def test_signed_entries_not_flagged_despite_capitals(ab):
+    assert not L.needs_flag(ab, "", tuple(L.load_single_meaning()))
+    md, flags = _one(f"Problem: {ab} noted")
+    assert flags == [] and f"({ab})" in md and L.FLAG not in md
+
+
+FIXED_WORDING = ["DRAFT, unsigned", "not documented", "reason not documented", "Reason for change",
+                 "Who follows up", "No results pending at time of writing.", "No medicine changes documented.",
+                 "Current medicines not documented.", "Allergies not documented.", "Follow-up actions not documented.",
+                 "No known drug allergies", "sent on an undocumented date", "Check against the record before sending."]
+
+
+def test_fixed_wording_never_flagged():
+    exact = tuple(L.load_single_meaning())
+    heads = {h for aud in L.HEADINGS.values() for h in aud.values()}
+    for phrase in FIXED_WORDING + sorted(heads) + list(L.OPENERS.values()) + [L.PATIENT_OPENER]:
+        assert L.flagged_tokens(phrase.replace("{d}", ""), exact) == [], phrase
+    md = make_letter("Patient: SYNTH-3601\n1937-05-01 Clinic review.\nPending: ferritin", "gp-update", "General practice")
+    for phrase in ("DRAFT, unsigned", "not documented"):
+        assert phrase in md and not re.search(re.escape(phrase) + r"\.? \[flag", md)

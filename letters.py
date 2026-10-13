@@ -392,6 +392,7 @@ ROMAN_CTX = {"stage", "grade", "class", "type", "types", "phase", "nyha"}
 # u/U/iu/IU as a dose unit is a known misreading risk (10u read as 100): always flagged, attached or detached.
 # Lab units such as U/L, mU/L and IU/L stay clean; "10 units" is never flagged.
 DOSE_U = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)( ?)([uU]|[iI][uU])(?![A-Za-z0-9/])")
+TOOL_WORDS = {"DRAFT"}        # the tool's own fixed wording ("DRAFT, unsigned") is never flagged
 SINGLE_MEANING_FILE = HERE / "single_meaning.toml"
 SHORTHAND_FILE = HERE / "shorthand.txt"
 WORDLISTS = [HERE / "wordlists" / "english.txt", HERE / "wordlists" / "medical.txt"]
@@ -421,7 +422,7 @@ def tokens(s):
 
 def needs_flag(tok, prev="", exact=()):
     """True if tok must be flagged. exact: abbreviations that may expand as written (reviewed list, resolutions)."""
-    if tok in exact:
+    if tok in exact or tok in TOOL_WORDS:
         return False
     low = tok.lower()
     if "/" in tok and tok not in ("c/o", "o/e"):
