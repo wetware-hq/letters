@@ -710,3 +710,13 @@ def test_readme_quickstart_final_command_exits_zero():
     r = subprocess.run(CLI + args, capture_output=True, text=True, cwd=HERE)
     assert r.returncode == 0, r.stderr
     assert "shortness of breath (SOB)" in r.stdout and L.FLAG not in r.stdout
+
+
+# ---------- word list integrity ----------
+def test_wordlist_checksums_unchanged():
+    import hashlib
+    sums = (HERE / "wordlists" / "SHA256SUMS").read_text().split("\n")
+    rows = [l.split() for l in sums if l.strip()]
+    assert {n for _, n in rows} == {"english.txt", "medical.txt"}
+    for digest, name in rows:
+        assert hashlib.sha256((HERE / "wordlists" / name).read_bytes()).hexdigest() == digest, name
