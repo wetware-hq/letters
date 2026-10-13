@@ -798,7 +798,7 @@ WORDLISTS = [HERE / "wordlists" / "english.txt", HERE / "wordlists" / "medical.t
 PLAIN = [(r"\boral\b", "tablets"), (r"\bhypertension\b", "high blood pressure"), (r"\bexertional\b", "when active"),
          (r"(?<!twice )(?<!three times )(?<!four times )(?<!once )\bdaily\b", "once a day"),
          # signed frequency plain words (13 Oct 2026); od has none
-         (r"\bnocte\b", "at night"), (r"\bmane\b", "in the morning"), (r"\bprn\b", "when needed"),
+         (r"(?i)\bnocte\b", "at night"), (r"(?i)\bmane\b", "in the morning"), (r"(?i)\bprn\b", "when needed"),
          # signed: a maximum over 24 hours; number and unit kept exactly; any other period stays as written
          (r"\bmax(?:imum)?\.?\s+(?:dose\s+)?(?:of\s+)?(\d+(?:\.\d+)?\s?(?:mg|mcg|g|ml|mL|tablets?|doses?))"
           r"\s*(?:in|per|/|every)\s*24\s?(?:h|hrs?|hours?)\b", r"no more than \1 in 24 hours")]
@@ -2234,6 +2234,8 @@ def parse_brief(core):
     if not kind:
         return None, None
     r = m.group("reader")
+    if re.search(r"[.:;,]", r) or len(r.split()) > 4:      # brief text never goes into 'To:'
+        return None, None
     return kind, r[:1].upper() + r[1:]
 
 
@@ -2276,7 +2278,7 @@ def main(argv=None):
     brief_copy = None
     include = []
     if a.brief is not None:
-        blines = [l.strip() for l in a.brief.splitlines() if l.strip()]
+        blines = [l.strip() for l in re.split(r"\n|[.;]\s*(?=include\s*:)", a.brief, flags=re.I) if l.strip()]
         include = [m.group(1).strip() for m in (re.match(r"^include\s*:\s*(.+?)\s*\.?$", l, re.I) for l in blines) if m]
         rest = [l for l in blines if not re.match(r"^include\s*:", l, re.I)]
         if len(rest) > 1 or any(i.lower() not in {c.lower() for c in SENSITIVE} for i in include):

@@ -2806,3 +2806,28 @@ def test_r10_after_and_following_kept_as_written_never_a_reason(word):
 def test_r10_text_after_dash_is_a_reason():
     md, _ = build("SYNTH-9303\n1937-06-01 review.\nCeased: zorbaline 5 mg daily - rash\nQuestion: ok?\n", "gp-update", "GP")
     assert "Reason for change: rash." in section(md, "Medicine changes")
+
+
+# ---------- round 10 item 7: patient plain words, include record, 'To:' ----------
+@pytest.mark.parametrize("freq,plain", [("prn", "when needed"), ("mane", "in the morning"), ("PRN", "when needed"),
+                                        ("Mane", "in the morning"), ("nocte", "at night")])
+def test_r10_patient_letters_use_signed_plain_words_never_a_flag(freq, plain):
+    t = tpl(question="Is it working?", meds=[f"zorbaline 5 mg {freq} reason: pain"])
+    md, _ = L.build_from_template(t, "gp-update", "Patient", audience="patient")
+    meds = section(md, "Your medicines now")
+    assert plain in meds and freq not in meds and L.FLAG not in meds
+
+
+@pytest.mark.parametrize("brief", ["update to GP\ninclude: psychiatric history", "update to GP. Include: psychiatric history",
+                                   "update to GP; include: psychiatric history"])
+def test_r10_include_record_always_printed_and_to_is_the_reader(tmp_path, brief):
+    r, out = _run_t(tmp_path, PSY_T, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    assert "Included by the brief: psychiatric history." in r.stderr.splitlines()
+    md = (out / "letter.md").read_text()
+    assert "**To:** GP  " in md and "nclude" not in md
+
+
+def test_r10_brief_text_never_goes_into_to(tmp_path):
+    r, out = _run_t(tmp_path, PSY_T, "--brief", "update to GP. Please be kind")
+    assert r.returncode == 2 and r.stderr.strip() == BRIEF_MSG and not out.exists()
