@@ -2860,3 +2860,37 @@ def test_r10_final_count_equals_flags_printed(tmp_path, brief):
     shown = [l for l in lines if l.startswith("Flag: ")]
     m = re.search(r"--final refused: (\d+) flag", r.stderr)
     assert m and int(m.group(1)) == len(shown) > 0
+
+
+# ---------- round 10: course length kept exactly (when the notes give one) ----------
+COURSE_T = tpl(question="Is it clearing?", meds=["amoxicillin 500 mg tds for 5 days reason: chest infection",
+                                                  "zorbaline 5 mg daily reason: gout"])
+
+
+@pytest.mark.parametrize("aud", [None, "patient"])
+def test_r10_course_length_kept_exactly(aud):
+    md, _ = L.build_from_template(COURSE_T, "gp-update", "Patient" if aud else "GP", audience=aud)
+    meds = L.FLAG_ANY.sub("", section(md, "Your medicines now" if aud else "Current medicines"))
+    assert "for 5 days" in meds and "then stop" not in md
+
+
+@pytest.mark.parametrize("change", ["", "for 7 days"])
+def test_r10_dropped_or_changed_course_length_refused(change):
+    md, _ = L.build_from_template(COURSE_T, "gp-update", "GP")
+    bad = md.replace(" for 5 days", f" {change}" if change else "", 1)
+    lid = line_of(COURSE_T, "amoxicillin")
+    with pytest.raises(Refused) as e:
+        L.verify_letter(bad, L.from_template(COURSE_T), "gp")
+    assert str(e.value) == (f"Refused: the medicine on line {lid} has a course length in the notes that this letter "
+                            "leaves out. Nothing was written.")
+
+
+def test_r10_no_course_length_in_notes_none_required():
+    md, _ = L.build_from_template(COURSE_T, "gp-update", "GP")
+    assert L.verify_letter(md, L.from_template(COURSE_T), "gp")
+
+
+def test_r10_dropped_course_length_build_refuses(monkeypatch):
+    monkeypatch.setattr(L, "render", (lambda f: lambda *a, **k: f(*a, **k).replace(" for 5 days", ""))(L.render))
+    with pytest.raises(Refused, match="course length"):
+        L.build_from_template(COURSE_T, "gp-update", "GP")

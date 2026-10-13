@@ -1684,6 +1684,9 @@ FINAL_REFUSED = ("--final refused: {n} flag(s) still open. Confirm each meaning 
                  '--resolve "AB=meaning" (or edit the notes), then run --final again.')
 
 
+COURSE_RX = re.compile(r"\bfor\s+\d+\s+(?:more\s+)?(?:days?|weeks?|months?)\b", re.I)
+COURSE_MISSING = ("Refused: the medicine on line {lid} has a course length in the notes that this letter leaves out. "
+                  "Nothing was written.")
 MED_MISSING = "Refused: a medicine on line {lid} of the notes is missing from this letter. Nothing was written."
 ALLERGY_MISSING = "Refused: an allergy on line {lid} of the notes is missing from this letter. Nothing was written."
 MAX_MISSING = ("Refused: the medicine on line {lid} has a maximum dose in the notes that this letter leaves out. "
@@ -2013,6 +2016,9 @@ def verify_letter(md, text, audience="gp", include=(), collect=None):
                 superseded = later.get(_v_key(part), [lid])[-1] != lid      # same drug written again later
                 in_meds = " ".join(t for s, t in cites if s in MED_SECTIONS | (CHANGE_SECTIONS if superseded else set()))
                 ok = _v_med_ok(part, in_meds)
+                for dm in COURSE_RX.finditer(part):          # a course length is kept exactly as written
+                    if _norm(dm.group(0)) not in in_meds:
+                        fail(COURSE_MISSING.format(lid=lid))
                 if ok == "max":
                     fail(MAX_MISSING.format(lid=lid))
                 elif not ok:
