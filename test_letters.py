@@ -3138,3 +3138,22 @@ def test_r11f_parsers_take_any_year_tripwire_is_the_only_year():
     assert src.count("1937") == 2 and 'SYNTH_YEAR = "1937"' in src       # comment + the one policy constant
     with pytest.raises(L.Refused, match="date outside 1937"):
         L.check_safe("SYNTH-1 seen 1936-05-01")                          # synthetic-data tripwire unchanged
+
+
+@pytest.mark.parametrize("brief,inc", [("referral to podiatry", []),
+                                       ("referral to podiatry\nInclude: psychiatric history", ["psychiatric history"]),
+                                       ("referral to podiatry\nInclude: psychiatric history\n", ["psychiatric history"])])
+def test_r11f_brief_one_line_or_two_with_include(tmp_path, brief, inc):
+    assert L.read_brief(brief)[:3] == ("referral", "Podiatry", inc)
+    notes = (pathlib.Path(L.__file__).parent / "fixtures/template/podiatry_referral.txt").read_text()
+    r, out = _run_t(tmp_path / "cli", notes, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    b = tmp_path / "b.txt"; b.write_text(brief)
+    c = _check(tmp_path / "chk", notes, "--brief", str(b))
+    assert c.returncode == 0, c.stderr
+
+
+def test_r11f_brief_include_on_first_line_or_three_lines_refused():
+    for brief in ("Include: psychiatric history\nreferral to podiatry\nupdate to GP", "referral to podiatry\nupdate to GP"):
+        with pytest.raises(L.Refused):
+            L.read_brief(brief)
