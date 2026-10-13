@@ -1891,6 +1891,8 @@ def _letter_lines(md):
 
 
 MED_SECTIONS = {h["meds"] for h in HEADINGS.values()}
+ACTION_SECTIONS = {h["followup"] for h in HEADINGS.values()}
+ACTION_MISSING = "Refused: an action on line {lid} of the notes is missing from this letter. Nothing was written."
 CHANGE_SECTIONS = {h["med_changes"] for h in HEADINGS.values()}
 ALLERGY_SECTIONS = {h["allergies"] for h in HEADINGS.values()}
 
@@ -1955,6 +1957,14 @@ def verify_letter(md, text, audience="gp", include=(), collect=None):
         if kind in ("med", "stop"):
             for part in _v_med_parts(body):
                 later.setdefault(_v_key(part), []).append(lid)
+    raw_lines = text.splitlines()
+    for n, l in enumerate(raw_lines, 1):                 # an action with its owner must sit in Actions
+        if re.match(r"^\s*Plan:\s*.+\|\|", l):
+            secs = [s for s, ids, _ in lines if f"L{n}" in ids]
+            if not secs:
+                fail(ACTION_MISSING.format(lid=f"L{n}"))
+            elif any(s not in ACTION_SECTIONS for s in secs):
+                fail(WRONG_SECTION.format(what="an action", lid=f"L{n}"))
     for lid, kind, body in notes:
         cites = [(s, t) for s, ids, t in lines if lid in ids]
         anywhere = " ".join(t for _, t in cites)

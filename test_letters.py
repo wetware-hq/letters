@@ -2703,3 +2703,31 @@ def test_r10_reverse_check_names_from_brief_allowed_but_not_invented():
     L.reverse_check(md, L.from_template(REV_T), "GP")
     with pytest.raises(Refused, match="line L\\d+ of this letter"):
         L.reverse_check(md.replace("Dear colleague,", "Dear Dr Quell,"), L.from_template(REV_T), "GP")
+
+
+# ---------- round 10 item 3: placement by content (template field) and the per-section check ----------
+PLACE_T = tpl(question="Is the plan right?", problems=["knee pain"], history="Walks with a stick.",
+              meds=["zorbaline 5 mg daily reason: gout", "emollient cream bd reason: dry skin",
+                    "trimeloxin 10 mg nocte; withheld 1937-06-01 - dizziness"],
+              allergies=["sulfa drugs: rash"], actions=["review the knee in 2 weeks, physio"])
+
+
+def test_r10_placement_follows_the_field():
+    md = build_from_template_md(PLACE_T)
+    assert "emollient cream" in section(md, "Current medicines")
+    assert "trimeloxin" in section(md, "Medicine changes") and "trimeloxin" not in section(md, "Background")
+    assert "physio" in section(md, "Actions") and "sulfa drugs: rash" in section(md, "Allergies")
+
+
+@pytest.mark.parametrize("frag,what", [("emollient cream", "a medicine"), ("Who: physio", "an action"),
+                                       ("sulfa drugs", "an allergy"), ("trimeloxin", None)])
+def test_r10_per_section_check_catches_each_misplacement(frag, what):
+    md = build_from_template_md(PLACE_T)
+    lines = md.split("\n")
+    i = next(k for k, l in enumerate(lines) if frag in l)
+    moved = lines[i]
+    del lines[i]
+    j = lines.index("## Background") + 2
+    lines.insert(j, moved if moved.startswith("- ") else "- " + moved.split(". ", 1)[1])
+    with pytest.raises(Refused, match="wrong section|missing from this letter"):
+        L.verify_letter("\n".join(lines), L.from_template(PLACE_T), "gp")
