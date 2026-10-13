@@ -58,3 +58,5 @@ Role: [role]
 Signature: [unsigned]
 
 Draft: check against the record before sending.
+
+This letter includes private details about your health. It's yours to share or keep private.

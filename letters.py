@@ -722,6 +722,8 @@ def render(st, pid, letter_type, to, recipient=None, audience="specialist", temp
         else:
             md = md.rstrip("\n") + "\n\n" + extra + "\n\n" + footer
     md = "\n".join(wording(md.splitlines(), audience, resolved, flags=flags))
+    if audience == "patient":
+        md = md.rstrip("\n") + "\n\n" + PATIENT_PRIVACY      # fixed wording; after the footer, never flagged
     return re.sub(r"\n{3,}", "\n\n", md).rstrip("\n") + "\n"
 
 
@@ -730,6 +732,25 @@ def llm_guard():
     if os.environ.get("LETTERS_LLM_PROVIDER"):
         raise SystemExit("LETTERS_LLM_PROVIDER is set, but letters makes no model calls in this version. "
                          "Unset it to run.")
+
+
+COPY_REFUSED = ("Refused: a letter to the patient can't be copied to anyone else. "
+                "Write a separate letter for each other reader.")
+PATIENT_PRIVACY = "This letter includes private details about your health. It's yours to share or keep private."
+COPY_WORDS = re.compile(r"(?<![\w])(?:cc|c\.c\.|copy|copies|copied)(?![\w])", re.I)
+COPY_LINE = re.compile(r"^\s*(?:\d{4}-\d{2}-\d{2}\s+)?(?:cc|c\.c\.|copy|copies|copied)(?:\s+to)?\s*:", re.I | re.M)
+COPY_SLOT = re.compile(r"\{\{\s*(?:cc|copy|copies|copy_to)\s*\}\}", re.I)
+
+
+def is_patient_letter(to, audience):
+    return audience == "patient" or (to or "").strip().lower() in ("patient", "the patient")
+
+
+def refuse_copies(text, template=None, brief=None):
+    """A patient letter has one reader. Refuse any copy recipient from the brief, the template or the notes."""
+    if (brief and COPY_WORDS.search(brief)) or (template and (COPY_SLOT.search(template) or COPY_LINE.search(template))) \
+            or COPY_LINE.search(text):
+        raise Refused(COPY_REFUSED)
 
 
 def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None):
@@ -741,6 +762,8 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         raise ValueError(f"unknown type {letter_type}; choose from {', '.join(TYPES)}")
     audience = audience or ("gp" if letter_type in ("discharge", "gp-update", "specialist-reply") else "specialist")
     pid = check_safe(text)
+    if is_patient_letter(to, audience):
+        refuse_copies(text, template)
     entries, sources = parse(text)
     resolved = resolution_sources(resolve, text)
     for ab, (rid, full) in resolved.items():
@@ -830,9 +853,13 @@ def main(argv=None):
     if a.heldout:
         heldout(a.heldout)
         return 0
+    brief_copy = None
     if a.brief:
+        cut = re.search(r"[,;]?\s*(?:\b(?:cc|copy|copies|copied)\b|c\.c\.).*$", a.brief, re.I)
+        brief_copy = cut.group(0) if cut else None
+        core = a.brief[:cut.start()] if cut else a.brief
         m = re.match(r"^\s*(referral|discharge|gp[- ]update|update|specialist[- ]reply|reply)\s+(?:to|for)\s+(.+?)\s*$",
-                     a.brief, re.I)
+                     core, re.I)
         if not m:
             ap.error('--brief must look like "referral to cardiology"')
         t = m.group(1).lower().replace(" ", "-")
@@ -842,6 +869,12 @@ def main(argv=None):
         ap.error("notes, --type and --to are required")
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
     tpl = open(a.template, encoding="utf-8").read() if a.template else None
+    if is_patient_letter(a.to, a.audience):
+        try:
+            refuse_copies(text, tpl, brief_copy)
+        except Refused as e:
+            print(str(e), file=sys.stderr)
+            return 2
     try:
         flags = []
         md, dropped = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
