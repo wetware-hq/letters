@@ -156,7 +156,8 @@ TAG = re.compile(r"^(?P<tag>[A-Za-z /-]+?)\s*:\s*(?P<body>.+)$")
 TAGS = {
     "problem": "problem", "dx": "problem", "diagnosis": "problem", "pmhx": "history", "history": "history",
     "resolved": "resolved", "ruled out": "ruledout", "excluded": "ruledout",
-    "med": "med", "meds": "med", "start": "med", "restart": "med", "change": "med",
+    "med": "med", "meds": "med", "medication": "med", "medications": "med", "medicines": "med",
+    "current meds": "med", "current medications": "med", "drugs": "med", "start": "med", "restart": "med", "change": "med",
     "stop": "stop", "ceased": "stop", "allergy": "allergy", "allergies": "allergy",
     "result": "result", "lab": "result", "pending": "pending", "plan": "followup",
     "follow-up": "followup", "followup": "followup", "f/u": "followup",
@@ -261,17 +262,49 @@ def med_reason(drug):
     return drug, None
 
 
-def clear_pending(st, body):
-    """A later line that starts with a pending test's name gives its result: that test is no longer pending."""
+RESULT_WORDS = re.compile(r"\b(?:done|normal|abnormal|results?|showed|shows|reported|back|unremarkable|completed|"
+                          r"negative|positive|confirmed|clear|came back)\b", re.I)
+
+
+def clear_pending(st, body, tagged_result=False):
+    """A later line naming a pending test and giving its result (done, normal, result...) clears it."""
     low = body.lower()
+    if untagged_pending(body):
+        return
     for k in list(st["pending"]):
-        if k and re.match(rf"{re.escape(k)}\b", low):
+        if k and re.search(rf"(?<![a-z0-9]){re.escape(k)}(?![a-z0-9])", low) and (tagged_result or RESULT_WORDS.search(low)):
             st["pending"].pop(k)
+
+
+MED_LIST_TAGS = {"meds", "medications", "medicines", "current meds", "current medications", "drugs"}
+
+
+def split_med_lists(lines):
+    """'Meds: a 5 mg daily, b 10 mg (for gout); c' -> one medicine per entry, same line id."""
+    out = []
+    for lid, line in lines:
+        m = TAG.match(line)
+        if m and m.group("tag").strip().lower() in MED_LIST_TAGS:
+            parts = [p.strip() for p in re.split(r"[,;](?![^()]*\))", m.group("body")) if p.strip()]
+            if len(parts) > 1:
+                out += [(lid, f"Med: {p}") for p in parts]
+                continue
+        out.append((lid, line))
+    return out
+
+
+QUESTION_UNTAGGED = re.compile(r"\?\s*$|\bplease advise\b|\bwould value your (?:opinion|advice|input)\b|"
+                               r"\bfor consideration of\b|\byour (?:opinion|advice) (?:on|re|regarding)\b|"
+                               r"\bgrateful if you could\b|\badvice re\b|^(?:please\s+)?(?:assess|evaluate)\b(?!ed)|"
+                               r"\bplease (?:assess|review|see|evaluate)\b|\breview for\b", re.I)
 
 
 def tag_kind(tag):
     """Map a note tag to its kind."""
-    return TAGS.get(re.sub(r"\s+", " ", tag.strip().lower()))
+    t = re.sub(r"\s+", " ", tag.strip().lower())
+    if re.match(r"^(?:question|q)(?: for .+)?$", t) or t in ("request", "referral question", "reason for referral"):
+        return "question"
+    return TAGS.get(t)
 
 
 def _mkey(s):
@@ -295,13 +328,16 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
         if d:
             st["first"] = st["first"] or d
             st["last"] = d
-        for lid, line in e["lines"]:
+        for lid, line in split_med_lists(e["lines"]):
             ids = [lid]
             m = TAG.match(line)
             kind = tag_kind(m.group("tag")) if m else None
             body = m.group("body").strip() if kind else line
             body = clean_text(body, ids, to, dropped, med=kind in ("med", "stop"), keep=keep_indications)
             if not body:
+                continue
+            if not kind and QUESTION_UNTAGGED.search(body):
+                st["question"].append((body, ids))
                 continue
             if not kind:
                 pb = untagged_pending(body)
@@ -356,7 +392,9 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 if change:
                     st["med_changes"].append({"what": change, "reason": reason, "date": d,
                                               "ids": (old["ids"] if old else []) + ids})
-                st["meds"][k] = {"drug": drug, "ind": ind, "date": d, "ids": (old["ids"] if old else []) + ids}
+                cut = any(lid in d_.split(":")[0].split(",") and "indication" in d_ for d_ in dropped)
+                st["meds"][k] = {"drug": drug, "ind": ind, "date": d, "ids": (old["ids"] if old else []) + ids,
+                                 "cut": cut and not ind}
             elif kind == "stop":
                 mm = MEDP.match(body)
                 drug, reason = mm.group("drug").strip(), mm.group("v") if (mm.group("k") or "").lower().startswith("reason") else None
@@ -368,7 +406,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
             elif kind == "allergy":
                 st["allergies"].append((body, ids))
             elif kind == "result":
-                clear_pending(st, body)
+                clear_pending(st, body, tagged_result=True)
                 r = RES.match(body)
                 if not r or not r.group("unit") or re.match(r"^[\d.]", r.group("unit")):
                     dropped.append(f"{lid}: result without a unit dropped")
@@ -472,9 +510,10 @@ def section_items(name, st, audience="specialist"):
             rows.append((r["name"], vals, [x[4] for x in r["values"]]))
         return rows
     if name == "meds" and audience == "patient":
-        return [f"{m['drug']}, {_patient_reason(m['ind'])}" + tag(m["ids"]) for m in st["meds"].values()]
+        return [f"{m['drug']}, {_patient_reason(m['ind'])}" + tag(m["ids"]) for m in st["meds"].values()]  # patient: nothing cut
     if name == "meds":
-        return [m["drug"] + (f" (for {m['ind']})" if m["ind"] else "") + tag(m["ids"]) for m in st["meds"].values()]
+        return [m["drug"] + (f" (for {m['ind']})" if m["ind"] else ", reason not included" if m.get("cut") else f", {REASON_ND}")
+                + tag(m["ids"]) for m in st["meds"].values()]
     if name == "med_changes":
         out = []
         for c in st["med_changes"]:
@@ -698,7 +737,7 @@ DIRECTION = re.compile(r"\b(improv\w*|rising|rose|risen|falling|fell|fallen|wors
                        r"normalis\w*|settl\w*)\b", re.I)
 _FIXED = [*EMPTY.values(), ND, "reaction", "Reason for change", "Who follows up", "Who When Action", "sent on an "
           "undocumented date", "No known drug allergies", "resolved ruled out", "started changed stopped restarted from now",
-          "possible", " ".join(MONTHS), "Test Results"]
+          "possible", " ".join(MONTHS), "Test Results", "reason not included"]
 VOCAB = set()
 for _s in _FIXED:   # only fixed scaffolding; expansions and rewrites are earned per cited line
     VOCAB.update(w.lower() for w in re.findall(r"[A-Za-z][A-Za-z-]+", _s))
@@ -987,12 +1026,12 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     if not patient:
         md = flag_linked_medicines(md, text, dropped, flags)
     check(md, sources, letter_type)
-    if not patient:
-        refuse_linked_terms(md, text, dropped)
     refuse_missing_required(md, text, {i for v in st["pending"].values() for i in v[3]})
     if st["pending"] and EMPTY["pending"] in md:
         lid = next(iter(st["pending"].values()))[3][-1]
         raise Refused(PENDING_NONE_REFUSED.format(lid=lid))
+    if not patient:
+        md = apply_cut_rule(md, text, dropped, flags, TITLES[letter_type])
     return md, dropped
 
 
@@ -1095,12 +1134,6 @@ def flag_linked_medicines(md, text, dropped, flags):
     src = _source_lines(text)
     lines = md.split("\n")
     for n, line in list(_body_lines(md)):
-        body = FLAG_ANY.sub("", split_ids(line)[0])
-        whit = [i for i in _line_ids(line) if i in src and any(_term_re(t).search(src[i][1]) for t in soft)]
-        if whit and any(_term_re(t).search(body) for t in soft):
-            line = lines[n] = _add_flag(line, WORD_FLAG)
-            if flags is not None:
-                flags.append(WORD_NOTICE.format(lid=whit[0]))
         hit = [i for i in _line_ids(line) if i in src and src[i][0] in MED_TAGS
                and any(_term_re(m).search(src[i][1]) for m in meds)]
         if hit and any(_term_re(m).search(line) for m in meds) and not _shows_reason(line, meds):
@@ -1110,25 +1143,84 @@ def flag_linked_medicines(md, text, dropped, flags):
     return "\n".join(lines)
 
 
-def refuse_linked_terms(md, text, dropped):
-    """Refuse when a cut item's term, or one of its medicine or brand names outside that medicine's own
-    medication line, still appears in the letter. The refusal names the line only."""
+LEFT_OUT_FLAG = "[flag: sentence left out]"
+LEFT_OUT_NOTICE = ("Flag: a sentence on line {lid} was left out to keep something private. "
+                   "Check it doesn't hold a safety fact the reader needs.")
+DRUG_FLAG_RX = r"(?: \[flag: [^\]]+\])?"
+
+
+def _brand_map(items):
+    return {b: g for v in items.values() for b, g in v.get("brands", {}).items()}
+
+
+def apply_cut_rule(md, text, dropped, flags, title=None):
+    """For a cut item (never in patient letters):
+    - medication line: a listed brand becomes its generic; a reason naming the cut item becomes 'reason not included';
+      other linked words on that line are left out; the medicine is flagged.
+    - any other line: every sentence holding a linked word (term, flag-only term, medicine or brand) is left out, flagged.
+    Refused only for a listed brand with no generic in the map."""
     items = _cut_items(dropped)
     if not items:
-        return
-    terms = [t for v in items.values() for t in v.get("terms", [])]
-    meds = _meds_of(items)
+        return md
+    brands = _brand_map(items)
+    generics = [m for v in items.values() for m in v.get("medicines", [])]
+    hard = [t for v in items.values() for t in v.get("terms", [])]
+    words = hard + [t for v in items.values() for t in v.get("flag_terms", [])]
+    linked = sorted(set(words + generics + list(brands)), key=len, reverse=True)
+    rx = lambda ws: re.compile("|".join(rf"(?<![A-Za-z0-9]){re.escape(w)}(?![A-Za-z0-9])" for w in ws), re.I)
+    any_linked = rx(linked)
+    any_word = rx(sorted(set(hard), key=len, reverse=True)) if hard else None      # left out even on a medication line
+    gen_rx = rx(sorted(set(generics + list(brands.values())), key=len, reverse=True)) if generics or brands else None
     src = _source_lines(text)
-    for _, line in _body_lines(md):
+    lines, left_out = md.split("\n"), []
+    def note(ids, pat):
+        lid = next((i for i in ids if i in src and pat.search(src[i][1])), ids[0])
+        left_out.append(lid)
+    for n, line in list(_body_lines(md)):
         ids = _line_ids(line)
-        body = FLAG_ANY.sub("", split_ids(line)[0])
-        own = [m for m in meds if any(i in src and src[i][0] in MED_TAGS and _term_re(m).search(src[i][1]) for i in ids)]
-        for m in sorted(own, key=len, reverse=True):     # a medicine is allowed on its own medication line
-            body = _term_re(m).sub(" ", body)
-        for t in terms + meds:
-            if _term_re(t).search(body):
-                lid = next((i for i in ids if i in src and _term_re(t).search(src[i][1])), ids[0])
-                raise Refused(LINKED_REFUSED.format(lid=lid))
+        text_part, id_part = split_ids(line)
+        lead = re.match(r"^(- |\d+\. |\| )?", text_part).group(0)
+        body = text_part[len(lead):]
+        if any(i in src and src[i][0] in MED_TAGS for i in ids):
+            if not any_linked.search(FLAG_ANY.sub("", body)):
+                continue
+            for b, g in brands.items():
+                if re.search(rf"(?<![A-Za-z0-9]){re.escape(b)}(?![A-Za-z0-9])", body, re.I):
+                    if not g:
+                        lid = next((i for i in ids if i in src and re.search(re.escape(b), src[i][1], re.I)), ids[0])
+                        raise Refused(LINKED_REFUSED.format(lid=lid))
+                    body = re.sub(rf"(?<![A-Za-z0-9]){re.escape(b)}(?![A-Za-z0-9]){DRUG_FLAG_RX}", g, body, flags=re.I)
+            def reason(m):
+                return ", reason not included" if any_linked.search(m.group(0)) else m.group(0)
+            body = re.sub(r"\s*\(for [^()]*\)", reason, body)
+            if any_word:                                 # other linked words on the medication line: left out
+                parts = re.split(r"(,\s*)", body)
+                bare = lambda p: gen_rx.sub(" ", FLAG_ANY.sub("", p)) if gen_rx else FLAG_ANY.sub("", p)
+                kept = [p for p in parts[::2] if not (any_word.search(bare(p)) and p.strip() != "reason not included")]
+                if len(kept) < len(parts[::2]):
+                    note(ids, any_word)
+                    body = ", ".join(p.strip() for p in kept)
+            if MED_FLAG not in body:
+                body = f"{body} {MED_FLAG}"
+                if flags is not None:
+                    flags.append(MED_NOTICE.format(lid=next((i for i in ids if i in src and src[i][0] in MED_TAGS), ids[0])))
+            lines[n] = lead + body + id_part
+            continue
+        sents = re.split(r"(?<=[.!?])\s+", body)
+        keep = [x for x in sents if not any_linked.search(FLAG_ANY.sub("", x))]
+        if len(keep) < len(sents):
+            note(ids, any_linked)
+            lines[n] = (lead + " ".join(keep) + id_part) if keep else None
+    if left_out:
+        for lid in dict.fromkeys(left_out):
+            if flags is not None:
+                flags.append(LEFT_OUT_NOTICE.format(lid=lid))
+        head = f"**Letter:** {title}" if title else None
+        out = [l for l in lines if l is not None]
+        i = next((k for k, l in enumerate(out) if head and l.startswith(head)), 0)
+        out[i] = f"{out[i]} {LEFT_OUT_FLAG}"
+        return "\n".join(out)
+    return "\n".join(lines)
 
 
 def refuse_missing_required(md, text, pending_ids=None):

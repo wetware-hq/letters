@@ -81,7 +81,7 @@ def test_planted_number_refused():
 def test_planted_drug_refused():
     _, md, src = _good()
     with pytest.raises(Refused, match="word not in cited"):
-        check(md.replace("aspirin 100 mg daily [L6]", "aspirin 100 mg daily, clopidogrel [L6]"), src, "referral")
+        check(md.replace("aspirin 100 mg daily, reason not documented [L6]", "aspirin 100 mg daily, clopidogrel [L6]"), src, "referral")
 
 
 def test_planted_unsourced_sentence_refused():
@@ -715,7 +715,7 @@ def test_shorthand_and_wordlist_files_documented():
 def test_resolve_as_written_closes_flag_without_expansion():
     text = "Patient: SYNTH-3301\n1937-05-01 Clinic review.\nMed: ramipril 5 mg daily\nFollow-up: review in 2 weeks"
     md, _ = build(text, "gp-update", "General practice", resolve=["ramipril=ramipril"])
-    assert "- ramipril 5 mg daily [L3, R1]" in md and L.FLAG not in md
+    assert "- ramipril 5 mg daily, reason not documented [L3, R1]" in md and L.FLAG not in md
 
 
 # ---------- patient letters: plain words + (ABBR) first, plain words alone after ----------
@@ -1081,31 +1081,6 @@ def test_sensitive_cut_everywhere_medicine_stays_and_flagged(letter_type, to):
         L.finalise(md)
 
 
-@pytest.mark.parametrize("extra,lid", [("Problem: monitoring CD4 count", "L12"), ("Plan: RVD clinic", "L12")])
-def test_linked_term_left_after_cut_refused_names_line_only(tmp_path, extra, lid):
-    n = tmp_path / "n.txt"; n.write_text(HIV_NOTES + extra + "\n")
-    with pytest.raises(Refused) as e:
-        build(n.read_text(), "gp-update", "Podiatry")
-    msg = f"Refused: line {lid} still mentions something this letter was meant to cut. Nothing was written."
-    assert str(e.value) == msg
-    out = tmp_path / "o"
-    r = subprocess.run(CLI + [str(n), "--type", "gp-update", "--to", "Podiatry", "--out", str(out)],
-                       capture_output=True, text=True)
-    assert r.returncode == 2 and r.stderr.strip() == msg and r.stdout == ""
-    assert not out.exists() or list(out.iterdir()) == []
-    for t in CUT_TERMS + ("antiretroviral", "abacavir", "dolutegravir"):
-        assert not re.search(rf"\b{re.escape(t)}\b", r.stdout + r.stderr, re.I), t
-
-
-def test_lithium_monitoring_term_after_cut_refused():
-    text = F("podiatry_referral.txt") + "Plan: check lithium level in 3 months\n"
-    with pytest.raises(Refused) as e:
-        build(text, "referral", "Podiatry")
-    assert re.fullmatch(r"Refused: line L\d+ still mentions something this letter was meant to cut\. Nothing was written\.",
-                        str(e.value))
-    assert "lithium" not in str(e.value) and "bipolar" not in str(e.value)
-
-
 def test_lithium_medicine_flagged_when_reason_cut():
     flags = []
     md, _ = build(F("podiatry_referral.txt"), "referral", "Podiatry", flags=flags)
@@ -1238,10 +1213,12 @@ def test_copy_refusal_in_any_brief_kind(tmp_path):
 
 def test_patient_letter_skips_linked_check_and_medicine_flag_but_keeps_abbreviation_flags():
     text = HIV_NOTES + "Plan: repeat CD4 and VL in 3 months\n"
-    with pytest.raises(Refused, match="still mentions something"):
-        build(text, "gp-update", "Podiatry")
+    flags = []
+    md_gp, _ = build(text, "gp-update", "Podiatry", flags=flags)
+    assert "CD4" not in md_gp and any(f.startswith("Flag: a sentence on line") for f in flags)
     flags = []
     md, _ = build(text, "gp-update", "Patient", audience="patient", flags=flags)
+    assert not any(f.startswith("Flag: a sentence on line") for f in flags) and "repeat CD4" in md
     assert not any(f.startswith("Flag: a medicine") for f in flags) and L.MED_FLAG not in md
     assert "abacavir" in md and "dolutegravir" in md
     assert f"CD4 {L.FLAG}" in md and f"VL {L.FLAG}" in md
@@ -1254,38 +1231,11 @@ WORD_MSG = ("Flag: a word on line {} may tell the reader about something that wa
             "Keep it, or reword it.")
 
 
-@pytest.mark.parametrize("extra", ["PMHx: seropositive", "Plan: PLHIV clinic",
-                                   "PMHx: on HAART", "Plan: explained U=U", "Med: antiretroviral 1 tablet daily"])
-def test_refuse_level_hiv_terms(extra):
-    with pytest.raises(Refused) as e:
-        build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry")
-    assert str(e.value) == "Refused: line L12 still mentions something this letter was meant to cut. Nothing was written."
-
-
-@pytest.mark.parametrize("extra", ["Plan: check for lithium toxicity", "Plan: Li level in 1 week",
-                                   "Plan: clozapine clinic in 1 week"])
-def test_refuse_level_psych_terms(extra):
-    with pytest.raises(Refused, match=r"^Refused: line L\d+ still mentions something"):
-        build(F("podiatry_referral.txt") + extra + "\n", "referral", "Podiatry")
-
-
 @pytest.mark.parametrize("extra,word", [("PMHx: HIV-positive", "HIV-positive"), ("PMHx: schizophrenia", "schizophrenia"),
                                         ("PMHx: schizoaffective disorder", "schizoaffective")])
 def test_terms_already_cut_by_clause_never_reach_letter(extra, word):
     md, dropped = build(F("podiatry_referral.txt") + extra + "\n", "referral", "Podiatry")
     assert word.lower() not in md.lower() and any(word in d for d in dropped)
-
-
-@pytest.mark.parametrize("extra,word", [("Plan: repeat test, undetectable last time", "undetectable"),
-                                        ("Plan: ART reviewed", "ART"), ("Med: ritonavir 100 mg daily", "ritonavir"),
-                                        ("Med: lamivudine 300 mg daily", "lamivudine")])
-def test_flag_only_terms_flag_never_refuse(extra, word):
-    flags = []
-    md, _ = build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry", flags=flags)
-    assert WORD_MSG.format("L12") in flags and L.WORD_FLAG in md
-    assert all(word not in f for f in flags if f.startswith("Flag:"))
-    with pytest.raises(Refused, match="--final refused"):
-        L.finalise(md)
 
 
 def test_linked_terms_only_checked_when_item_dropped():
@@ -1495,23 +1445,15 @@ PSY = """Patient: SYNTH-5401
 1937-06-03 Clinic review.
 Problem: ingrown toenail
 PMHx: bipolar disorder
-Med: Lithicarb 250 mg twice daily
+Med: lithium 250 mg twice daily
 Follow-up: review in 2 weeks
 """
 
 
-def test_brand_on_own_medication_line_is_flagged_not_refused():
+def test_generic_on_own_medication_line_is_flagged_not_refused():
     flags = []
     md, _ = build(PSY, "gp-update", "Podiatry", flags=flags)
-    assert "Lithicarb" in section(md, "Current medicines") and MED_MSG.format("L5") in flags
-
-
-@pytest.mark.parametrize("extra", ["Plan: continue Lithicarb", "Plan: continue lithium", "Plan: Clozaril review",
-                                   "Plan: CPMS bloods", "Plan: check Li+ in 1 week", "Plan: clozapine registry updated"])
-def test_medicine_or_brand_off_its_line_refused(extra):
-    with pytest.raises(Refused) as e:
-        build(PSY + extra + "\n", "gp-update", "Podiatry")
-    assert str(e.value) == "Refused: line L7 still mentions something this letter was meant to cut. Nothing was written."
+    assert "lithium" in section(md, "Current medicines") and MED_MSG.format("L5") in flags
 
 
 def test_medicine_names_unchecked_when_item_not_cut():
@@ -1519,19 +1461,11 @@ def test_medicine_names_unchecked_when_item_not_cut():
     assert "Lithicarb" in md and not dropped
 
 
-def test_s100_flag_only_but_s100_prescriber_refused():
-    flags = []
-    build(HIV_NOTES + "Plan: S100 script\n", "gp-update", "Podiatry", flags=flags)
-    assert WORD_MSG.format("L12") in flags
-    with pytest.raises(Refused, match="^Refused: line L12 still mentions"):
-        build(HIV_NOTES + "Plan: see S100 prescriber\n", "gp-update", "Podiatry")
-
-
 PREP = """Patient: SYNTH-5501
 1937-06-03 Clinic review.
 Problem: ankle sprain
 PMHx: on PrEP
-Med: Truvada 1 tablet daily (for PrEP)
+Med: emtricitabine 1 tablet daily (for PrEP)
 Follow-up: review in 2 weeks
 """
 
@@ -1539,20 +1473,8 @@ Follow-up: review in 2 weeks
 def test_prep_cut_and_medicine_flagged():
     flags = []
     md, dropped = build(PREP, "gp-update", "Podiatry", flags=flags)
-    assert "PrEP" not in md and "Truvada" in md and any("PrEP" in d for d in dropped)
+    assert "PrEP" not in md and "emtricitabine" in md and any("PrEP" in d for d in dropped)
     assert MED_MSG.format("L5") in flags
-
-
-@pytest.mark.parametrize("extra", ["Plan: continue Truvada", "Plan: tenofovir/emtricitabine supply", "Plan: Descovy supply"])
-def test_prep_terms_and_medicines_off_line_refused(extra):
-    with pytest.raises(Refused, match="^Refused: line L7 still mentions"):
-        build(PREP + extra + "\n", "gp-update", "Podiatry")
-
-
-def test_prep_sexual_health_clinic_flag_only():
-    flags = []
-    build(PREP + "Plan: sexual health clinic in 3 months\n", "gp-update", "Podiatry", flags=flags)
-    assert WORD_MSG.format("L7") in flags
 
 
 def test_prep_kept_for_relevant_reader_and_patient():
@@ -1567,13 +1489,6 @@ def test_prep_clause_cut_upstream():
 
 
 
-@pytest.mark.parametrize("extra", ["PMHx: undetectable VL", "Plan: repeat viral load in 3 months"])
-def test_viral_load_and_vl_flag_only_after_signoff(extra):
-    flags = []
-    md, _ = build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry", flags=flags)
-    assert WORD_MSG.format("L12") in flags
-
-
 
 # frozen v2 content (parsed); the header-only edit must not change any term
 FROZEN_V2 = json.loads(r'''{"HIV status": {"brands": {"Biktarvy": "bictegravir", "Dovato": "dolutegravir", "Genvoya": "cobicistat", "Triumeq": "dolutegravir"}, "flag_terms": ["undetectable", "ART", "ritonavir", "lamivudine", "Truvada", "Descovy", "tenofovir", "S100", "viral load", "VL"], "medicines": ["dolutegravir", "emtricitabine", "zidovudine", "abacavir", "bictegravir", "raltegravir", "rilpivirine", "darunavir", "efavirenz", "nevirapine", "cobicistat"], "terms": ["HIV", "HIV+", "HIV-positive", "seropositive", "PLHIV", "HAART", "U=U", "CD4", "RVD", "antiretroviral", "S100 prescriber"]}, "PrEP": {"brands": {"Descovy": "tenofovir/emtricitabine", "Truvada": "tenofovir/emtricitabine"}, "flag_terms": ["sexual health clinic", "tenofovir"], "medicines": ["tenofovir/emtricitabine", "emtricitabine"], "terms": ["PrEP", "pre-exposure prophylaxis"]}, "psychiatric history": {"brands": {"Clopine": "clozapine", "Clozaril": "clozapine", "Lithicarb": "lithium", "Quilonum": "lithium"}, "flag_terms": ["ANC", "bipolar", "psychosis"], "medicines": ["lithium", "clozapine"], "terms": ["lithium level", "serum lithium", "clozapine level", "clozapine monitoring", "ANC monitoring", "lithium toxicity", "Li level", "Li+", "clozapine clinic", "clozapine registry", "CPMS", "schizophrenia", "schizoaffective"]}}''')
@@ -1581,3 +1496,155 @@ FROZEN_V2 = json.loads(r'''{"HIV status": {"brands": {"Biktarvy": "bictegravir",
 
 def test_linked_terms_parsed_identical_to_frozen_v2():
     assert json.loads(json.dumps(L.load_linked(), sort_keys=True)) == FROZEN_V2
+
+
+
+# ---------- round 6: cut rule (sentences left out), brand swap, reason not included ----------
+LEFT_MSG = ("Flag: a sentence on line {} was left out to keep something private. "
+            "Check it doesn't hold a safety fact the reader needs.")
+
+
+@pytest.mark.parametrize("extra", ["Problem: monitoring CD4 count", "Plan: RVD clinic", "PMHx: seropositive",
+                                   "Plan: PLHIV clinic", "PMHx: on HAART", "Plan: explained U=U", "Plan: ART reviewed",
+                                   "Plan: repeat viral load in 3 months", "Plan: see S100 prescriber",
+                                   "Plan: review next week. Undetectable last time."])
+def test_off_med_line_linked_sentence_left_out_and_flagged(extra):
+    flags = []
+    md, _ = build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry", flags=flags)
+    assert LEFT_MSG.format("L12") in flags and L.LEFT_OUT_FLAG in md
+    for w in ("CD4", "RVD", "seropositive", "PLHIV", "HAART", "U=U", "ART", "viral load", "S100", "Undetectable"):
+        assert not re.search(rf"(?<![A-Za-z0-9]){re.escape(w)}(?![A-Za-z0-9])", md), w
+    with pytest.raises(Refused, match="--final refused"):
+        L.finalise(md)
+
+
+def test_only_offending_sentence_dropped():
+    md, _ = build(HIV_NOTES + "Plan: review next week. Undetectable last time.\n", "gp-update", "Podiatry")
+    assert "review next week" in md and "Undetectable" not in md
+
+
+@pytest.mark.parametrize("extra", ["Plan: continue Lithicarb", "Plan: continue lithium", "Plan: Clozaril review",
+                                   "Plan: CPMS bloods", "Plan: check Li+ in 1 week", "Plan: clozapine registry updated",
+                                   "Plan: check for lithium toxicity", "Plan: Li level in 1 week"])
+def test_psych_linked_off_med_line_left_out(extra):
+    flags = []
+    md, _ = build(PSY + extra + "\n", "gp-update", "Podiatry", flags=flags)
+    assert LEFT_MSG.format("L7") in flags
+    body = md.split("## Current medicines")[0] + md.split("## Current medicines")[1].split("##", 1)[1]
+    for w in ("Lithicarb", "lithium", "Clozaril", "CPMS", "Li+", "registry", "Li level"):
+        assert w not in body, w
+
+
+@pytest.mark.parametrize("medline,generic", [("Med: Lithicarb 250 mg twice daily", "lithium"),
+                                             ("Med: Clozaril 100 mg daily", "clozapine"),
+                                             ("Med: Quilonum 250 mg daily", "lithium")])
+def test_brand_on_med_line_swapped_to_generic_and_flagged(medline, generic):
+    text = PSY.replace("Med: lithium 250 mg twice daily", medline)
+    flags = []
+    md, _ = build(text, "gp-update", "Podiatry", flags=flags)
+    meds = section(md, "Current medicines")
+    assert generic in meds and medline.split()[1] not in md and MED_MSG.format("L5") in flags
+
+
+def test_cut_reason_on_med_line_becomes_reason_not_included():
+    text = PSY.replace("Med: lithium 250 mg twice daily", "Med: lithium 250 mg twice daily (for bipolar disorder)")
+    flags = []
+    md, _ = build(text, "gp-update", "Podiatry", flags=flags)
+    meds = section(md, "Current medicines")
+    assert "reason not included" in meds and "bipolar" not in md and MED_MSG.format("L5") in flags
+
+
+def test_other_linked_words_on_med_line_left_out():
+    text = PSY.replace("Med: lithium 250 mg twice daily", "Med: lithium 250 mg twice daily, CPMS registered")
+    flags = []
+    md, _ = build(text, "gp-update", "Podiatry", flags=flags)
+    assert "CPMS" not in md and "lithium" in md and LEFT_MSG.format("L5") in flags
+
+
+def test_every_listed_brand_maps_to_a_generic():
+    for cat, v in L.load_linked().items():
+        for b, g in v.get("brands", {}).items():
+            assert g and all(x in v.get("medicines", []) or x in sum((w.get("medicines", []) for w in L.load_linked().values()), [])
+                             or x in g for x in [g]), (cat, b)
+
+
+def test_brand_without_generic_refused(monkeypatch):
+    real = L.load_linked
+    def fake(path=None):
+        d = real(path); d["psychiatric history"] = dict(d["psychiatric history"], brands={"Lithicarb": ""}); return d
+    monkeypatch.setattr(L, "load_linked", fake)
+    text = PSY.replace("Med: lithium 250 mg twice daily", "Med: Lithicarb 250 mg twice daily")
+    with pytest.raises(Refused) as e:
+        build(text, "gp-update", "Podiatry")
+    assert str(e.value) == "Refused: line L5 still mentions something this letter was meant to cut. Nothing was written."
+
+
+def test_unknown_brand_like_drug_not_refused():
+    text = PSY.replace("Med: lithium 250 mg twice daily", "Med: lithium 250 mg twice daily\nMed: Tritace 5 mg daily")
+    flags = []
+    md, _ = build(text, "gp-update", "Podiatry", flags=flags)
+    assert "Tritace" in md
+
+
+@pytest.mark.parametrize("medline", ["Med: Truvada 1 tablet daily", "Med: Descovy 1 tablet daily"])
+def test_prep_brand_swapped(medline):
+    md, _ = build(PREP.replace("Med: emtricitabine 1 tablet daily (for PrEP)", medline), "gp-update", "Podiatry")
+    assert "tenofovir/emtricitabine" in md and medline.split()[1] not in md
+
+
+@pytest.mark.parametrize("extra", ["Plan: continue Truvada", "Plan: emtricitabine supply", "Plan: sexual health clinic in 3 months"])
+def test_prep_linked_off_med_line_left_out(extra):
+    flags = []
+    md, _ = build(PREP + extra + "\n", "gp-update", "Podiatry", flags=flags)
+    assert LEFT_MSG.format("L7") in flags
+    body = md.split("## Current medicines")[0] + md.split("## Current medicines")[1].split("##", 1)[1]
+    for w in ("Truvada", "emtricitabine", "sexual health"):
+        assert w not in body, w
+
+
+def test_patient_letters_drop_nothing_for_linked_terms():
+    for notes, extra in ((HIV_NOTES, "Plan: repeat CD4 and viral load\n"), (PSY, "Plan: continue Lithicarb\n"),
+                         (PREP, "Plan: continue Truvada\n")):
+        flags = []
+        md, _ = build(notes + extra, "gp-update", "Patient", audience="patient", flags=flags)
+        assert extra.split(": ")[1].strip().split()[-1] in md
+        assert not any(f.startswith("Flag: a sentence on line") for f in flags) and L.LEFT_OUT_FLAG not in md
+
+
+# ---------- round 6: reasons, pending, questions ----------
+@pytest.mark.parametrize("line", ["Meds: allopurinol 100 mg daily, colchicine 500 mcg twice daily (for gout)",
+                                  "Medications: allopurinol 100 mg daily; colchicine 500 mcg twice daily"])
+def test_med_list_lines_split_never_list_not_documented(line):
+    text = "Patient: SYNTH-5601\n1937-06-03 Clinic review.\nProblem: gout\n" + line + "\nFollow-up: review in 2 weeks\n"
+    md, _ = build(text, "gp-update", "GP")
+    meds = section(md, "Current medicines")
+    assert "allopurinol" in meds and "colchicine" in meds and "Current medicines not documented" not in md
+    for l in meds.splitlines():
+        assert ("(for " in l) != ("reason not documented" in l), l
+
+
+@pytest.mark.parametrize("later", ["Echo done, normal", "Result back for echo: normal", "Repeat echo was normal",
+                                   "The echo came back clear"])
+def test_pending_cleared_by_any_later_result_line(later):
+    text = ("Patient: SYNTH-5701\n1937-06-03 Clinic review.\nPending: echo - cardiology to arrange\n"
+            "1937-06-10 Review.\n" + later + "\nFollow-up: review in 2 weeks\n")
+    md, _ = build(text, "gp-update", "GP")
+    assert "cardiology to arrange" not in md.split("## Results still to come")[1].split("##")[0]
+
+
+@pytest.mark.parametrize("q", ["Please advise re ongoing knee pain", "Would value your opinion on knee pain",
+                               "For consideration of knee replacement", "Assess for knee replacement",
+                               "Please review for surgery", "Is surgery needed?", "Question for orthopaedics: surgery?",
+                               "Q: surgery?", "Request: please assess"])
+def test_referral_question_unusual_forms(q):
+    text = "Patient: SYNTH-5801\n1937-06-03 Clinic review.\nProblem: knee pain\n" + q + "\nFollow-up: review in 2 weeks\n"
+    flags = []
+    md, _ = build(text, "referral", "Orthopaedics", flags=flags)
+    assert not any("no clear question" in f for f in flags) and "[L4]" in md.split("## ")[1]
+
+
+def test_no_question_flag_blocks_final_cli(tmp_path):
+    r, out = _cli_out(tmp_path, "Patient: SYNTH-5802\n1937-06-03 Clinic review.\nProblem: knee pain\n",
+                      "--brief", "referral to orthopaedics", "--final")
+    assert r.returncode == 3 and "Flag: this referral has no clear question. Add one before it's signed." in r.stderr
+    assert not out.exists() or list(out.iterdir()) == []
