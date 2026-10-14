@@ -4884,3 +4884,18 @@ def test_rulecheck_fails_on_row_with_missing_test(tmp_path):
     (tmp_path / "RULES.md").write_text(rows + "| 19 | c | Physician | safety | test_not_there |\n")
     r = subprocess.run([sys.executable, str(tmp_path / "scripts" / "rulecheck.py")], capture_output=True, text=True)
     assert r.returncode == 1 and "rule 19" in r.stdout
+
+
+# ---------- replay: same input twice gives byte-identical output and screen messages ----------
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient", "referral to cardiology"])
+def test_replay_same_input_byte_identical(tmp_path, brief):
+    text = tpl(question="Please review.", problems=("review", "HIV"), meds=("empagliflozin 10 mg daily",),
+               results=("Hb 132 g/L 1937-08-01", "CXR clear 1937-08-01", "Hb 120", "XYZ 5 mmol/L 1937-08-01"),
+               pending=("FBC, sent 1937-08-01, GP",), actions=("review in 2 weeks, GP",))
+    runs = []
+    for i in range(2):
+        r, out = _run_t(tmp_path / f"run{i}", text, "--brief", brief)
+        runs.append((r.returncode, r.stdout.encode(), r.stderr.encode(), (out / "letter.md").read_bytes()))
+    assert runs[0] == runs[1]
+    lib = [L.build_from_template(text, *L.read_brief(brief)[:2]) for _ in range(2)]
+    assert lib[0].md.encode() == lib[1].md.encode() and lib[0].flags == lib[1].flags
