@@ -6,3 +6,4 @@ letter.md
 heldout/
 *.pdf
 *.html
+/local.toml

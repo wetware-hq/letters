@@ -1,6 +1,6 @@
 import json
 """Regression tests. Each rule has a test that plants its failure. Synthetic data only."""
-import pathlib, re, subprocess, sys, tomllib
+import os, pathlib, re, subprocess, sys, tomllib
 import pytest
 import letters as L
 from letters import make_letter, build, build_from_template, check, parse, cumsum, Refused, INCIDENT, ND
@@ -5860,8 +5860,8 @@ def test_fail_closed_brief_cannot_be_read(tmp_path, brief):
 
 
 def test_pre_push_blocks_on_the_signed_test():
-    hook = (HERE / "scripts" / "pre-push").read_text()
-    assert "test_refusal_codes_signed_in_both_files" in hook and "exit 1" in hook
+    hook = (HERE / "scripts" / "pre-push").read_text() + (HERE / "scripts" / "prepush.py").read_text()
+    assert "scripts/prepush.py" in hook and "test_refusal_codes_signed_in_both_files" in hook and "return 1" in hook
     t = (HERE / "test_letters.py").read_text()
     i = t.index("def test_refusal_codes_signed_in_both_files")
     assert "xfail" not in t[t.rindex("\n\n\n", 0, i):i]                    # a plain test, never xfail
@@ -6062,3 +6062,23 @@ def test_reader_grants_reasons():
     assert rg(["SYNTH-AG-0003", "SYNTH-AG-0001"], ["SYNTH-GR-0003", "SYNTH-GR-0001"])[0] == "current"
     assert rg([" SYNTH-AG-0003 "], [" SYNTH-GR-0003 "])[0] == "current"
     assert L.needs_hand("GP", None, True, 1, ["SYNTH-AG-0003"], "", card, ("SYNTH-AG-0003",)) is None
+
+
+# ---------------------------------------------------------------- traces setting (room rulings 08:07-08:09)
+def test_run_traces_not_run_line_copied_word_for_word():
+    s = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
+    assert f'RUN-TRACES-NOT-RUN signed (Educator text): "{L.RUN_TRACES_NOT_RUN}"' in s
+
+
+@pytest.mark.parametrize("cmd", [["scripts/pre-push"], [sys.executable, "scripts/check14_derived.py"]])
+def test_safety_bar_fails_when_traces_not_run(tmp_path, cmd):
+    envv = {k: v for k, v in os.environ.items() if k not in ("LETTERS_TRUTH", "TRUTH_DIR")}
+    envv["LETTERS_LOCAL"] = str(tmp_path / "absent.toml")
+    r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, env=envv)
+    assert r.returncode != 0 and L.RUN_TRACES_NOT_RUN in r.stdout, (r.stdout, r.stderr)
+
+
+def test_missing_answer_file_fails_when_set(tmp_path):
+    envv = dict(os.environ, LETTERS_TRUTH=str(tmp_path))
+    r = subprocess.run([sys.executable, "scripts/check14_derived.py"], cwd=HERE, capture_output=True, text=True, env=envv)
+    assert r.returncode != 0 and "answer file missing" in r.stderr
