@@ -540,12 +540,27 @@ FOLLOWUP_UNTAGGED = re.compile(r"^(?:re-?check|review|recall|repeat|follow[- ]?u
                                r"\b(?:will|to) (?:chase|arrange|book|ring|call|follow)\b", re.I)
 
 
+RESULT_UNREAD_NOTICE = "Flag: a result on line {lid} couldn't be read. Check it against the record."
+
+
+def result_sensitive_cats(body):
+    """Sensitive items a results line names (signed detection words: SENSITIVE patterns and linked_terms.toml)."""
+    cats = {sensitive_cat(c) for c in CLAUSE.findall(body)} - {None}
+    cats |= {c for c, v in load_linked().items() for w in list(v.get("terms", [])) + list(v.get("medicines", []))
+             + list(v.get("brands", {})) if _term_re(w).search(body)}
+    return cats
+
+
+def _names_cut_item(d):
+    return any(c in d for c in list(SENSITIVE) + list(load_linked()))
+
+
 def cumsum(entries, to="", dropped=None, keep_indications=False):
     dropped = [] if dropped is None else dropped
     st = {"problems": OrderedDict(), "resolved": OrderedDict(), "ruledout": OrderedDict(), "history": [],
           "meds": OrderedDict(), "stopped": OrderedDict(), "med_changes": [], "allergies": [],
           "results": OrderedDict(), "pending": OrderedDict(), "followup": [], "question": [],
-          "admission": [], "course": [], "exam": [], "narrative": [], "first": None, "last": None,
+          "admission": [], "course": [], "exam": [], "narrative": [], "results_text": [], "first": None, "last": None,
           "admit": None, "dropped": dropped}
     dated = sorted([e for e in entries if e["date"]], key=lambda e: e["date"])
     for e in [e for e in entries if not e["date"]] + dated:
@@ -648,6 +663,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
             elif kind == "allergy":
                 st["allergies"].append((body, ids))
             elif kind == "result":
+                raw = body                               # word for word, before any date handling
                 clear_pending(st, body, tagged_result=True)
                 rd = ISO.search(body)
                 if rd:                                   # the result's own date, never the entry's
@@ -658,7 +674,15 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                     if PER_LITRE.search(body):
                         st["narrative"].append((d, body0 if rd else body, ids))      # a result written in a sentence stays as written
                         continue
-                    dropped.append(f"{lid}: result without a unit dropped")
+                    # Round 12 ruling (severity 5): never a silent drop. Sensitive detection runs first.
+                    if any(d.split(":")[0].split(",").count(lid) and _names_cut_item(d) for d in dropped):
+                        continue                         # already cut as sensitive (flag on screen, blocks --final)
+                    cats = result_sensitive_cats(raw)
+                    if cats and not keep_indications and any(c.lower() not in _INCLUDE for c in cats):
+                        dropped.append(f"{lid}: {sorted(cats)[0]} result, not relevant to {to}")
+                        continue                         # clinician letter: cut, sensitive flag on screen only
+                    unread = not re.search(r"[A-Za-z]{2,}", ISO.sub(" ", raw))
+                    st["results_text"].append((raw, ids, unread))   # kept word for word and cited
                     continue
                 name = r.group("name").strip()
                 k = name.lower()
@@ -762,7 +786,7 @@ def section_items(name, st, audience="specialist"):
         for r in st["results"].values():
             vals = ", ".join(f"{v} {u}{dt(d)}" + (f" ({n})" if n else "") for d, v, u, n, _ in r["values"])
             rows.append((r["name"], vals, [x[4] for x in r["values"]]))
-        return rows
+        return rows + [(None, t, i) for t, i, _ in st.get("results_text", [])]
     if name == "meds" and audience == "patient":
         return [f"{m['drug']}, {_patient_reason(m['ind'])}" + tag(m["ids"]) for m in st["meds"].values()]  # patient: nothing cut
     if name == "meds":
@@ -827,10 +851,15 @@ def render_section(name, st, audience):
     head = HEADINGS[audience][name]
     items = section_items(name, st, audience)
     body = []
+    if name == "results":
+        plain = [x for x in items if x[0] is None]           # results with no value: word for word, cited
+        items = [x for x in items if x[0] is not None]
     if name == "results" and len(items) >= 3:
         body = ["| Test | Results |", "|---|---|"] + [f"| {n} | {v}{tag(i)} |" for n, v, i in items]
     elif name == "results":
         body = [f"- {n}: {v}" + tag(i) for n, v, i in items]
+    if name == "results":
+        body += [f"- {v}" + tag(i) for _, v, i in plain]
     elif name == "followup":
         body = [f"{k}. {x}" for k, x in enumerate(items, 1)]
     else:
@@ -916,6 +945,13 @@ def load_allowed_shorthand(paths=None):
 
 
 ALLOWED_SHORTHAND = load_allowed_shorthand()
+_PATIENT_LETTER = []    # [True] while a patient letter is built: allowed words don't clear the flag there (ruling)
+
+
+def allowed_word(tok):
+    """Allowed words clear the shorthand flag in clinician letters only. In patient letters they stay flagged unless
+    a signed plain-words entry exists (single_meaning.toml, handled before this check)."""
+    return tok in ALLOWED_SHORTHAND and not _PATIENT_LETTER
 WORDS = set().union(*(_lines(p) for p in WORDLISTS)) | {m.lower() for m in MONTHS}
 
 
@@ -956,7 +992,7 @@ def reason_flag(tok, prev="", exact=()):
 
 def needs_flag(tok, prev="", exact=()):
     """True if tok must be flagged. exact: abbreviations that may expand as written (reviewed list, resolutions)."""
-    if tok in exact or tok in TOOL_WORDS or tok in ALLOWED_SHORTHAND:     # allowed: exact case only
+    if tok in exact or tok in TOOL_WORDS or allowed_word(tok):     # allowed: exact case, clinician letters only
         return False
     low = tok.lower()
     if low in drug_names() or low in drug_words():
@@ -1446,7 +1482,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
         md, dropped = _build(text, letter_type, to, recipient, audience, template, brand, resolve, own)
         return BuildResult(md, dropped, own)
     finally:
-        _INCLUDE.clear()
+        _INCLUDE.clear(); _PATIENT_LETTER.clear()
 
 
 # Temporary (13 Oct 2026): combination medicines can't be fully listed yet, so any letter naming one is refused.
@@ -1483,6 +1519,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
         raise ValueError(f"unknown type {letter_type}; choose from {', '.join(TYPES)}")
     audience = audience or ("gp" if letter_type in ("discharge", "gp-update", "specialist-reply") else "specialist")
     pid = check_safe(text)
+    _PATIENT_LETTER[:] = [True] if audience == "patient" else []
     refuse_copies(text, template, patient=is_patient_letter(to, audience), not_copy=_NOT_COPY)
     entries, sources = parse(text)
     resolved = resolution_sources(resolve, text)
@@ -1492,6 +1529,8 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
     st = cumsum(entries, to, dropped, keep_indications=(audience == "patient"))
     if audience != "patient":
         mark_linked_items(text, to, dropped)
+    if flags is not None:
+        flags.extend(RESULT_UNREAD_NOTICE.format(lid=i[0]) for _, i, unread in st["results_text"] if unread)
     md = render(st, pid, letter_type, to, recipient, audience, template, brand, dropped,
                 resolved, flags)
     if not st["question"]:                       # every letter keeps its question; none found: the flag fires

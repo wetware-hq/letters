@@ -1,5 +1,7 @@
 # CORE allowed words: ordinary clinical words used with the same single meaning in every English-speaking
-# country. Never flagged as unconfirmed shorthand. PENDING CLINICIAN SIGNATURE (whole list, round 12).
+# country. Not flagged as unconfirmed shorthand in clinician letters. First set, from named sources; citations UNVERIFIED. PENDING CLINICIAN SIGNATURE (whole list).
+# Clears the shorthand flag in CLINICIAN letters only; in patient letters these words stay flagged unless a signed
+# plain-words entry exists (single_meaning.toml).
 # Exact case only ("MRI" allowed; "Mri", "mri" still flagged). Kept as written, never expanded.
 #
 # Sources, by class:

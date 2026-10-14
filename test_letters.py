@@ -395,9 +395,9 @@ def test_table_only_for_three_or_more_results():
     assert "| Test | Results |" in make_letter(t, "gp-update", "GP")
 
 
-def test_result_without_unit_dropped_and_logged():
-    _, dropped = build("SYNTH-2\n1937-01-01\nResult: Hb 120", "gp-update", "GP")
-    assert any("without a unit" in d for d in dropped)
+def test_result_without_unit_kept_word_for_word():      # adapted round 12 (severity 5): never a silent drop
+    md, dropped = build("SYNTH-2\n1937-01-01\nResult: Hb 120", "gp-update", "GP")
+    assert "- Hb 120 [L3]" in md and not any("without a unit" in d for d in dropped)
 
 
 def test_planted_long_sentence_flagged_not_refused(tmp_path):
@@ -4442,10 +4442,10 @@ R12_ORDINARY = dict(question="Please review blood pressure and kidney function."
                     actions=("recheck EUC in 3 months, GP", "MRI brain in 3 months, GP"))
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
-def test_r12_ordinary_clinical_words_can_final(tmp_path, brief):
+def test_r12_ordinary_clinical_words_can_final(tmp_path):
+    """Clinician letter: allowed words carry no flag and the letter finalises."""
     text = tpl(**R12_ORDINARY)
-    r, out = _run_t(tmp_path, text, "--brief", brief, "--final")
+    r, out = _run_t(tmp_path, text, "--brief", "discharge to GP", "--final")
     assert r.returncode == 0, r.stderr
     assert "abbreviation" not in r.stderr
     md = (out / "letter.md").read_text()
@@ -4453,8 +4453,74 @@ def test_r12_ordinary_clinical_words_can_final(tmp_path, brief):
         assert w in md
 
 
+def test_r12_allowed_words_still_flagged_in_patient_letter(tmp_path):
+    """Ruling: the allowed list clears the flag in clinician letters only. No signed plain words yet, so in a
+    patient letter each allowed word stays flagged and --final is refused (exit 3, nothing written)."""
+    text = tpl(**R12_ORDINARY)
+    r, out = _run_t(tmp_path, text, "--brief", "letter to the patient")
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    for w in ("FBC", "UEC", "LFT", "CXR", "MRI", "TSH", "EUC"):
+        assert f"{w} {L.FLAG}" in md, w
+    r, out2 = _run_t(tmp_path / "f", text, "--brief", "letter to the patient", "--final")
+    assert r.returncode == 3 and not (out2 / "letter.md").exists()
+    assert not L.needs_flag("FBC") and not L._PATIENT_LETTER        # state never leaks out of a build
+
+
 def test_r12_top_still_blocks_final(tmp_path):
     text = tpl(**{**R12_ORDINARY, "actions": ("recheck EUC in 3 months, GP", "MRI brain in 3 months, GP",
                                                  "discuss TOP at review, GP")})
     r, out = _run_t(tmp_path, text, "--brief", "discharge to GP", "--final")
     assert r.returncode == 3 and not (out / "letter.md").exists()
+
+
+# ---------- round 12 ruling 1 (severity 5): a Results line with no value is never dropped silently ----------
+def _r12_res(*results):
+    return tpl(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
+               results=results, actions=("review in 2 weeks, GP",))
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r12_result_without_value_kept_word_for_word_and_cited(tmp_path, brief):
+    text = _r12_res("Hb 132 g/L 1937-08-01", "CXR clear 1937-08-01")
+    r, out = _run_t(tmp_path, text, "--brief", brief)
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    lid = line_of(text, "CXR clear")
+    assert re.search(rf"^- CXR(?: {re.escape(L.FLAG)})? clear 1937-08-01 \[{lid}\]$", md, re.M), md
+    assert "Cut from this letter" not in r.stderr
+
+
+@pytest.mark.parametrize("line", ["HIV negative 1937-08-01", "BRCA1 not detected 1937-08-01"])
+def test_r12_sensitive_result_without_value_cut_in_gp_letter(tmp_path, line):
+    text = _r12_res("Hb 132 g/L 1937-08-01", line)
+    lid = line_of(text, line.split()[0])
+    r, out = _run_t(tmp_path, text, "--brief", "discharge to GP")
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert line.split()[0] not in md and lid not in md               # nothing in letter.md
+    assert L.SENS_RESULT_NOTICE.format(lid=lid) in r.stderr           # sensitive flag, screen only
+    r, out2 = _run_t(tmp_path / "f", text, "--brief", "discharge to GP", "--final")
+    assert r.returncode == 3 and not (out2 / "letter.md").exists()   # blocks --final
+
+
+@pytest.mark.parametrize("line", ["HIV negative 1937-08-01", "BRCA1 not detected 1937-08-01"])
+def test_r12_sensitive_result_without_value_kept_in_patient_letter(tmp_path, line):
+    text = _r12_res("Hb 132 g/L 1937-08-01", line)
+    lid = line_of(text, line.split()[0])
+    r, out = _run_t(tmp_path, text, "--brief", "letter to the patient")
+    assert r.returncode == 0, r.stderr
+    md = FLAG_RX.sub("", (out / "letter.md").read_text())
+    assert f"- {line} [{lid}]" in re.sub(r" +", " ", md)
+    assert "sensitive" not in r.stderr
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r12_unparseable_result_flagged(tmp_path, brief):
+    text = _r12_res("Hb 132 g/L 1937-08-01", "1937-08-01")
+    lid = next(f"L{n}" for n, l in enumerate(text.splitlines(), 1) if l == "- 1937-08-01")
+    r, out = _run_t(tmp_path, text, "--brief", brief)
+    assert r.returncode == 0 and L.RESULT_UNREAD_NOTICE.format(lid=lid) in r.stderr
+    assert f"- 1937-08-01 [{lid}]" in (out / "letter.md").read_text()
+    r, out2 = _run_t(tmp_path / "f", text, "--brief", brief, "--final")
+    assert r.returncode == 3 and not (out2 / "letter.md").exists()
