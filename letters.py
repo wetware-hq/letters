@@ -1412,8 +1412,10 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     _INCLUDE.clear(); _INCLUDE.update(i.lower() for i in (include or []))
     _NOT_COPY[:] = list(not_copy or ())
     _KEEP_OUT[:] = list(keep_out or ()); _SENS_CUTS.clear(); _KEPT_OUT.clear()
+    own = [] if flags is None else flags                      # every flag is kept for finalise(), screen-only too
     try:
-        return _build(text, letter_type, to, recipient, audience, template, brand, resolve, flags)
+        md, dropped = _build(text, letter_type, to, recipient, audience, template, brand, resolve, own)
+        return BuildResult(md, dropped, own)
     finally:
         _INCLUDE.clear()
 
@@ -2013,14 +2015,30 @@ def printed_flags(flags, md):
 SCREEN_ONLY_PREFIXES = tuple(x.split("{")[0] for x in (SENS_RESULT_NOTICE, MED_NOTICE, CUT_NOTICE))
 
 
-def finalise(md, n=None, screen_only=0):
-    """Remove [Lx]/[Rx] source tags only. Refused while any flag is open; n is the number of flag lines printed.
-    screen_only: open flags printed on screen that never appear in the letter (sensitive result cuts).
-    The draft mark and draft footer stay until the signing clinician removes them."""
-    if FLAG_ANY.search(md) or screen_only:
-        n = n or len(FLAG_ANY.findall(md))
-    else:
-        n = 0
+class BuildResult(tuple):
+    """What build() returns: unpacks as (md, dropped) as before, and also carries every flag raised while building,
+    including the screen-only ones that never appear in the letter. finalise() takes only this."""
+    def __new__(cls, md, dropped, flags):
+        r = super().__new__(cls, (md, dropped))
+        r.md, r.dropped, r.flags = md, dropped, list(flags)
+        return r
+
+
+FINAL_RAW_REFUSED = ("Refused: --final needs the built letter with its flags, not letter text on its own. "
+                     "Nothing was written.")
+
+
+def finalise(result):
+    """Remove [Lx]/[Rx] source tags only. Takes only a build() result, so screen-only flags (cuts, sensitive results,
+    medicines) can never be lost: refused while any flag is open, in the letter or on screen. A cut stays open until
+    the brief's Include: line or --keep-out L<n> clears it. The draft mark and footer stay until the signing
+    clinician removes them."""
+    if not isinstance(result, BuildResult):
+        raise Refused(FINAL_RAW_REFUSED)
+    md = result.md
+    shown = printed_flags(result.flags, md)
+    screen_only = sum(f.startswith(SCREEN_ONLY_PREFIXES) for f in shown)
+    n = (len(shown) or len(FLAG_ANY.findall(md))) if (FLAG_ANY.search(md) or screen_only) else 0
     if n:
         raise Refused(FINAL_REFUSED.format(n=n))
     return re.sub(r" \[[LR]\d+(?:, [LR]\d+)*\]", "", md)
@@ -2426,7 +2444,7 @@ MED_ITEM = re.compile(
     r"(?:\s+(?P<dose>\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?\s?(?:mg|mcg|micrograms?|g|mL|ml|units?|IU|%|puffs?|tablets?|drops?)?"
     r"(?:\s+(?:one|two)\s+puffs?)?))?"
     r"\s+(?P<freq>" + _FREQS + r"(?:\s+and\s+" + _FREQS + r")?)"
-    r"(?:\s+(?P<route>by mouth|(?!(?:max|maximum|for|reason|and)\b)[A-Za-z][A-Za-z-]*(?![\w:])))?"
+    r"(?:\s+(?P<route>by mouth|(?!(?:max|maximum|for|reason|and|stopped|ceased|withheld)\b)[A-Za-z][A-Za-z-]*(?![\w:])))?"
     r"(?:\s+(?P<max>max(?:imum)?\s+\d+(?:\.\d+)?\s?(?:mg|mcg|micrograms?|g|mL|ml|units?|tablets?|doses?|puffs?|drops?)?"
     r"\s+(?:in\s+24\s+hours|(?:per|in|every)\s+(?:\d+\s+)?[a-z]+)))?"
     r"(?:\s+(?P<dur>for\s+\d+\s+(?:more\s+)?days?))?"
@@ -2730,8 +2748,9 @@ def main(argv=None):
         return 2
     try:
         flags = []
-        md, dropped = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
-                            a.resolve, flags, include, not_copy, keep_out)
+        result = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
+                       a.resolve, flags, include, not_copy, keep_out)
+        md, dropped = result
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -2760,7 +2779,7 @@ def main(argv=None):
     dropped.clear()
     if a.final:
         try:
-            md = finalise(md, len(shown), sum(f.startswith(SCREEN_ONLY_PREFIXES) for f in shown))
+            md = finalise(result)
         except Refused as e:
             print(str(e), file=sys.stderr)
             return 3

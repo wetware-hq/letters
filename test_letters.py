@@ -3,7 +3,7 @@ import json
 import pathlib, re, subprocess, sys
 import pytest
 import letters as L
-from letters import make_letter, build, check, parse, cumsum, Refused, INCIDENT, ND
+from letters import make_letter, build, build_from_template, check, parse, cumsum, Refused, INCIDENT, ND
 
 HERE = pathlib.Path(__file__).parent
 F = lambda n: (HERE / "fixtures" / n).read_text()
@@ -202,11 +202,11 @@ def test_uncertainty_preserved():
 
 def test_referral_without_question_flagged_and_final_refused():
     flags = []
-    md, _ = build("SYNTH-1\n1937-01-01\nProblem: cough", "referral", "Respiratory", flags=flags)
+    res = build("SYNTH-1\n1937-01-01\nProblem: cough", "referral", "Respiratory", flags=flags); md, _ = res
     assert "Flag: this referral has no clear question. Add one before it's signed." in flags
     assert L.QUESTION_FLAG in md
     with pytest.raises(Refused, match="--final refused"):
-        L.finalise(md)
+        L.finalise(res)
 
 
 def test_referral_opens_with_question():
@@ -403,11 +403,11 @@ def test_result_without_unit_dropped_and_logged():
 def test_planted_long_sentence_flagged_not_refused(tmp_path):
     t = "SYNTH-2\n1937-01-01\n" + " ".join(["word"] * 30) + ".\nFollow-up: GP review in 1 week"
     flags = []
-    md, _ = build(t, "gp-update", "GP", flags=flags)
+    res = build(t, "gp-update", "GP", flags=flags); md, _ = res
     assert "Flag: sentence at L3 is over 25 words. Split it, or keep it as written." in flags
     assert L.SENTENCE_FLAG in md
     with pytest.raises(Refused, match="--final refused"):
-        L.finalise(md)
+        L.finalise(res)
     n = tmp_path / "n.txt"
     n.write_text(tpl(question="Any concerns?", history=" ".join(["word"] * 30) + ".", actions=["review in 1 week, practice nurse"]))
     r = subprocess.run(CLI + [str(n), "--type", "gp-update", "--to", "GP", "--final"], capture_output=True, text=True)
@@ -531,8 +531,8 @@ def test_final_text_otherwise_unchanged():
     build(text, "discharge", "General practice", audience="gp", flags=flags)
     res = sorted({f.split()[0] + "=meaning of " + f.split()[0] for f in flags
                   if not f.startswith(L.NO_REASON_NOTICE.split("{")[0])})    # round 11: no-reason notice, not an abbreviation
-    md, _ = build(text, "discharge", "General practice", audience="gp", resolve=res)
-    fin = L.finalise(md)
+    built = build(text, "discharge", "General practice", audience="gp", resolve=res); md, _ = built
+    fin = L.finalise(built)
     assert "[L" not in fin and fin.count("\n") == md.count("\n")
     _draft_intact(fin)
 
@@ -573,11 +573,11 @@ def _notes(tmp_path, ab):
                                         ("RA", ["rheumatoid arthritis", "right atrium"])])
 def test_ambiguous_abbreviation_flagged_not_expanded_and_final_refused(tmp_path, ab, guesses):
     flags = []
-    md, _ = build(AMBIG.format(ab=ab), "gp-update", "General practice", flags=flags)
+    res = build(AMBIG.format(ab=ab), "gp-update", "General practice", flags=flags); md, _ = res
     assert f"- {ab} {L.FLAG} [L3]" in md and any(f.startswith(ab) for f in flags)
     assert not any(g in md.lower() for g in guesses)
     with pytest.raises(Refused, match="flag"):
-        L.finalise(md)
+        L.finalise(res)
     r = subprocess.run(CLI + [str(_notes(tmp_path, ab)), "--type", "gp-update", "--to", "GP", "--final"],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "--final refused" in r.stderr and r.stdout == ""
@@ -597,9 +597,9 @@ def test_single_meaning_list_has_exactly_ten_signed_off_entries():
 
 def test_resolve_closes_flag_cites_r1_and_final_runs(tmp_path):
     text = AMBIG.format(ab="MS")
-    md, _ = build(text, "gp-update", "General practice", resolve=["MS=multiple sclerosis"])
+    res = build(text, "gp-update", "General practice", resolve=["MS=multiple sclerosis"]); md, _ = res
     assert "- multiple sclerosis (MS) [L3, R1]" in md and L.FLAG not in md
-    assert L.finalise(md).count("multiple sclerosis (MS)") == 1
+    assert L.finalise(res).count("multiple sclerosis (MS)") == 1
     r = subprocess.run(CLI + [str(_notes(tmp_path, "MS")), "--type", "gp-update", "--to", "GP",
                               "--resolve", "MS=multiple sclerosis", "--final"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -633,10 +633,14 @@ def test_goldens_expand_no_abbreviation():
 
 
 # ---------- abbreviation detection edges ----------
+_LAST = {}   # the last build result from a helper, for finalise() (it takes only a build result)
+
+
 def _one(line):
     flags = []
-    md, _ = build(f"Patient: SYNTH-3101\n1937-05-01 Clinic review.\n{line}\nFollow-up: review in 2 weeks\nQuestion: any concerns?",
+    _LAST["res"] = build(f"Patient: SYNTH-3101\n1937-05-01 Clinic review.\n{line}\nFollow-up: review in 2 weeks\nQuestion: any concerns?",
                   "gp-update", "General practice", flags=flags)
+    md, _ = _LAST["res"]
     return md, [f.split()[0] for f in flags if f != L.QUESTION_NOTICE_ANY]   # round 10: no-question flag on every letter
 
 
@@ -802,12 +806,12 @@ def test_dose_unit_u_iu_always_flagged(dose):
 
 def test_10u_insulin_flagged_and_checker_refuses_unflagged():
     text = "Patient: SYNTH-3501\n1937-05-01 Clinic review.\nProblem: needs 10u insulin at night\nFollow-up: review in 2 weeks"
-    md, flags = build(text, "gp-update", "General practice", flags=(fl := []))[0], fl
+    res = build(text, "gp-update", "General practice", flags=(fl := [])); md, flags = res[0], fl
     assert f"10u {L.FLAG} insulin" in md and any(f.startswith("10u") for f in flags)
     with pytest.raises(Refused, match="dose unit not flagged at line L"):
         check(md.replace(f"10u {L.FLAG}", "10u"), parse(text)[1], "gp-update")
     with pytest.raises(Refused, match="flag"):
-        L.finalise(md)
+        L.finalise(res)
 
 
 @pytest.mark.parametrize("line", ["Result: ALT 40 U/L", "Result: TSH 2.1 mU/L", "Result: vitamin D 50 IU/L",
@@ -865,12 +869,13 @@ def test_shorthand_and_capitals_on_medicine_line_keep_abbreviation_label():
 def test_final_refused_while_drug_flag_open():
     md, _ = _one("Med: synthopril 5 mg daily")
     with pytest.raises(Refused, match="1 flag"):
-        L.finalise(md)
+        L.finalise(_LAST['res'])
 
 
 # ---------- patient letters: each medicine with its reason ----------
 def _pmeds(text, to="Patient", aud="patient"):
-    md = make_letter(text, "gp-update", to, audience=aud)
+    _LAST["res"] = build(text, "gp-update", to, audience=aud)
+    md = _LAST["res"][0]                                  # same text make_letter returns
     return md, section(md, "Your medicines now" if aud == "patient" else "Current medicines")
 
 
@@ -879,7 +884,7 @@ def test_patient_medicine_reason_from_cited_line_flagged_without_signed_plain_wo
     md, meds = _pmeds(text)
     assert f"- metformin 500 mg twice a day (bd), for type 2 diabetes [L3]" in meds      # r11: ordinary English, no flag
     with pytest.raises(Refused, match="flag"):
-        L.finalise(md)
+        L.finalise(_LAST['res'])
 
 
 def test_patient_medicine_reason_signed_entry_gets_plain_words_unflagged():
@@ -1103,7 +1108,7 @@ MED_MSG = ("Flag: a medicine on line {} may tell the reader about something that
 def test_sensitive_cut_everywhere_medicine_stays_and_flagged(letter_type, to):
     text = HIV_NOTES + ("Question: please review\n" if letter_type == "referral" else "")
     flags = []
-    md, dropped = build(text, letter_type, to, flags=flags)
+    res = build(text, letter_type, to, flags=flags); md, dropped = res
     for t in CUT_TERMS:
         assert not re.search(rf"\b{re.escape(t)}\b", md, re.I), t
     for drug in ("abacavir", "dolutegravir", "metformin"):
@@ -1115,7 +1120,7 @@ def test_sensitive_cut_everywhere_medicine_stays_and_flagged(letter_type, to):
     for t in ("'(HIV)'", "'(for HIV)'", "HIV viral load"):
         assert t in removed, t
     with pytest.raises(Refused, match="--final refused"):
-        L.finalise(md)
+        L.finalise(res)
 
 
 def test_lithium_medicine_flagged_when_reason_cut():
@@ -1569,12 +1574,12 @@ LEFT_MSG = ("Flag: a sentence on line {} was left out to keep something private.
                                    "Plan: review next week. Undetectable last time."])
 def test_off_med_line_linked_sentence_left_out_and_flagged(extra):
     flags = []
-    md, _ = build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry", flags=flags)
+    res = build(HIV_NOTES + extra + "\n", "gp-update", "Podiatry", flags=flags); md, _ = res
     assert LEFT_MSG.format("L12") in flags and L.LEFT_OUT_FLAG in md
     for w in ("CD4", "RVD", "seropositive", "PLHIV", "HAART", "U=U", "ART", "viral load", "S100", "Undetectable"):
         assert not re.search(rf"(?<![A-Za-z0-9]){re.escape(w)}(?![A-Za-z0-9])", md), w
     with pytest.raises(Refused, match="--final refused"):
-        L.finalise(md)
+        L.finalise(res)
 
 
 def test_only_offending_sentence_dropped():
@@ -1724,11 +1729,12 @@ CUT_MSG = "Flag: something on line {} was cut to keep it private. Check the read
 
 def test_default_cut_for_gp_and_flagged_blocks_final():
     flags = []
-    md, _ = build(PSY, "gp-update", "GP", flags=flags)
+    res = build(PSY, "gp-update", "GP", flags=flags); md, _ = res
     assert "bipolar" not in md and CUT_MSG.format("L4") in flags and L.CUT_FLAG not in md   # round 11 freeze: screen only
     shown = L.printed_flags(flags, md)
     with pytest.raises(Refused, match="--final refused"):
-        L.finalise(md, len(shown), sum(f.startswith(L.SCREEN_ONLY_PREFIXES) for f in shown))
+        L.finalise(res)
+    assert any(f.startswith(L.SCREEN_ONLY_PREFIXES) for f in shown)
 
 
 PSY_T = tpl(pid="SYNTH-5401", question="Can you treat the toenail?", problems=["ingrown toenail"], history="bipolar disorder",
@@ -3969,7 +3975,7 @@ def test_h29_cut_change_reason_dropped_change_printed_flag_on_screen(drug, reaso
     text = (f"SYNTH-9400\n1937-06-01 review.\nMed: {drug} 100 mg daily\n1937-06-10 review.\n"
             f"Med: {drug} 200 mg daily reason: {reason}\nQuestion: is she well?\n")
     flags = []
-    md, _ = build(text, "gp-update", "GP", flags=flags)
+    res = build(text, "gp-update", "GP", flags=flags); md, _ = res
     ch = FLAG_RX.sub("", next(l for l in md.splitlines() if l.startswith("- Changed")))
     assert ch == f"- Changed on 10 Jun 1937: from {drug} 100 mg daily. Now: {drug} 200 mg daily. [L3, L5]"   # H29
     assert_no_empty_reason_label(ch)
@@ -3978,7 +3984,7 @@ def test_h29_cut_change_reason_dropped_change_printed_flag_on_screen(drug, reaso
     assert "reason not documented" not in md.lower()
     assert L.MED_NOTICE.format(lid="L5") in L.printed_flags(flags, md)                # on screen only
     with pytest.raises(Refused, match="--final refused"):
-        L.finalise(md, len(L.printed_flags(flags, md)), 1)
+        L.finalise(res)
 
 
 @pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
@@ -4009,7 +4015,7 @@ def _change_build(monkeypatch, drug, reason=None, to="GP", audience=None):
     monkeypatch.setattr(L, "_TEMPLATE", [])
     monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
     flags = []
-    md, _ = build(_change_notes(drug, reason), "gp-update", to, audience=audience, flags=flags)
+    _LAST["res"] = build(_change_notes(drug, reason), "gp-update", to, audience=audience, flags=flags); md, _ = _LAST["res"]
     return md, flags, next(l for l in md.splitlines() if l.startswith("- Changed"))
 
 
@@ -4030,7 +4036,7 @@ def _kind_build(monkeypatch, kind, drug, reason=None):
     monkeypatch.setattr(L, "_TEMPLATE", [])
     monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
     flags = []
-    md, _ = build(_kind_notes(kind, drug, reason), "gp-update", "GP", flags=flags)
+    _LAST["res"] = build(_kind_notes(kind, drug, reason), "gp-update", "GP", flags=flags); md, _ = _LAST["res"]
     lines = [l for l in md.splitlines() if l.startswith("- " + kind.capitalize() + " on")]
     assert len(lines) == 1, md
     return md, flags, lines[0]
@@ -4046,6 +4052,7 @@ def test_r11r_change_line_missing_reason_identical_to_cut_reason(drug, reason, w
     """Draft: the line is compared byte for byte with nothing stripped, and the letter header too (no inline marker
     may differ). Final: the --final form of both lines is byte-identical."""
     cmd, cflags, cut = _kind_build(monkeypatch, kind, drug, reason)
+    cres = _LAST["res"]
     mmd, mflags, missing = _kind_build(monkeypatch, kind, drug, None)
     assert missing.encode() == cut.encode()                                         # draft, nothing stripped
     head = lambda md: next(l for l in md.splitlines() if l.startswith("**Letter:**"))
@@ -4057,7 +4064,7 @@ def test_r11r_change_line_missing_reason_identical_to_cut_reason(drug, reason, w
     assert L.NO_REASON_NOTICE.format(lid=lid) in L.printed_flags(mflags, mmd)       # screen only
     assert L.MED_NOTICE.format(lid=lid) in L.printed_flags(cflags, cmd)
     with pytest.raises(Refused, match="--final refused"):                            # the cut still blocks --final
-        L.finalise(cmd, len(L.printed_flags(cflags, cmd)), 1)
+        L.finalise(cres)
 
 
 def _line_ids(line):
@@ -4069,7 +4076,7 @@ def test_r11r_missing_reason_final_letter_line_matches_cut_draft_line(kind, monk
     _, _, cut = _kind_build(monkeypatch, kind, "ramipril", "BRCA2 pathogenic variant")
     md, flags, missing = _kind_build(monkeypatch, kind, "ramipril", None)
     shown = L.printed_flags(flags, md)
-    fin = L.finalise(md, len(shown), 0)                                             # the notice doesn't block
+    fin = L.finalise(_LAST["res"])                                             # the notice doesn't block
     assert _final_form(cut) in fin.splitlines() and _final_form(missing) in fin.splitlines()
 
 
@@ -4119,7 +4126,7 @@ def test_r11r_missing_change_reason_notice_does_not_block_final_library(monkeypa
     assert L.NO_REASON_NOTICE.format(lid="L5") in shown and "No reason was written" not in md
     screen = sum(f.startswith((L.SENS_RESULT_NOTICE.split("{")[0], L.MED_NOTICE.split("{")[0])) for f in shown)
     assert screen == 0
-    assert "[L" not in L.finalise(md, len(shown), screen)                    # not refused
+    assert "[L" not in L.finalise(_LAST["res"])                    # not refused
 
 
 @pytest.mark.parametrize("drug,reason,words", STOP_CASES)
@@ -4221,3 +4228,92 @@ def test_r11s_bracketed_stop_reason_still_works(monkeypatch):
             "Med: ramipril 5 mg daily\n1937-06-10 review.\nStop: ramipril 5 mg daily (reason: dry cough)\nQuestion: is she well?\n")
     md, _ = build(text, "gp-update", "GP")
     assert "Stopped on 10 Jun 1937: ramipril 5 mg daily. Reason for change: dry cough." in md
+
+
+# ---- round 11 freeze, severity 5: finalise() takes only a build result, so screen-only flags travel with the letter ----
+def test_r11s_finalise_refuses_raw_md_string(tmp_path):
+    res = build(PSY, "gp-update", "GP", flags=[])
+    md, _ = res
+    for raw in (md, "", "# Letter\nNo flags here.\n"):
+        with pytest.raises(Refused) as e:
+            L.finalise(raw)
+        assert str(e.value) == L.FINAL_RAW_REFUSED and "Nothing was written" in str(e.value)
+    assert list(tmp_path.iterdir()) == []                                          # nothing written
+
+
+def test_r11s_cut_blocks_finalise_until_cleared_by_include():
+    flags = []
+    res = build_from_template(PSY_T, "gp-update", "GP", flags=flags, resolve=["GP=general practitioner"])
+    assert CUT_MSG.format(lid := line_of(PSY_T, "bipolar")) in flags and L.CUT_FLAG not in res.md
+    with pytest.raises(Refused, match="--final refused"):
+        L.finalise(res)
+    ok = build_from_template(PSY_T, "gp-update", "GP", flags=[], include=["psychiatric history"],
+                             resolve=["GP=general practitioner"])          # unrelated abbreviation flag closed too
+    assert "bipolar" in ok.md and not any("cut to keep it private" in f for f in ok.flags)
+    fin = L.finalise(ok)
+    assert "bipolar" in fin and "[L" not in fin
+
+
+def test_r11s_sensitive_cut_blocks_finalise_until_cleared_by_keep_out():
+    res = build_from_template(SENS_RES_NOTES, "gp-update", "GP", flags=[])
+    assert SENS_FLAG.format(lid=SENS_LID) in res.flags
+    with pytest.raises(Refused, match="--final refused"):
+        L.finalise(res)
+    ok = build_from_template(SENS_RES_NOTES, "gp-update", "GP", flags=[], keep_out=[SENS_LID])
+    assert SENS_FLAG.format(lid=SENS_LID) not in ok.flags
+    assert "[L" not in L.finalise(ok) and "chlamydia" not in L.finalise(ok).lower()
+
+
+@pytest.mark.parametrize("notes,lid_of", [(PSY_T, "bipolar"), (SENS_RES_NOTES, "chlamydia")])
+def test_r11s_not_copy_does_not_clear_cut_through_library(notes, lid_of):
+    res = build_from_template(notes, "gp-update", "GP", flags=[], not_copy=[line_of(notes, lid_of)])
+    with pytest.raises(Refused, match="--final refused"):
+        L.finalise(res)
+
+
+# ---- round 11 freeze: tests of already-signed rules (template stop form, H29 patient letters) ----
+@pytest.mark.parametrize("med", ["ramipril 5 mg daily stopped reason: dry cough",
+                                 "ramipril 5 mg daily stopped 1937-06-01 reason: dry cough",
+                                 "ramipril 5 mg daily ceased - dry cough",
+                                 "ramipril 5 mg daily withheld",
+                                 "ramipril 5 mg daily reason: cough; stopped 1937-06-01 reason: dry cough"])
+def test_r11s_template_unbracketed_stop_reason_refused_never_partly_parsed(tmp_path, med):
+    text = tpl(question="Please review.", problems=("cough",), meds=(med,), actions=("review in 2 weeks",))
+    n = int(line_of(text, "ramipril")[1:])
+    with pytest.raises(Refused) as e:
+        L.build_from_template(text, "gp-update", "Patient", audience="patient")
+    assert str(e.value) == L.TEMPLATE_REFUSED.format(n=n)
+    r, out = _run_t(tmp_path, text, "--brief", "update to patient")
+    assert r.returncode == 2 and r.stdout == "" and r.stderr.strip() == L.TEMPLATE_REFUSED.format(n=n)
+    assert not out.exists()                                                         # nothing written
+
+
+H29_PATIENT = {
+    ("changed", "dry cough"): "- Changed on 10 Jun 1937: from metformin 100 mg once a day. Now: metformin 200 mg once a day. "
+                              "Reason for change: dry cough. [L4, L6]",
+    ("stopped", "dry cough"): "- Stopped on 10 Jun 1937: metformin 100 mg once a day. Reason for change: dry cough. [L5, L7]",
+    ("changed", None): "- Changed on 10 Jun 1937: from metformin 100 mg once a day. Now: metformin 200 mg once a day. "
+                       "Reason for change: not documented. [L4, L6]",
+    ("stopped", None): "- Stopped on 10 Jun 1937: metformin 100 mg once a day. Reason for change: not documented. [L5, L7]",
+}
+
+
+def _patient_kind(monkeypatch, kind, reason):
+    monkeypatch.setattr(L, "_TEMPLATE", [])
+    monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
+    md, dropped = build(_kind_notes(kind, "metformin", reason), "gp-update", "Patient", audience="patient")
+    return md, [l for l in md.splitlines() if l.startswith("- " + kind.capitalize() + " on")]
+
+
+@pytest.mark.parametrize("kind", ["changed", "stopped"])
+def test_r11s_h29_patient_stop_and_change_in_full_plain_words_with_reason(monkeypatch, kind):
+    md, lines = _patient_kind(monkeypatch, kind, "dry cough")
+    assert lines == [H29_PATIENT[(kind, "dry cough")]]                              # byte for byte, in full
+    assert "daily" not in lines[0] and "once a day" in lines[0]                     # plain words
+
+
+@pytest.mark.parametrize("kind", ["changed", "stopped"])
+def test_r11s_h29_patient_no_reason_still_names_stop_and_change_never_dropped(monkeypatch, kind):
+    md, lines = _patient_kind(monkeypatch, kind, None)
+    assert lines == [H29_PATIENT[(kind, None)]]                                     # still there, in full
+    assert "daily" not in lines[0] and "once a day" in lines[0]
