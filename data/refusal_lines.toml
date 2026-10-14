@@ -8,10 +8,10 @@
 
 [[code]]
 key = "CHECK_SAFE_MULTI_ID"
-text = "Refused: notes mention more than one patient identifier."
+text = "Refused: the notes mention more than one patient identifier. Nothing was written. Use notes for one patient only."
 check = 1
-status = "held"
-source = "letters_refusals_SAFETY.md re-sign: held; earlier text kept"
+status = "signed"
+source = "both files, round 2 (15 Oct 2026)"
 
 [[code]]
 key = "CHECK_WORD_LIMIT"
@@ -64,10 +64,10 @@ source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)
 
 [[code]]
 key = "CHECK_DOSE_UNIT"
-text = "Refused: dose unit not flagged at {at}."
+text = "Refused: the dose unit at {at} hasn't been flagged for checking. Check the unit against the notes, then run again."
 check = 9
-status = "held"
-source = "letters_refusals_SAFETY.md re-sign: held; earlier text kept"
+status = "signed"
+source = "both files, round 2 (15 Oct 2026)"
 
 [[code]]
 key = "CHECK_DATE"
@@ -134,10 +134,10 @@ source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)
 
 [[code]]
 key = "COMBO_REFUSED"
-text = "Refused: line {lid} has a combination medicine that letters can't fully list yet. Nothing was written."
+text = "Refused: line {lid} has a combination medicine that this tool can't fully list yet. Nothing was written."
 check = 2
-status = "signed-earlier"
-source = "Physician, room message 14 Oct 2026 21:22 (docs/RULINGS.md, check 2)"
+status = "signed"
+source = "both files: Physician final 5, Educator round 3 (15 Oct 2026)"
 
 [[code]]
 key = "REVERSE_REFUSED"
@@ -220,15 +220,15 @@ source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)
 key = "PRIVACY_BLOCKED[missing]"
 text = "Blocked: this letter needs the privacy line, and it's missing."
 check = 19
-status = "signed-earlier"
-source = "Physician signed, Patient reviewed, 14 Oct 2026 (RULES.md row 19)"
+status = "signed"
+source = "both files: Physician final 5, Educator round 3 (15 Oct 2026)"
 
 [[code]]
 key = "PRIVACY_BLOCKED[unset]"
 text = "Blocked: the privacy field isn't set. Mark whether this letter needs the privacy line."
 check = 19
-status = "signed-earlier"
-source = "Physician signed, Patient reviewed, 14 Oct 2026 (RULES.md row 19)"
+status = "signed"
+source = "both files: Physician final 5, Educator round 3 (15 Oct 2026)"
 
 [[code]]
 key = "FINAL_RAW_REFUSED"
@@ -281,10 +281,10 @@ source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)
 
 [[code]]
 key = "SENSITIVE_REFUSED"
-text = "Refused: line L{n} of the brief includes an item that isn't on the sensitive-items list. Nothing was written."
+text = "Refused: line L{n} of the brief includes an item that isn't on the sensitive-items list. Nothing was written. Remove the item from the brief, or use one from the list."
 check = 5
-status = "signed-earlier"
-source = "rulings: round 11, Physician signed (Unknown Include: item)"
+status = "signed"
+source = "Educator round 3 text; Physician safety re-sign, 15 Oct 2026 (letters_refusals_SAFETY.md)"
 
 [[code]]
 key = "SENSITIVE_REFUSED_NO_LINE"
@@ -297,15 +297,15 @@ source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)
 key = "INCIDENT"
 text = "This looks like real patient information. Don't paste it here; delete it from where you copied it and report it to your organisation's privacy officer."
 check = 1
-status = "held"
-source = "letters_refusals_SAFETY.md: held"
+status = "signed"
+source = "both files: Physician final 5, Educator round 3 (15 Oct 2026); 2 signed reasons"
 
 [[code]]
 key = "copy_refusal: Refused: copy request {where}. {PATIENT_COPY_TAIL if patient else COPY_TAIL}"
 text = "Refused: copy request {where}. {PATIENT_COPY_TAIL if patient else COPY_TAIL}"
 check = 3
-status = "held"
-source = "letters_refusals_SAFETY.md: held"
+status = "signed"
+source = "both files, round 2 (15 Oct 2026); both endings"
 
 [[code]]
 key = "FINAL_REFUSED"

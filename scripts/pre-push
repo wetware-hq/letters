@@ -1,0 +1,8 @@
+#!/bin/sh
+# Blocks a push while any refusal line is not signed in both signed files (room ruling, 15 Oct 2026).
+# Install: ln -s ../../scripts/pre-push .git/hooks/pre-push
+cd "$(git rev-parse --show-toplevel)" || exit 1
+python3 -m pytest -q -p no:cacheprovider "test_letters.py::test_refusal_codes_signed_in_both_files" || {
+  echo "pre-push: blocked: a refusal line is not signed in both files (test_refusal_codes_signed_in_both_files)." >&2
+  exit 1
+}
