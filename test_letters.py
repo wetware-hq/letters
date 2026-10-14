@@ -5177,3 +5177,23 @@ def test_template_unsigned_a_day_wordings_still_refused():
     for f in ("twice a day", "three times a day", "4 times a day"):
         with pytest.raises(Refused, match="doesn't follow the template"):
             L.from_template(C4_TPL.replace("- aspirin 100 mg daily", f"- paracetamol 1 g {f} oral"))
+
+
+# ---------- check 14: prefix-overlapping linked terms give the same letter in either list order (Scientist) ----------
+def test_c14_prefix_linked_terms_same_letter_and_cuts_in_both_orders(monkeypatch):
+    import copy
+    base = L.load_linked()
+    note = ("Patient: SYNTH-9301\n1937-06-03 Clinic review.\nProblem: ingrown toenail\nPMHx: bipolar disorder\n"
+            "Med: lithium 250 mg twice daily heart failure clinic\nPlan: discuss heart failure clinic. Keep walking.\n"
+            "Plan: heart check next visit. Rest feet.\nFollow-up: review in 2 weeks\n")
+    runs = []
+    for terms in (["heart", "heart failure"], ["heart failure", "heart"]):
+        d = copy.deepcopy(base)
+        d["psychiatric history"]["terms"] = terms + d["psychiatric history"]["terms"]
+        monkeypatch.setattr(L, "load_linked", lambda d=d: d)
+        flags = []
+        md, dropped = build(note, "gp-update", "Podiatry", flags=flags)
+        runs.append((md.encode(), json.dumps(dropped).encode(), json.dumps(flags).encode()))
+    assert runs[0] == runs[1]
+    md = runs[0][0].decode()
+    assert "heart" not in md and "Keep walking." in md and "Rest feet." in md and "lithium 250 mg" in md
