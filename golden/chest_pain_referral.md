@@ -25,7 +25,7 @@ Please answer the question below.
 
 ## Results
 
-- LDL [flag: abbreviation, meaning not confirmed]: 4.1 mmol/L on 2 Mar 1937, 3.2 mmol/L on 16 Mar 1937 [L8, L13]
+- LDL: 4.1 mmol/L on 2 Mar 1937, 3.2 mmol/L on 16 Mar 1937 [L8, L13]
 
 ## Medicine changes
 

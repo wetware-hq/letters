@@ -4695,3 +4695,43 @@ def test_r13_mu_g_after_number_is_a_dose_flagged(dose):
 def test_r13_ug_flagged():
     assert "ug" in L.flagged_tokens("levothyroxine 50 ug daily", tuple(L.load_single_meaning()))
     assert L.flagged_tokens("ug", ()) == ["ug"]
+
+
+# ---------- round 13 item 3: test names (locale/core/test_names.toml) ----------
+R13_TN = ("Na 140 mmol/L 1937-08-01", "K 4.1 mmol/L 1937-08-01", "Cr 90 micromol/L 1937-08-01",
+          "urea 6.0 mmol/L 1937-08-01", "LDL 2.1 mmol/L 1937-08-01", "ferritin 50 \u00b5g/L 1937-08-01")
+
+
+def test_r13_test_names_file_clean_and_one_entry_each():
+    raw = tomllib.loads(L.TEST_NAMES_FILE.read_text())["test_names"]
+    assert set(raw) == set(L.TEST_NAMES) and "Ca" not in raw
+    assert not {w for w in raw if w.lower() in L.SHORTHAND | L._detection_words()}
+    others = set(L.UNIT_WORDING) | set(L.load_plain_words()) | set(L.load_single_meaning())
+    assert not set(raw) & others
+
+
+def test_r13_test_names_clear_flag_in_clinician_letter(tmp_path):
+    r, md = _r13_run(tmp_path, _r13(R13_TN), "discharge to GP", "--final")
+    assert r.returncode == 0, r.stderr
+    for w in ("Na", "K", "Cr", "urea", "LDL", "ferritin"):
+        assert re.search(rf"\b{w}\b", md) and f"{w} (" not in md
+
+
+def test_r13_test_names_patient_wording_every_use(tmp_path):
+    text = _r13(R13_TN + ("Na 138 mmol/L 1937-08-20",))
+    r, md = _r13_run(tmp_path, text, "letter to the patient")
+    assert r.returncode == 0, r.stderr
+    for w, plain in (("Na", "sodium"), ("K", "potassium"), ("Cr", "creatinine, a kidney test"),
+                     ("urea", "a kidney test"), ("LDL", '"bad" cholesterol'), ("ferritin", "iron stores")):
+        assert f"{w} ({plain})" in md and f"{w} {L.FLAG}" not in md
+
+
+def test_r13_ca_not_treated_as_calcium_in_gp_letter(tmp_path):
+    r, md = _r13_run(tmp_path, _r13(("Ca 2.4 mmol/L 1937-08-01",)), "discharge to GP")
+    assert r.returncode == 0, r.stderr
+    assert f"Ca {L.FLAG}" in md and "calcium" not in md.lower()
+
+
+@pytest.mark.parametrize("tok", ["PCR", "PT", "PSA", "Ca"])
+def test_r13_unlisted_test_shorthand_stays_flagged(tok):
+    assert L.needs_flag(tok, "", tuple(L.load_single_meaning()))

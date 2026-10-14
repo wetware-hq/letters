@@ -990,6 +990,20 @@ def load_allowed_shorthand(paths=None):
 
 
 ALLOWED_SHORTHAND = load_allowed_shorthand()
+TEST_NAMES_FILE = HERE / "locale" / "core" / "test_names.toml"
+
+
+def load_test_names(path=None):
+    """Signed test names (round 13 item 3): {name: patient wording}. Shorthand.txt and detection words never."""
+    p = pathlib.Path(path) if path else TEST_NAMES_FILE
+    if not p.exists():
+        return {}
+    d = tomllib.loads(p.read_text(encoding="utf-8")).get("test_names", {})
+    banned = SHORTHAND | _detection_words()
+    return {k: v for k, v in d.items() if k.lower() not in banned}
+
+
+TEST_NAMES = load_test_names()
 PLAIN_WORDS_FILES = [HERE / "locale" / "core" / "plain_words.toml", HERE / "locale" / LOCALE / "plain_words.toml"]
 
 
@@ -1003,13 +1017,18 @@ def load_plain_words(paths=None):
 
 
 PLAIN_WORDS = load_plain_words()
+
+
+def patient_wording():
+    """Signed patient wording: plain words plus test names (round 13). Read at call time."""
+    return {**PLAIN_WORDS, **TEST_NAMES}
 _PATIENT_LETTER = []    # [True] while a patient letter is built: allowed words don't clear the flag there (ruling)
 
 
 def allowed_word(tok):
     """Allowed words clear the shorthand flag in clinician letters only. In patient letters they stay flagged unless
     a signed plain-words entry exists (single_meaning.toml, handled before this check)."""
-    return tok in ALLOWED_SHORTHAND and (not _PATIENT_LETTER or tok in PLAIN_WORDS)
+    return (tok in ALLOWED_SHORTHAND or tok in TEST_NAMES) and (not _PATIENT_LETTER or tok in patient_wording())
 WORDS = set().union(*(_lines(p) for p in WORDLISTS)) | {m.lower() for m in MONTHS}
 
 
@@ -1182,10 +1201,10 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
                     return ab                                # confirmed as written (e.g. a drug name)
             elif ab in single:
                 full = single[ab]["patient" if audience == "patient" else "clinical"]
-            elif audience == "patient" and ab in PLAIN_WORDS:
+            elif audience == "patient" and ab in patient_wording():
                 if re.match(r"\s*\(", m.string[m.end():]):
                     return ab                                # the notes already explain it in a bracket
-                return f"{ab} ({PLAIN_WORDS[ab]})"           # signed plain words, on every use
+                return f"{ab} ({patient_wording()[ab]})"           # signed plain words, on every use
             elif needs_flag(ab, before, exact):
                 label = DRUG_FLAG if med and not in_reason and (ab.islower() or (ab.istitle() and len(ab) > 3)) and ab.lower() not in SHORTHAND \
                     and ab.lower() not in WORDS else FLAG
@@ -1255,7 +1274,7 @@ def _source_words(src, single=None):
             words |= _words(rep)
     for m in UNIT_AFTER_NUMBER.finditer(src):           # signed unit wording, earned by the unit in the line
         words |= _words(UNIT_WORDING.get(mu_norm(m.group(3)), ""))
-    for ab, plain in PLAIN_WORDS.items():              # signed patient plain words, earned by the word in the line
+    for ab, plain in patient_wording().items():        # signed patient plain words, earned by the word in the line
         if ab in tokens(src):
             words |= _words(plain)
     for pat, rep in LABEL_REWRITES:
@@ -1308,7 +1327,7 @@ def check(md, sources, letter_type):
         if section in ROUTE_SECTIONS:
             scan = route_slot(scan, ids, plain=True)[1].replace(ROUTE_SLOT, "route")   # signed route slot: checked in wording()
         forms = [(f, ab) for ab, d in single.items() for f in (d["clinical"], d["patient"])] + \
-                [(f, ab) for ab, f in res.items()] + [(f"{ab} ({f})", ab) for ab, f in PLAIN_WORDS.items()] + \
+                [(f, ab) for ab, f in res.items()] + [(f"{ab} ({f})", ab) for ab, f in patient_wording().items()] + \
                 [(f"{v} ({w})", v) for u, w in UNIT_WORDING.items() if w for v in {u, u.replace("\u00b5", "\u03bc")}]
         for f, ab in sorted(forms, key=lambda x: -len(x[0])):
             scan = scan.replace(f"{f} ({ab})", ab).replace(f, ab)
@@ -1684,7 +1703,7 @@ def reverse_check(md, text, extra="", template=None):
     tool = _tool_words()
     single = load_single_meaning()
     expans = " ".join(v["clinical"] + " " + v["patient"] for v in single.values()).lower()
-    expans += " " + " ".join(PLAIN_WORDS.values()).lower()     # signed patient plain words
+    expans += " " + " ".join(patient_wording().values()).lower()     # signed patient plain words
     expans += " " + " ".join(UNIT_WORDING.values()).lower()    # signed unit wording
     body = md.split("\n---\n")[0]
     tool |= {"dear", "who", "when", "action", "changed", "from", "now", "stopped", "started", "restarted", "reason",

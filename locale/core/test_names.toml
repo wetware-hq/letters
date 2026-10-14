@@ -1,0 +1,27 @@
+# Test names (core). First set, from named sources; citations UNVERIFIED. Signed by clinical reviewer.
+# Sources named: RCPA PUTS/SPIA terminology; LOINC common test short names.
+# Clinician letters: the shorthand flag clears. Patient letters: NAME (wording) on every use, no second bracket.
+# Ca is deliberately NOT listed and stays flagged (ruling). PCR, PT and PSA are not listed and stay flagged.
+# Never add anything in shorthand.txt or a sensitive-items detection word; the loader drops such an entry.
+
+[test_names]
+Na = "sodium"
+K = "potassium"
+Cl = "chloride"
+HCO3 = "bicarbonate"
+Cr = "creatinine, a kidney test"
+urea = "a kidney test"
+Mg = "magnesium"
+PO4 = "phosphate"
+PTH = "a hormone that controls calcium"
+LDL = "\"bad\" cholesterol"
+HDL = "\"good\" cholesterol"
+TG = "triglycerides, a type of blood fat"
+B12 = "vitamin B12"
+folate = "a B vitamin"
+ferritin = "iron stores"
+troponin = "a heart muscle test"
+lipase = "a pancreas test"
+Plt = "platelets, cells that help blood clot"
+Hct = "the share of blood made of red cells"
+ACR = "a urine test for kidney protein"
