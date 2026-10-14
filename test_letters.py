@@ -5160,3 +5160,20 @@ def test_c1_in_event_id_exact_bounds():
     assert L.in_event_id(at("SYNTH-EP-1002#7"))
     assert not L.in_event_id(at("Event")) and not L.in_event_id(at("noted")) and not L.in_event_id(at("EP", 1))
     assert not L.in_event_id(at("Event SYNTH")) and not L.in_event_id(at("7 noted"))
+
+
+# ---------- template frequency 'four times a day' (signed qid patient wording, single_meaning.toml) ----------
+def test_template_four_times_a_day_is_signed_frequency():
+    assert L.load_single_meaning()["qid"]["patient"] == "four times a day"      # only allowed because it is signed
+    assert L.med_item("paracetamol 1 g four times a day oral for 5 days")["freq"] == "four times a day"
+    t = C4_TPL.replace("- aspirin 100 mg daily", "- paracetamol 1 g four times a day oral for 5 days")
+    pmd = L.build_from_template(t, "discharge", "patient", audience="patient", privacy=True, flags=[])[0]
+    gmd = L.build_from_template(t, "discharge", "GP", audience="gp", flags=[])[0]
+    assert "paracetamol 1 g four times a day oral (by mouth) for 5 days" in pmd
+    assert "paracetamol 1 g four times a day oral for 5 days" in gmd
+
+
+def test_template_unsigned_a_day_wordings_still_refused():
+    for f in ("twice a day", "three times a day", "4 times a day"):
+        with pytest.raises(Refused, match="doesn't follow the template"):
+            L.from_template(C4_TPL.replace("- aspirin 100 mg daily", f"- paracetamol 1 g {f} oral"))
