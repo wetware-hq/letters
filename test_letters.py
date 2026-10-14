@@ -4836,7 +4836,7 @@ def test_r13_main_leaves_no_template_state(tmp_path):
     assert "5 Apr 1937" in md
 
 
-# ---------- check 19: privacy line, explicit privacy field (wording pending Patient review, Physician sign-off) ----------
+# ---------- check 19: privacy line, explicit privacy field (wording reviewed by Patient, signed by Physician) ----------
 R19 = dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
            actions=("review in 2 weeks, GP",))
 

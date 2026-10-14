@@ -2191,7 +2191,7 @@ class BuildResult(tuple):
         return r
 
 
-# Check 19 (privacy line). Wording PENDING Patient's review and Physician's sign-off: change it here only.
+# Check 19 (privacy line). Wording reviewed by Patient and signed by Physician (14 Oct 2026); change it here only.
 PRIVACY_BLOCKED = {
     "missing": "Blocked: this letter needs the privacy line, and it's missing.",
     "unset": "Blocked: the privacy field isn't set. Mark whether this letter needs the privacy line.",

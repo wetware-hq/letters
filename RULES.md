@@ -23,4 +23,4 @@ The 19 safety checks in `docs/SAFETY_CHECKS.md`, each with its signer, class and
 | 16 | Long sentence | Physician | safety | test_planted_long_sentence_flagged_not_refused |
 | 17 | Empty allergies or medicines field, question flag | Physician | safety | test_r10_empty_allergies_and_medicines_non_patient, test_referral_without_question_flagged_and_final_refused |
 | 18 | --final gate | Physician | safety | test_final_removes_tags_keeps_draft_mark_and_footer, test_default_cut_for_gp_and_flagged_blocks_final |
-| 19 | Privacy line (explicit privacy field) | Physician | safety | test_c19_privacy_true_line_missing_blocks_final, test_c19_privacy_false_passes_unblocked, test_c19_privacy_field_absent_on_patient_letter_blocks_final |
+| 19 | Privacy line (explicit privacy field); both blocked lines in `PRIVACY_BLOCKED` reviewed by Patient, signed by Physician 14 Oct 2026 | Physician | safety | test_c19_privacy_true_line_missing_blocks_final, test_c19_privacy_false_passes_unblocked, test_c19_privacy_field_absent_on_patient_letter_blocks_final |

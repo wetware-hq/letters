@@ -28,7 +28,7 @@ written. FACT checks take their facts from the source lines, so plain words neve
 | 16 | Long sentence (`flag_long_sentences`) | finished letter | OUTPUT (readability) | correct; counting of plain-word brackets is unchanged (round 14 item) |
 | 17 | Empty allergies or medicines field, question flag | finished letter + template fields | OUTPUT | correct |
 | 18 | `--final` gate (`finalise`) | build result (letter + every flag) | OUTPUT | correct |
-| 19 | Privacy line (`privacy_check`, run by `finalise`) | the explicit privacy field (`--privacy true/false`, `build(privacy=)`) and the finished letter; never inferred from the notes | OUTPUT | added; wording pending Patient's review and Physician's sign-off (`PRIVACY_BLOCKED`) |
+| 19 | Privacy line (`privacy_check`, run by `finalise`) | the explicit privacy field (`--privacy true/false`, `build(privacy=)`) and the finished letter; never inferred from the notes | OUTPUT | added; wording in `PRIVACY_BLOCKED` reviewed by Patient and signed by Physician (14 Oct 2026) |
 
 Result of the audit: no check was misclassified, so no check was moved. The tests below pin the two properties
 the classes depend on:
