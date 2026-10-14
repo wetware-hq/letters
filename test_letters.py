@@ -4735,3 +4735,47 @@ def test_r13_ca_not_treated_as_calcium_in_gp_letter(tmp_path):
 @pytest.mark.parametrize("tok", ["PCR", "PT", "PSA", "Ca"])
 def test_r13_unlisted_test_shorthand_stays_flagged(tok):
     assert L.needs_flag(tok, "", tuple(L.load_single_meaning()))
+
+
+# ---------- round 13: safety-check audit (docs/SAFETY_CHECKS.md) ----------
+def test_r13_audit_dose_check_same_with_and_without_plain_words():
+    text = _r13(("Hb 132 g/L 1937-08-01", "TSH 2.1 mU/L 1937-08-01"),
+                meds=("paracetamol 1 g qid max 4 g in 24 hours",))
+    notes = L.from_template(text)
+    out = {}
+    for aud, to in (("patient", "Patient"), (None, "GP")):
+        md = L.build_from_template(text, "discharge", to, audience=aud).md
+        ok = L.verify_letter(md, notes, aud or "gp")
+        bad = re.sub(r"no more than 4 g in 24 hours|max 4 g in 24 hours", "", md)
+        got = []
+        L.verify_letter(bad, notes, aud or "gp", collect=got)
+        out[aud] = (ok, [g for g in got if "maximum dose" in g])
+    assert out["patient"] == out[None] and out[None][1]
+    assert "(grams per litre)" in L.build_from_template(text, "discharge", "Patient", audience="patient").md
+
+
+R13_HIV = _r13(meds=("empagliflozin 10 mg daily",)).replace("- review\n", "- HIV\n- review\n", 1)
+
+
+def test_r13_audit_leak_check_source_side():
+    flags = []
+    md = L.build_from_template(R13_HIV, "discharge", "GP", flags=flags).md
+    assert "HIV" not in md and any("L6" in f for f in flags)
+
+
+def test_r13_audit_leak_check_output_side_introduced_leak(monkeypatch):
+    real = L.render
+    def inject(*a, **k):                         # a leak introduced while writing, not present in the output source
+        return real(*a, **k).replace("## Problems\n\n", f"## Problems\n\n- HIV {L.FLAG} [L6]\n", 1)
+    monkeypatch.setattr(L, "render", inject)
+    flags = []
+    md = L.build_from_template(R13_HIV, "discharge", "GP", flags=flags).md
+    assert "HIV" not in md and any("L6" in f for f in flags)
+
+
+def test_r13_audit_leak_refusal_on_finished_letter():
+    notes = L.from_template(R13_HIV)
+    md = L.build_from_template(R13_HIV, "discharge", "GP").md
+    leaked = md.replace("## Problems\n\n", "## Problems\n\n- HIV [L6]\n", 1)
+    with pytest.raises(L.Refused):
+        L.verify_letter(leaked, notes, "gp")
