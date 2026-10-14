@@ -4899,3 +4899,224 @@ def test_replay_same_input_byte_identical(tmp_path, brief):
     assert runs[0] == runs[1]
     lib = [L.build_from_template(text, *L.read_brief(brief)[:2]) for _ in range(2)]
     assert lib[0].md.encode() == lib[1].md.encode() and lib[0].flags == lib[1].flags
+
+
+# ---------- check 14 (cut rule): direct tests, one per behaviour a mutant could break (round 13 step 5) ----------
+C14_NOTE = """Patient: SYNTH-9001
+1937-06-03 Clinic review.
+Problem: ingrown toenail
+Med: lithium 250 mg twice daily, with food, clozapine monitoring weekly
+Plan: discuss schizophrenia at review
+Med: dolutegravir 50 mg daily HIV-positive
+Med: lithium 250 mg daily serum lithium checked
+Med: Lithicarb 250 mg daily
+Med: lithium level 250 mg daily
+"""
+C14_PSY = ["L99: psychiatric history linked words, not relevant to Podiatry"]
+C14_PART = L.MED_PART_NOTICE.format(lid="{}")
+C14_MED = L.MED_NOTICE.format(lid="{}")
+
+
+def _c14(md, dropped=C14_PSY, title="Update"):
+    flags = []
+    return L.apply_cut_rule(md, C14_NOTE, dropped, flags, title), flags
+
+
+def test_c14_med_line_keeps_plain_parts_drops_linked_part_and_names_the_medicine_line():
+    out, flags = _c14("**Letter:** Update\n- lithium 250 mg twice daily, with food, clozapine monitoring weekly [L3, L4]")
+    assert out == "**Letter:** Update\n- lithium 250 mg twice daily, with food [flag: part of medicine entry left out] [L3, L4]"
+    assert flags == [C14_PART.format("L4"), C14_MED.format("L4")]      # the medicine line, never the first cited id
+
+
+def test_c14_longest_detection_word_is_removed_whole():
+    out, flags = _c14("- dolutegravir 50 mg daily HIV-positive [L3, L6]", ["L99: HIV status linked words, not relevant to GP"])
+    assert out == "- dolutegravir 50 mg daily [flag: part of medicine entry left out] [L3, L6]"
+    assert flags == [C14_PART.format("L6"), C14_MED.format("L6")]
+
+
+def test_c14_flag_already_on_the_medicine_stays_when_the_term_is_matched_directly():
+    out, _ = _c14("- lithium 250 mg daily serum lithium [flag: abbreviation], checked [L3, L7]")
+    assert out == "- lithium 250 mg daily [flag: abbreviation], checked [flag: part of medicine entry left out] [L3, L7]"
+
+
+def test_c14_medicine_that_would_disappear_is_refused_with_the_medicine_line():
+    with pytest.raises(Refused) as e:
+        _c14("- lithium level 250 mg daily [L3, L9]")
+    assert str(e.value) == L.LINKED_REFUSED.format(lid="L9")
+
+
+def test_c14_brand_with_no_generic_is_refused_with_the_line_naming_it(monkeypatch):
+    monkeypatch.setattr(L, "_brand_map", lambda items: {"Lithicarb": ""})
+    with pytest.raises(Refused) as e:
+        _c14("- Lithicarb 250 mg daily [L3, L8]")
+    assert str(e.value) == L.LINKED_REFUSED.format(lid="L8")
+
+
+def test_c14_sentence_left_out_flag_goes_on_the_letter_heading_and_names_the_source_line():
+    out, flags = _c14("# Head\n**Letter:** Update\n- Discuss schizophrenia at review. Keep walking. [L3, L5]")
+    assert out == "# Head\n**Letter:** Update [flag: sentence left out]\n- Keep walking. [L3, L5]"
+    assert flags == [L.LEFT_OUT_NOTICE.format(lid="L5")]
+
+
+def test_c14_sentence_left_out_with_no_title_flags_the_first_line():
+    out, flags = _c14("- Discuss schizophrenia at review. Keep walking. [L3, L5]", title=None)
+    assert out == "- Keep walking. [L3, L5] [flag: sentence left out]"
+    assert flags == [L.LEFT_OUT_NOTICE.format(lid="L5")]
+
+
+def test_c14_cut_rule_same_letter_without_a_flags_list():
+    md = "# Head\n**Letter:** Update\n- Discuss schizophrenia at review. Keep walking. [L3, L5]"
+    assert L.apply_cut_rule(md, C14_NOTE, C14_PSY, None, "Update") == _c14(md)[0]
+
+
+def test_c14_flag_cuts_without_note_text_flags_every_cut_line():
+    flags = []
+    assert L.flag_cuts("x", ["L4: HIV status cut", "L6: other note"], flags, "Update") == "x"
+    assert flags == [L.CUT_NOTICE.format(lid="L4")]
+    assert L.flag_cuts("x", ["L4: HIV status cut"], None, "Update") == "x"
+
+
+def test_c14_flag_cuts_result_line_gets_its_own_flag_and_keep_out_clears_it(monkeypatch):
+    note = "Patient: SYNTH-9002\n1937-06-03 Clinic review.\nResult: HIV negative 1937-06-01\nProblem: cough\n"
+    monkeypatch.setattr(L, "_SENS_CUTS", [])
+    monkeypatch.setattr(L, "_KEPT_OUT", [])
+    flags = []
+    L.flag_cuts("x", ["L3: HIV status result, not relevant to GP", "L4: HIV status linked words"], flags, "Update", note)
+    assert flags == [L.SENS_RESULT_NOTICE.format(lid="L3"), L.CUT_NOTICE.format(lid="L4")] and L._SENS_CUTS == ["L3"]
+    monkeypatch.setattr(L, "_KEEP_OUT", ["L3"])
+    flags = []
+    L.flag_cuts("x", ["L3: HIV status result, not relevant to GP"], flags, "Update", note)
+    assert flags == [] and L._KEPT_OUT == ["L3"]
+
+
+# ---------- check 6/7 (no-value result lines): direct cumsum tests (round 13 step 5) ----------
+C6_NOTE = "Patient: SYNTH-9003\n1937-08-02 Clinic review.\nResult: chest X-ray clear 1937-08-01\nResult: CD4 not done 1937-08-01\n"
+
+
+def _c6(dropped, include=(), keep=False, monkeypatch=None):
+    monkeypatch.setattr(L, "_INCLUDE", set(include))
+    st = cumsum(parse(C6_NOTE)[0], "GP", dropped, keep_indications=keep)
+    return [r[1] for r in st["results_text"]], dropped
+
+
+def test_c6_line_already_cut_as_sensitive_is_not_kept_again(monkeypatch):
+    kept, dropped = _c6(["L3: HIV status cut (earlier)"], monkeypatch=monkeypatch)
+    assert ["L3"] not in kept and dropped == ["L3: HIV status cut (earlier)", "L4: HIV status result, not relevant to GP"]
+
+
+def test_c6_a_cut_on_another_line_does_not_hide_this_line(monkeypatch):
+    kept, _ = _c6(["L9: HIV status cut (earlier)"], monkeypatch=monkeypatch)
+    assert kept == [["L3"]]
+
+
+def test_c6_linked_word_result_cut_unless_included(monkeypatch):
+    kept, dropped = _c6([], monkeypatch=monkeypatch)
+    assert kept == [["L3"]] and dropped == ["L4: HIV status result, not relevant to GP"]
+    kept, dropped = _c6([], include=["hiv status"], monkeypatch=monkeypatch)
+    assert kept == [["L3"], ["L4"]] and dropped == []
+    kept, dropped = _c6([], keep=True, monkeypatch=monkeypatch)     # patient letter: kept word for word
+    assert kept == [["L3"], ["L4"]] and dropped == []
+
+
+# ---------- checks 2, 3, 4, 8, 9, 12, 13: direct tests for behaviours mutation testing showed untested ----------
+def test_c2_combination_refusal_names_the_parsed_line_not_a_comment():
+    t = "Patient: SYNTH-9004\n# Biktarvy aside\n1937-06-03 Clinic review.\nMed: Biktarvy 1 tablet daily\n"
+    with pytest.raises(Refused) as e:
+        L.refuse_combination_brands(t)
+    assert str(e.value) == L.COMBO_REFUSED.format(lid="L4")
+
+
+def test_c3_copy_refusal_defaults_to_clinician_wording():
+    for fn in (L.refuse_copies, L.pre_template_checks):
+        with pytest.raises(Refused) as e:
+            fn("Patient: SYNTH-9008\n", brief="copy to GP")
+        assert str(e.value) == L.copy_refusal("in the brief", False)
+
+
+def test_c3_recipients_line_with_two_readers_refused_before_template_check():
+    with pytest.raises(Refused) as e:
+        L.pre_template_checks("Patient: SYNTH-9008\nRecipients: GP, Cardiology\n")
+    assert str(e.value) == L.RECIPIENTS_REFUSED.format(n=2)
+    assert L.pre_template_checks("Patient: SYNTH-9008\nRecipients: Cardiology clinic\n") is not False
+
+
+C4_TPL = (HERE / "fixtures" / "template" / "chest_pain.txt").read_text()
+
+
+def test_c4_template_recipients_two_readers_refused():
+    with pytest.raises(Refused) as e:
+        L.from_template(C4_TPL.replace("Recipients: Cardiology clinic", "Recipients: Cardiology clinic, GP"))
+    assert str(e.value) == L.RECIPIENTS_REFUSED.format(n=3)
+
+
+def test_c4_template_list_header_value_only_nil_known_allergies():
+    assert "Allergy: nil known" in L.from_template(C4_TPL.replace("Allergies:\n- penicillin: rash", "Allergies: nil known"))
+    for bad in (C4_TPL.replace("Allergies:\n- penicillin: rash", "Allergies: penicillin"),
+                C4_TPL.replace("Problems:\n- exertional chest pain", "Problems: nil known")):
+        with pytest.raises(Refused) as e:
+            L.from_template(bad)
+        assert str(e.value).startswith(L.TEMPLATE_REFUSED.split("{")[0])
+
+
+def test_c8_sensitive_result_lines_default_is_clinician_and_reads_results_only():
+    note = C6_NOTE + "PMHx: CD4 count monitored\n"
+    assert L.sensitive_result_lines(note) == ["L4"]
+    assert L.sensitive_result_lines(note, patient=True) == []
+
+
+def test_c9_lines_before_the_first_heading_are_not_body_lines():
+    assert L.check("- unsourced claim here\n## Plan\n", {}, "referral") is True
+
+
+def test_c9_patient_route_plain_words_are_sourced():
+    t = C4_TPL.replace("- aspirin 100 mg daily", "- aspirin 100 mg daily oral")
+    md = L.build_from_template(t, "discharge", "patient", audience="patient", privacy=True, flags=[])[0]
+    assert "oral (by mouth)" in md
+
+
+def test_c9_signed_route_plain_words_are_never_read_as_shorthand(monkeypatch):
+    monkeypatch.setitem(L.ROUTE_PLAIN, "oral", "by mouth with SIP")     # signed wording is not re-checked for shorthand
+    t = C4_TPL.replace("- aspirin 100 mg daily", "- aspirin 100 mg daily oral")
+    md = L.build_from_template(t, "discharge", "patient", audience="patient", privacy=True, flags=[])[0]
+    assert "oral (by mouth with SIP)" in md
+
+
+def test_c12_not_documented_section_refused_once_per_section():
+    n = "Patient: SYNTH-9006\n1937-06-03 Clinic review.\nMed: aspirin 100 mg daily\nMed: ramipril 5 mg daily\n" \
+        "Allergy: penicillin - rash\nAllergy: sulfa - hives\n"
+    md = "**Date:** 3 Jun 1937\n## Current medicines\n- Current medicines not documented.\n## Allergies\n" \
+         "- Allergies not documented.\n"
+    got = []
+    L.verify_letter(md, n, collect=got)
+    nd = [g for g in got if "not documented" in g]
+    assert nd == [L.SECTION_ND.format(sec="medicines", lid="L3"), L.SECTION_ND.format(sec="allergies", lid="L5")]
+
+
+def test_c12_cut_result_not_required_in_clinician_letter_but_required_for_patient():
+    n = "Patient: SYNTH-9007\n1937-06-03 Clinic review.\nResult: CD4 0.35 ×10^9/L 1937-06-01\nResult: Hb 120 g/L 1937-06-01\n"
+    md = "**Date:** 3 Jun 1937\n## Results\n- Hb 120 g/L on 1 Jun 1937 [L4]\n"
+    assert L.verify_letter(md, n, "gp") is True
+    with pytest.raises(Refused) as e:
+        L.verify_letter(md, n, "patient")
+    assert str(e.value) == L.RESULT_MISSING.format(lid="L3")
+
+
+C13_NOTE = "Patient: SYNTH-9005\n1937-06-03 Clinic review.\nPlan: review in 2 weeks\n"
+
+
+def _c13(line, extra="", pre=""):
+    return L.reverse_check(pre + "**Date:** 3 Jun 1937\n" + line, C13_NOTE, extra)
+
+
+@pytest.mark.parametrize("line", ["- review 4 Jun 1937 [L3]", "- review 1937-06-09 [L3]", "- review in 7 weeks [L3]",
+                                  "- review with Smithers [L3]", "- Who follows up: physio. [L3]"])
+def test_c13_each_unsourced_kind_refused(line):
+    with pytest.raises(Refused) as e:
+        _c13(line)
+    assert str(e.value) == L.REVERSE_REFUSED.format(n=2)
+
+
+def test_c13_sourced_line_passes_header_above_date_skipped_and_no_extra_ok():
+    assert _c13("- review in 2 weeks [L3]") is None
+    assert _c13("- review in 2 weeks [L3]", pre="Smithers clinic 99\n") is None
+    assert _c13("- review in 2 weeks [L3]", extra=None) is None
