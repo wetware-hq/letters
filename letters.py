@@ -540,6 +540,7 @@ FOLLOWUP_UNTAGGED = re.compile(r"^(?:re-?check|review|recall|repeat|follow[- ]?u
                                r"\b(?:will|to) (?:chase|arrange|book|ring|call|follow)\b", re.I)
 
 
+NO_UNIT_NOTICE = "Line {lid} left out: no unit written."       # signed; screen only; does not block --final
 RESULT_UNREAD_NOTICE = "Flag: a result on line {lid} couldn't be read. Check it against the record."
 
 
@@ -674,7 +675,10 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                     if PER_LITRE.search(body):
                         st["narrative"].append((d, body0 if rd else body, ids))      # a result written in a sentence stays as written
                         continue
-                    # Round 12 ruling (severity 5): never a silent drop. Sensitive detection runs first.
+                    if r:                                # a number but no unit: signed behaviour (as at 92d6341)
+                        dropped.append(f"{lid}: result without a unit dropped")
+                        continue
+                    # Round 12 ruling (severity 5): a line with no value is never dropped silently. Sensitive first.
                     if any(d.split(":")[0].split(",").count(lid) and _names_cut_item(d) for d in dropped):
                         continue                         # already cut as sensitive (flag on screen, blocks --final)
                     cats = result_sensitive_cats(raw)
@@ -2853,6 +2857,9 @@ def main(argv=None):
     shown = printed_flags(flags, md)
     for f in shown:
         print(f, file=sys.stderr)
+    for d in dropped:                                                   # screen only; never in letter.md
+        if d.endswith(": result without a unit dropped"):
+            print(NO_UNIT_NOTICE.format(lid=d.split(":")[0]), file=sys.stderr)
     if dropped:
         cut = list(dict.fromkeys(i for d in dropped for i in re.findall(r"\b[LR]\d+\b", d.split(":")[0])))
         print(f"Cut from this letter: {', '.join(cut)}." if cut else "Cut from this letter: lines not known.",

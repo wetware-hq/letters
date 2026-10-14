@@ -395,9 +395,19 @@ def test_table_only_for_three_or_more_results():
     assert "| Test | Results |" in make_letter(t, "gp-update", "GP")
 
 
-def test_result_without_unit_kept_word_for_word():      # adapted round 12 (severity 5): never a silent drop
-    md, dropped = build("SYNTH-2\n1937-01-01\nResult: Hb 120", "gp-update", "GP")
-    assert "- Hb 120 [L3]" in md and not any("without a unit" in d for d in dropped)
+def test_result_without_unit_dropped_and_logged(tmp_path):
+    _, dropped = build("SYNTH-2\n1937-01-01\nResult: Hb 120", "gp-update", "GP")
+    assert any("without a unit" in d for d in dropped)
+    # signed addition (round 12): exact screen line, GP and patient letters; never in letter.md; --final not blocked
+    text = tpl(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
+               results=("Hb 120",), actions=("review in 2 weeks, GP",))
+    lid = line_of(text, "Hb 120")
+    for brief in ("discharge to GP", "letter to the patient"):
+        r, out = _run_t(tmp_path / brief.split()[-1], text, "--brief", brief, "--final")
+        assert r.returncode == 0, r.stderr
+        assert f"Line {lid} left out: no unit written." in r.stderr.splitlines()
+        md = (out / "letter.md").read_text()
+        assert "no unit written" not in md and "Hb 120" not in md
 
 
 def test_planted_long_sentence_flagged_not_refused(tmp_path):
