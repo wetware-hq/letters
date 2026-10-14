@@ -4453,18 +4453,14 @@ def test_r12_ordinary_clinical_words_can_final(tmp_path):
         assert w in md
 
 
-def test_r12_allowed_words_still_flagged_in_patient_letter(tmp_path):
-    """Ruling: the allowed list clears the flag in clinician letters only. No signed plain words yet, so in a
-    patient letter each allowed word stays flagged and --final is refused (exit 3, nothing written)."""
-    text = tpl(**R12_ORDINARY)
-    r, out = _run_t(tmp_path, text, "--brief", "letter to the patient")
-    assert r.returncode == 0, r.stderr
-    md = (out / "letter.md").read_text()
-    for w in ("FBC", "UEC", "LFT", "CXR", "MRI", "TSH", "EUC"):
-        assert f"{w} {L.FLAG}" in md, w
-    r, out2 = _run_t(tmp_path / "f", text, "--brief", "letter to the patient", "--final")
-    assert r.returncode == 3 and not (out2 / "letter.md").exists()
-    assert not L.needs_flag("FBC") and not L._PATIENT_LETTER        # state never leaks out of a build
+def test_r12_allowed_word_without_plain_words_flagged_in_patient_letter(monkeypatch):
+    """Adapted after the signed plain words: the allowed list alone never clears the flag in a patient letter;
+    only a signed plain-words entry does. Clinician letters are not affected."""
+    monkeypatch.setattr(L, "PLAIN_WORDS", {k: v for k, v in L.PLAIN_WORDS.items() if k != "FBC"})
+    monkeypatch.setattr(L, "_PATIENT_LETTER", [True])
+    assert L.needs_flag("FBC") and not L.needs_flag("UEC")
+    monkeypatch.setattr(L, "_PATIENT_LETTER", [])
+    assert not L.needs_flag("FBC")
 
 
 def test_r12_top_still_blocks_final(tmp_path):
@@ -4487,7 +4483,7 @@ def test_r12_result_without_value_kept_word_for_word_and_cited(tmp_path, brief):
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     lid = line_of(text, "CXR clear")
-    assert re.search(rf"^- CXR(?: {re.escape(L.FLAG)})? clear 1937-08-01 \[{lid}\]$", md, re.M), md
+    assert re.search(rf"^- CXR(?: \(chest X-ray\))? clear 1937-08-01 \[{lid}\]$", md, re.M), md
     assert "Cut from this letter" not in r.stderr
 
 
@@ -4524,3 +4520,57 @@ def test_r12_unparseable_result_flagged(tmp_path, brief):
     assert f"- 1937-08-01 [{lid}]" in (out / "letter.md").read_text()
     r, out2 = _run_t(tmp_path / "f", text, "--brief", brief, "--final")
     assert r.returncode == 3 and not (out2 / "letter.md").exists()
+
+
+# ---------- round 12: signed patient-letter plain words (locale/core + locale/au plain_words.toml) ----------
+R12_PW = dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
+              results=("TSH 2.1 mU/L 1937-08-01", "CXR clear 1937-08-01", "CXR clear 1937-08-20",
+                       "CT clear 1937-08-01", "FBC (full blood count) normal 1937-08-01"),
+              actions=("GP to review TSH in 2 weeks, GP",))
+
+
+def test_r12_plain_words_files_signed_and_on_allowed_list():
+    for p in L.PLAIN_WORDS_FILES:
+        assert "Signed by clinical reviewer; first set." in p.read_text()
+    raw = {}
+    for p in L.PLAIN_WORDS_FILES:
+        raw.update(tomllib.loads(p.read_text())["plain_words"])
+    assert set(raw) == set(L.PLAIN_WORDS) and set(raw) <= L.ALLOWED_SHORTHAND and "CT" not in raw
+    assert L.PLAIN_WORDS["GP"] == "your family doctor" and L.PLAIN_WORDS["CXR"] == "chest X-ray"
+
+
+def test_r12_plain_words_printed_on_every_use_in_patient_letter(tmp_path):
+    text = tpl(**R12_PW)
+    r, out = _run_t(tmp_path, text, "--brief", "letter to the patient")
+    assert r.returncode == 0, r.stderr
+    md = (out / "letter.md").read_text()
+    assert md.count("CXR (chest X-ray)") == 2 and md.count("CXR") == 2
+    assert md.count("GP (your family doctor)") == md.count("GP") >= 2
+    assert md.count("TSH (a blood test of thyroid function)") == md.count("TSH") >= 2
+    for w in ("CXR", "GP", "TSH"):
+        assert f"{w} {L.FLAG}" not in md
+
+
+def test_r12_plain_words_no_double_explanation(tmp_path):
+    text = tpl(**R12_PW)
+    r, out = _run_t(tmp_path, text, "--brief", "letter to the patient")
+    md = (out / "letter.md").read_text()
+    assert "FBC (full blood count) normal" in md and "FBC (full blood count, a blood test" not in md
+
+
+def test_r12_unlisted_word_and_ct_still_flagged_in_patient_letter(tmp_path):
+    text = tpl(**{**R12_PW, "results": R12_PW["results"] + ("ECHO clear 1937-08-01",)})
+    r, out = _run_t(tmp_path, text, "--brief", "letter to the patient")
+    md = (out / "letter.md").read_text()
+    assert f"CT {L.FLAG}" in md and f"ECHO {L.FLAG}" in md
+    r, out2 = _run_t(tmp_path / "f", text, "--brief", "letter to the patient", "--final")
+    assert r.returncode == 3 and not (out2 / "letter.md").exists()
+
+
+def test_r12_plain_words_clinician_letter_unchanged(tmp_path):
+    text = tpl(**R12_PW)
+    r, out = _run_t(tmp_path, text, "--brief", "discharge to GP")
+    md = (out / "letter.md").read_text()
+    for w, plain in L.PLAIN_WORDS.items():
+        assert f"{w} ({plain})" not in md
+    assert "- CXR clear 1937-08-01" in md and f"CXR {L.FLAG}" not in md and f"CT {L.FLAG}" in md

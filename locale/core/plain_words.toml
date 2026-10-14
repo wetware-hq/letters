@@ -1,0 +1,36 @@
+# Patient-letter plain words (core). Signed by clinical reviewer; first set.
+# In PATIENT letters each listed word prints as WORD (plain words) on every use and its shorthand flag clears.
+# Clinician letters are unchanged. A bracket already written straight after the word in the notes is kept
+# and no second one is added. Words with no entry here stay flagged in patient letters; CT stays flagged.
+# Only words on the allowed list (allowed_shorthand.toml) take effect; shorthand.txt and detection words never do.
+
+[plain_words]
+cm = "centimetres"
+mm = "millimetres"
+kPa = "kilopascals, a unit of pressure"
+mmHg = "millimetres of mercury, a unit of pressure"
+nmol = "nanomoles, a tiny amount of a substance"
+pmol = "picomoles, an even tinier amount of a substance"
+fL = "femtolitres, a unit for the size of blood cells"
+pg = "picograms, a tiny unit of weight"
+kJ = "kilojoules, a unit of energy in food"
+ESR = "a blood test for inflammation"
+TSH = "a blood test of thyroid function"
+APTT = "a blood test of how well your blood clots"
+ALT = "a liver blood test"
+AST = "a liver blood test"
+ALP = "a liver and bone blood test"
+GGT = "a liver blood test"
+LDH = "a blood test for tissue damage"
+CK = "a blood test for muscle damage"
+BNP = "a blood test for heart strain"
+MCV = "the average size of your red blood cells"
+ABG = "a blood test from an artery for oxygen and acid levels"
+VBG = "a blood test from a vein for acid and gas levels"
+Hb = "haemoglobin, the part of blood that carries oxygen"
+LFT = "liver blood tests"
+CXR = "chest X-ray"
+MRI = "a scan that uses magnets to take detailed pictures"
+EEG = "a test of the brain's electrical activity"
+DXA = "a scan of bone density"
+PET = "a scan that shows how active your body's tissues are"

@@ -1,0 +1,13 @@
+# Patient-letter plain words (au). Signed by clinical reviewer; first set.
+# In PATIENT letters each listed word prints as WORD (plain words) on every use and its shorthand flag clears.
+# Clinician letters are unchanged. A bracket already written straight after the word in the notes is kept
+# and no second one is added. Words with no entry here stay flagged in patient letters; CT stays flagged.
+# Only words on the allowed list (allowed_shorthand.toml) take effect; shorthand.txt and detection words never do.
+
+[plain_words]
+GP = "your family doctor"
+FBC = "full blood count, a blood test that counts your blood cells"
+UEC = "a blood test of your kidneys and salts"
+EUC = "a blood test of your kidneys and salts"
+WCC = "white cell count, the number of infection-fighting cells in your blood"
+USS = "ultrasound scan"
