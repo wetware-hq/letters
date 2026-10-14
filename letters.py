@@ -1565,7 +1565,7 @@ def refuse_copies(text, template=None, brief=None, patient=False, not_copy=()):
 
 
 def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None,
-          include=None, not_copy=(), keep_out=()):
+          include=None, not_copy=(), keep_out=(), privacy=None):
     """include: item names the brief asked to keep (see SENSITIVE); everything else sensitive is cut."""
     unknown = [i for i in (include or []) if i.lower() not in {c.lower() for c in SENSITIVE}]
     if unknown:
@@ -1576,7 +1576,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     own = [] if flags is None else flags                      # every flag is kept for finalise(), screen-only too
     try:
         md, dropped = _build(text, letter_type, to, recipient, audience, template, brand, resolve, own)
-        return BuildResult(md, dropped, own)
+        return BuildResult(md, dropped, own, privacy, is_patient_letter(to, audience))
     finally:
         _INCLUDE.clear(); _PATIENT_LETTER.clear()
 
@@ -2184,10 +2184,26 @@ SCREEN_ONLY_PREFIXES = tuple(x.split("{")[0] for x in (SENS_RESULT_NOTICE, MED_N
 class BuildResult(tuple):
     """What build() returns: unpacks as (md, dropped) as before, and also carries every flag raised while building,
     including the screen-only ones that never appear in the letter. finalise() takes only this."""
-    def __new__(cls, md, dropped, flags):
+    def __new__(cls, md, dropped, flags, privacy=None, patient=False):
         r = super().__new__(cls, (md, dropped))
         r.md, r.dropped, r.flags = md, dropped, list(flags)
+        r.privacy, r.patient = privacy, patient          # check 19: explicit field, never inferred from the notes
         return r
+
+
+# Check 19 (privacy line). Wording PENDING Patient's review and Physician's sign-off: change it here only.
+PRIVACY_BLOCKED = {
+    "missing": "Blocked: this letter needs the privacy line, and it's missing.",
+    "unset": "Blocked: the privacy field isn't set. Mark whether this letter needs the privacy line.",
+}
+
+
+def privacy_check(result):
+    """Check 19: reads only the explicit privacy field (True/False/None) and the finished letter."""
+    if result.privacy is True and PATIENT_PRIVACY not in result.md:
+        raise Refused(PRIVACY_BLOCKED["missing"])
+    if result.privacy is None and result.patient:
+        raise Refused(PRIVACY_BLOCKED["unset"])
 
 
 FINAL_RAW_REFUSED = ("Refused: --final needs the built letter with its flags, not letter text on its own. "
@@ -2207,6 +2223,7 @@ def finalise(result):
     n = (len(shown) or len(FLAG_ANY.findall(md))) if (FLAG_ANY.search(md) or screen_only) else 0
     if n:
         raise Refused(FINAL_REFUSED.format(n=n))
+    privacy_check(result)
     return re.sub(r" \[[LR]\d+(?:, [LR]\d+)*\]", "", md)
 
 
@@ -2873,6 +2890,8 @@ def _main(argv=None):
                     help="mark one notes line as not a copy request (repeat for each line); never a line naming someone")
     ap.add_argument("--keep-out", action="append", default=[], metavar="L<n>",
                     help="confirm a result cut as sensitive stays out (one line; clears only that line's flag)")
+    ap.add_argument("--privacy", choices=("true", "false"),
+                    help="check 19: does this letter need the privacy line? Required for --final on patient letters")
     ap.add_argument("--heldout", help="external folder of held-out synthetic notes; reports a failure rate")
     a = ap.parse_args(argv)
     llm_guard()
@@ -2924,7 +2943,8 @@ def _main(argv=None):
     try:
         flags = []
         result = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
-                       a.resolve, flags, include, not_copy, keep_out)
+                       a.resolve, flags, include, not_copy, keep_out,
+                       privacy=None if a.privacy is None else a.privacy == "true")
         md, dropped = result
     except Refused as e:
         print(str(e), file=sys.stderr)

@@ -403,7 +403,8 @@ def test_result_without_unit_dropped_and_logged(tmp_path):
                results=("Hb 120",), actions=("review in 2 weeks, GP",))
     lid = line_of(text, "Hb 120")
     for brief in ("discharge to GP", "letter to the patient"):
-        r, out = _run_t(tmp_path / brief.split()[-1], text, "--brief", brief, "--final")
+        r, out = _run_t(tmp_path / brief.split()[-1], text, "--brief", brief, "--privacy",
+                        "true" if "patient" in brief else "false", "--final")                    # check 19
         assert r.returncode == 0, r.stderr
         assert f"Line {lid} left out: no unit written." in r.stderr.splitlines()
         md = (out / "letter.md").read_text()
@@ -4671,7 +4672,8 @@ def test_r13_medicine_lines_get_no_unit_wording_and_same_dose_check(tmp_path):
 
 @pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
 def test_r13_blood_pressure_kept_together_as_written(tmp_path, brief):
-    r, md = _r13_run(tmp_path, _r13(("blood pressure 150/90 mmHg 1937-08-01",)), brief, "--final")
+    r, md = _r13_run(tmp_path, _r13(("blood pressure 150/90 mmHg 1937-08-01",)), brief, "--privacy",
+                     "true" if "patient" in brief else "false", "--final")   # check 19: explicit privacy field
     assert r.returncode == 0, r.stderr
     assert "150/90 mmHg" in md and "150 /90" not in md
     assert "H-R13-BP" in (HERE / "HAZARD_LOG.md").read_text()
@@ -4832,3 +4834,37 @@ def test_r13_main_leaves_no_template_state(tmp_path):
     md = make_letter("Patient: SYNTH-7401\n1937-04-05 Clinic.\nProblem: tiredness\nPlan: review in 4 weeks\n",
                      "gp-update", "GP")
     assert "5 Apr 1937" in md
+
+
+# ---------- check 19: privacy line, explicit privacy field (wording pending Patient review, Physician sign-off) ----------
+R19 = dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
+           actions=("review in 2 weeks, GP",))
+
+
+def test_c19_privacy_true_line_missing_blocks_final(tmp_path):
+    r, out = _run_t(tmp_path, tpl(**R19), "--brief", "discharge to GP", "--privacy", "true", "--final")
+    assert r.returncode == 3 and not (out / "letter.md").exists()
+    assert r.stderr.strip().splitlines()[-1] == L.PRIVACY_BLOCKED["missing"]
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_c19_privacy_false_passes_unblocked(tmp_path, brief):
+    r, out = _run_t(tmp_path, tpl(**R19), "--brief", brief, "--privacy", "false", "--final")
+    assert r.returncode == 0, r.stderr
+    assert not any(v in r.stderr for v in L.PRIVACY_BLOCKED.values())
+
+
+def test_c19_privacy_field_absent_on_patient_letter_blocks_final(tmp_path):
+    r, out = _run_t(tmp_path, tpl(**R19), "--brief", "letter to the patient", "--final")
+    assert r.returncode == 3 and not (out / "letter.md").exists()
+    assert r.stderr.strip().splitlines()[-1] == L.PRIVACY_BLOCKED["unset"]
+    r, out = _run_t(tmp_path / "t", tpl(**R19), "--brief", "letter to the patient", "--privacy", "true", "--final")
+    assert r.returncode == 0, r.stderr                      # the patient letter carries the line: true passes
+
+
+def test_c19_privacy_never_inferred_from_notes():
+    text = tpl(**{**R19, "problems": ("review", "privacy: false")})
+    res = L.build_from_template(text, "gp-update", "Patient", audience="patient")
+    assert res.privacy is None
+    with pytest.raises(L.Refused, match=re.escape(L.PRIVACY_BLOCKED["unset"])):
+        L.finalise(res)
