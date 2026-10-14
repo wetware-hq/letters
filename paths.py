@@ -12,3 +12,21 @@ def truth():
     if not r and local.is_file():
         r = tomllib.loads(local.read_text()).get("truth")
     return pathlib.Path(r) if r else None
+
+
+def _local():
+    local = pathlib.Path(os.environ.get("LETTERS_LOCAL") or HERE / "local.toml")
+    return tomllib.loads(local.read_text()) if local.is_file() else {}
+
+
+def reused_signed():
+    """forms_orders_lines_SIGNED.md, the one signed source of lines shared across tools (the setting cards uses):
+    REUSED_SIGNED, or reused_signed in local.toml."""
+    r = os.environ.get("REUSED_SIGNED") or _local().get("reused_signed")
+    return pathlib.Path(r) if r else None
+
+
+def wording_dirs():
+    """The folders holding the signing files (read-only): WORDING_DIRS (os.pathsep-separated) or wording_dirs."""
+    r = os.environ.get("WORDING_DIRS")
+    return [pathlib.Path(x) for x in (r.split(os.pathsep) if r else _local().get("wording_dirs", [])) if x]
