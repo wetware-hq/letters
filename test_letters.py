@@ -4317,3 +4317,74 @@ def test_r11s_h29_patient_no_reason_still_names_stop_and_change_never_dropped(mo
     md, lines = _patient_kind(monkeypatch, kind, None)
     assert lines == [H29_PATIENT[(kind, None)]]                                     # still there, in full
     assert "daily" not in lines[0] and "once a day" in lines[0]
+
+
+
+# ---------- round 12: inline brief and file brief give identical results (test only; no logic change) ----------
+R12_BRIEFS = ["discharge to GP", "letter to the patient", "referral to respiratory",
+              "discharge to GP. Include: HIV status", "discharge to GP. Include: astrology",
+              "discharge to GP, cc physio", "letter to the patient, copy to her son", "please write something"]
+R12_NOTES = {
+    "plain": dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
+                  actions=("review in 2 weeks, GP",)),
+    "combination": dict(question="Please review.", problems=("review",), meds=("Entresto 49/51 mg bd",),
+                        actions=("review in 2 weeks, GP",)),
+    "hiv": dict(question="Please review.", problems=("HIV", "review"), meds=("dolutegravir 50 mg daily",),
+                actions=("review in 2 weeks, GP",)),
+    "note-copy": dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
+                      actions=("review in 2 weeks, GP",), recipient="General practice; cc physiotherapy"),
+}
+
+
+def _r12_cli(tmp_path, tag, text, brief_arg, prog=None):
+    d = tmp_path / tag; d.mkdir()
+    n = d / "n.txt"; n.write_text(text); out = d / "o"
+    cmd = (prog or CLI) + [str(n), "--brief", brief_arg] + ([] if prog else ["--out", str(out)])
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    written = (out / "letter.md").read_text() if (out / "letter.md").exists() else None
+    return r.returncode, r.stderr, r.stdout if prog else None, written
+
+
+@pytest.mark.parametrize("notes", list(R12_NOTES))
+@pytest.mark.parametrize("brief", R12_BRIEFS)
+def test_r12_letter_command_inline_and_file_brief_identical(tmp_path, notes, brief):
+    text = tpl(**R12_NOTES[notes])
+    f = tmp_path / "brief.txt"; f.write_text(brief + "\n", encoding="utf-8")
+    assert _r12_cli(tmp_path, "inline", text, brief) == _r12_cli(tmp_path, "file", text, str(f))
+
+
+@pytest.mark.parametrize("notes", list(R12_NOTES))
+@pytest.mark.parametrize("brief", R12_BRIEFS)
+def test_r12_check_template_file_brief_matches_inline_parse(tmp_path, notes, brief, monkeypatch, capsys):
+    """check_template takes a brief file only; its result must equal the same checks run on the inline brief."""
+    text = tpl(**R12_NOTES[notes])
+    f = tmp_path / "brief.txt"; f.write_text(brief + "\n", encoding="utf-8")
+    n = tmp_path / "n.txt"; n.write_text(text)
+    rc = L.check_template_main([str(n), "--brief", str(f)]); got = (rc, capsys.readouterr())
+    def inline():
+        try:
+            kind, reader, include, copy = L.read_brief(brief)
+            L.pre_template_checks(text, None, copy, L.is_patient_letter(reader, None))
+            L.check_safe(L.from_template(text))
+        except L.Refused as e:
+            return 2, str(e)
+        return 0, L.TEMPLATE_OK
+    rc2, msg = inline()
+    assert got[0] == rc2 and msg in (got[1].err + got[1].out)
+
+
+@pytest.mark.parametrize("notes", list(R12_NOTES))
+@pytest.mark.parametrize("brief", R12_BRIEFS)
+def test_r12_library_call_file_and_inline_brief_identical(tmp_path, notes, brief):
+    text = tpl(**R12_NOTES[notes])
+    f = tmp_path / "brief.txt"; f.write_text(brief + "\n", encoding="utf-8")
+    def run(btxt):
+        try:
+            kind, reader, include, copy = L.read_brief(btxt)
+            aud = "patient" if L.is_patient_letter(reader, None) else None
+            L.pre_template_checks(text, None, copy, L.is_patient_letter(reader, aud))
+            res = L.build_from_template(text, kind, reader, audience=aud, include=include)
+            return ("letter", res.md if hasattr(res, "md") else res[0])
+        except L.Refused as e:
+            return ("refused", str(e))
+    assert run(f.read_text(encoding="utf-8")) == run(brief)
