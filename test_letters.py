@@ -4675,3 +4675,23 @@ def test_r13_blood_pressure_kept_together_as_written(tmp_path, brief):
     assert r.returncode == 0, r.stderr
     assert "150/90 mmHg" in md and "150 /90" not in md
     assert "H-R13-BP" in (HERE / "HAZARD_LOG.md").read_text()
+
+
+# ---------- round 13 item 2: micro sign U+00B5 and Greek mu U+03BC are the same ----------
+@pytest.mark.parametrize("mu", ["\u00b5", "\u03bc"])
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r13_mu_per_litre_allowed_both_characters(tmp_path, mu, brief):
+    r, md = _r13_run(tmp_path, _r13((f"vitamin B12 300 {mu}g/L 1937-08-01",)), brief)
+    assert r.returncode == 0, r.stderr
+    assert f"300 {mu}g/L" in md and f"{mu}g/L {L.FLAG}" not in md
+    assert (f"300 {mu}g/L (micrograms per litre)" in md) == (brief != "discharge to GP")
+
+
+@pytest.mark.parametrize("dose", ["50 \u00b5g", "50 \u03bcg", "50\u00b5g", "50\u03bcg"])
+def test_r13_mu_g_after_number_is_a_dose_flagged(dose):
+    assert L.DOSE_U.search(f"Med: thyroxine {dose} daily")
+
+
+def test_r13_ug_flagged():
+    assert "ug" in L.flagged_tokens("levothyroxine 50 ug daily", tuple(L.load_single_meaning()))
+    assert L.flagged_tokens("ug", ()) == ["ug"]

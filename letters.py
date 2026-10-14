@@ -349,7 +349,7 @@ DOSE_RX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?(mg|mcg|micrograms?|g|mL|ml|u
 FREQ_RX = re.compile(r"(?<![A-Za-z])(daily|bd|tds|qid|nocte|mane|prn|weekly|od)(?![A-Za-z])", re.I)
 STOP_RX = re.compile(r"\b(?:stopped|ceased|withheld|stop)\b", re.I)
 ALLERGY_RX = re.compile(r"\b(?:allerg\w*|reactions?|intoleran\w*|anaphyla\w*|sensitivit\w*|adverse)\b", re.I)
-PER_LITRE = re.compile(r"\d(?:\.\d+)?\s?[A-Za-z\u00b5]*/L(?![A-Za-z])")
+PER_LITRE = re.compile(r"\d(?:\.\d+)?\s?[A-Za-z\u00b5\u03bc]*/L(?![A-Za-z])")
 MED_HEAD = re.compile(r"\b(?:drugs?|med\w*|chart|prescri\w*|tablets?|regimen|rx|takes|taking)\b", re.I)
 _DRUGS = {}
 
@@ -903,7 +903,8 @@ def load_units(path=None):
 
 
 UNIT_WORDING, UNIT_ALWAYS, UNIT_PATIENT_UNSIGNED = load_units()
-_UNIT_ALT = "|".join(re.escape(u) for u in sorted(UNIT_WORDING, key=len, reverse=True))
+_UNIT_ALT = "|".join(re.escape(u).replace("\u00b5", "[\u00b5\u03bc]")
+                     for u in sorted(UNIT_WORDING, key=len, reverse=True))
 UNIT_AFTER_NUMBER = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(\s?)(" + _UNIT_ALT + r")(?![\w/^\u00b2])")
 
 
@@ -918,7 +919,7 @@ def unit_after_number(m):
 def patient_units(text):
     """Patient letters: UNIT (wording) on every use, straight after a number; no second bracket; '' = no brackets."""
     def sub(m):
-        w = UNIT_WORDING.get(m.group(3), "")
+        w = UNIT_WORDING.get(mu_norm(m.group(3)), "")
         if not w or re.match(r"\s*\(", text[m.end():]):
             return m.group(0)
         return f"{m.group(0)} ({w})"
@@ -927,7 +928,13 @@ ROMAN_CTX = {"stage", "grade", "class", "type", "types", "phase", "nyha"}
 # u/U/iu/IU as a dose unit is a known misreading risk (10u read as 100): always flagged, attached or detached.
 # cc as a dose unit ("5 cc saline") follows the same rule (Physician-requested); it is never a copy request.
 # Lab units such as U/L, mU/L and IU/L stay clean; "10 units" is never flagged.
-DOSE_U = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)( ?)([uU]|[iI][uU]|[cC][cC])(?![A-Za-z0-9/])")
+DOSE_U = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)( ?)([uU]|[iI][uU]|[cC][cC]|[\u00b5\u03bc]g)(?![A-Za-z0-9/])")
+# round 13 item 2: micro sign U+00B5 and Greek mu U+03BC are the same; µg straight after a number is a dose: flagged
+MU = "\u00b5\u03bc"
+
+
+def mu_norm(s):
+    return s.replace("\u03bc", "\u00b5")
 TOOL_WORDS = {"DRAFT"}        # the tool's own fixed wording ("DRAFT, unsigned") is never flagged
 SINGLE_MEANING_FILE = HERE / "single_meaning.toml"
 SHORTHAND_FILE = HERE / "shorthand.txt"
@@ -1247,7 +1254,7 @@ def _source_words(src, single=None):
         if re.search(pat, src):
             words |= _words(rep)
     for m in UNIT_AFTER_NUMBER.finditer(src):           # signed unit wording, earned by the unit in the line
-        words |= _words(UNIT_WORDING.get(m.group(3), ""))
+        words |= _words(UNIT_WORDING.get(mu_norm(m.group(3)), ""))
     for ab, plain in PLAIN_WORDS.items():              # signed patient plain words, earned by the word in the line
         if ab in tokens(src):
             words |= _words(plain)
@@ -1302,7 +1309,7 @@ def check(md, sources, letter_type):
             scan = route_slot(scan, ids, plain=True)[1].replace(ROUTE_SLOT, "route")   # signed route slot: checked in wording()
         forms = [(f, ab) for ab, d in single.items() for f in (d["clinical"], d["patient"])] + \
                 [(f, ab) for ab, f in res.items()] + [(f"{ab} ({f})", ab) for ab, f in PLAIN_WORDS.items()] + \
-                [(f"{u} ({w})", u) for u, w in UNIT_WORDING.items() if w]
+                [(f"{v} ({w})", v) for u, w in UNIT_WORDING.items() if w for v in {u, u.replace("\u00b5", "\u03bc")}]
         for f, ab in sorted(forms, key=lambda x: -len(x[0])):
             scan = scan.replace(f"{f} ({ab})", ab).replace(f, ab)
         exact = tuple(res) + tuple(single)
