@@ -66,7 +66,7 @@ def test_refuses_non_synthetic(text):
     with pytest.raises(Refused) as e:
         make_letter(text, "gp-update", "GP")
     if "SYNTH-1" in text and re.search(r"\d{4}-\d\d-\d\d|\d+/\d+/\d+", text):
-        assert str(e.value) == L.DATE_REFUSED.format(n=2)     # ruled: dates get the two-line refusal, not the incident text
+        assert str(e.value) == L.DATE_REFUSED.format(n=2)     # ruled: dates get the date refusal, not the incident text
     else:
         assert INCIDENT in str(e.value)
 
@@ -3669,9 +3669,9 @@ def test_r11k_unparseable_brief_still_not_understood(tmp_path, brief):
     assert str(e.value) == L.BRIEF_REFUSED
 
 
-# ---------- ruled date refusal (two lines, names the line); same boundary dates as figures ----------
-DATE_LINES = ("Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written.",
-              "If these are real notes, delete them and use synthetic data only.")
+# ---------- ruled date refusal (one line, the signed bytes; 15 Oct 10:01), names the line ----------
+DATE_LINES = ("Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written. "
+              "If these are real notes, delete them and use synthetic data only.",)
 
 
 @pytest.mark.parametrize("d,ok", [("1929-12-31", False), ("1930-01-01", True), ("1939-12-31", True), ("1940-01-01", False)])
@@ -3680,7 +3680,7 @@ def test_r11h_boundary_dates(d, ok):
     if not ok:
         with pytest.raises(Refused) as e:
             L.check_safe(f"SYNTH-1\n\nseen {d}")
-        assert str(e.value).splitlines() == [DATE_LINES[0].format(n=3), DATE_LINES[1]]
+        assert str(e.value).splitlines() == [DATE_LINES[0].format(n=3)]
         assert INCIDENT not in str(e.value)
 
 
@@ -3689,9 +3689,9 @@ def test_r11h_check_template_and_letter_give_the_two_ruled_lines(tmp_path, d):
     text = tpl(question="Please review.", problems=("cough",), date=d, actions=("review in 2 weeks, GP",))
     c = _check(tmp_path / "c", text)
     r, out = _run_t(tmp_path / "r", text, "--brief", "update to GP")
-    want = [DATE_LINES[0].format(n=2), DATE_LINES[1]]
+    want = [DATE_LINES[0].format(n=2)]
     assert c.returncode == 2 and c.stderr.strip().splitlines() == want, c.stderr
-    assert r.returncode == 2 and want[0] in r.stderr and want[1] in r.stderr, r.stderr
+    assert r.returncode == 2 and want[0] in r.stderr, r.stderr
     assert not (out / "letter.md").exists()
 
 
@@ -3703,8 +3703,7 @@ def test_r11h_date_line_counts_blank_lines_and_iso_with_time():
 
 # ---- round 11 ruling: dates with a time joined on, both directions, both forms (same cases as figures) ----
 TIMED = [("1937-02-03T08:00", True), ("1937-02-03 08:00", True), ("1941-02-03T08:00", False), ("1941-02-03 08:00", False)]
-DATE_TWO_LINES = ["Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written.",
-                  "If these are real notes, delete them and use synthetic data only."]
+DATE_TWO_LINES = list(DATE_LINES)                    # one line now: the signed bytes (15 Oct 10:01)
 
 
 @pytest.mark.parametrize("ts,ok", TIMED)
@@ -3715,7 +3714,7 @@ def test_r11i_safeguard_dates_with_time_joined_on(ts, ok):
     else:
         with pytest.raises(L.Refused) as e:
             L.check_safe(text)
-        assert str(e.value).splitlines() == [DATE_TWO_LINES[0].format(n=2), DATE_TWO_LINES[1]]
+        assert str(e.value).splitlines() == [DATE_TWO_LINES[0].format(n=2)]
 
 
 @pytest.mark.parametrize("ts,ok", TIMED)
@@ -3727,11 +3726,11 @@ def test_r11i_checker_and_letter_command_dates_with_time(tmp_path, ts, ok):
     r, _ = _run_t(tmp_path / "r", text, "--brief", "update to GP")
     if ok:
         assert c.returncode == 0 and r.returncode == 0, (c.stderr, r.stderr)
-        assert DATE_TWO_LINES[1] not in c.stderr + r.stderr
+        assert "If these are real notes" not in c.stderr + r.stderr
     else:
         assert c.returncode != 0 and r.returncode != 0
         assert _clin(c) == _clin(r)
-        assert c.stderr.strip().splitlines()[-2:] == [DATE_TWO_LINES[0].format(n=n), DATE_TWO_LINES[1]]
+        assert c.stderr.strip().splitlines()[-1:] == [DATE_TWO_LINES[0].format(n=n)]
 
 
 # ---- round 11 signed rulings, items 2, 4, 5: detection words, sensitive result cut record, --keep-out ----
@@ -5599,9 +5598,7 @@ def test_refusal_codes_signed_in_both_files():
     for k, t in refusalcodes.codes().items():
         key = "copy_refusal" if k.startswith("copy_refusal") else k
         want, have = signed.get(key), _code_text(k, t)
-        n = (lambda x: tuple(_norm(i.replace("`", "")) for i in x)) if isinstance(have, tuple) else \
-            (lambda x: _norm(x.replace("`", "")))
-        if want is None or n(want) != n(have):
+        if want is None or want != have:                         # byte-exact: whitespace and newlines count
             unsigned.append(key)
     assert not unsigned, "not signed in both files: " + "; ".join(unsigned)
 
@@ -5611,7 +5608,7 @@ def test_refusal_signed_lines_used_word_for_word():
     plain = {k: v for k, v in signed.items() if k != "copy_refusal"}
     assert len(plain) >= 42 and set(plain) <= set(code)   # 43 once Physician confirms SENSITIVE_REFUSED
     for k, t in plain.items():
-        assert _norm(code[k]) == _norm(t), k
+        assert code[k] == t, k                                   # byte-exact
     assert signed["copy_refusal"] == (L.copy_refusal("{where}", False), L.copy_refusal("{where}", True))
 
 
@@ -6134,35 +6131,56 @@ def _wording_table(wording):
     return out
 
 
+SAFETY_REGISTER, WORDING_REGISTER = "## Per-id safety register", "## Per-id wording register"
+
+
+def _register(text, head):
+    """The ids listed (one "- ID" bullet each) under a register heading, in order; None if the heading is absent."""
+    if head not in text:
+        return None
+    sec = text.split(head, 1)[1].split("\n## ")[0]
+    return re.findall(r"^- (\S+)\s*$", sec, re.M)
+
+
 def _unpaired(safety, wording, keys):
-    """Refusal line ids not signed in BOTH files. Educator's wording file must name the id. Physician's safety file
-    either names it or signs Educator's id table as a whole ("Re-sign of Educator's edited wording
-    (letters_refusals_WORDING.md, N ids)"), which covers the table only when N is the table's own row count.
-    Holds are checked separately (test_refusal_codes_signed_in_both_files)."""
-    named = lambda k, t: re.search(rf"(?<![A-Za-z_]){re.escape(k.split('[')[0])}(?![A-Za-z_])", t) is not None
-    table = _wording_table(wording)
-    m = re.search(r"^## Re-sign of Educator's edited wording \(letters_refusals_WORDING\.md, (\d+) ids\)", safety, re.M)
-    covered = set(table) if m and int(m.group(1)) == len(table) else set()
-    return sorted(k for k in keys if not (named(k, wording) and (named(k, safety) or k in covered)))
+    """Id-by-id match of Physician's and Educator's per-id registers against each other and the code's refusal ids.
+    No count shortcut: every id must be named in both registers, once, and nothing extra."""
+    s, w = _register(safety, SAFETY_REGISTER), _register(wording, WORDING_REGISTER)
+    if s is None or w is None:
+        return ["register missing"]
+    bad = [f"repeated: {x}" for x in sorted({x for x in s + w if s.count(x) > 1 or w.count(x) > 1})]
+    for name, have in (("safety", set(s)), ("wording", set(w))):
+        bad += [f"not in {name} register: {x}" for x in sorted(set(keys) - have)]
+        bad += [f"extra in {name} register: {x}" for x in sorted(have - set(keys))]
+    return bad
+
+
+def _refusal_keys():
+    return {"copy_refusal" if k.startswith("copy_refusal") else k for k in refusalcodes.codes()}
 
 
 def test_every_refusal_line_signed_in_both_paired_files():
     safety = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
     wording = (SIGNED_DIR / "letters_refusals_WORDING.md").read_text()
-    keys = {"copy_refusal" if k.startswith("copy_refusal") else k for k in refusalcodes.codes()}
-    assert keys and _unpaired(safety, wording, keys) == []
+    keys = _refusal_keys()
+    assert len(keys) == 44 and _unpaired(safety, wording, keys) == []
 
 
-def test_line_in_only_one_paired_file_fails():
-    assert _unpaired("INCIDENT and COMBO_REFUSED signed", "INCIDENT only", {"INCIDENT", "COMBO_REFUSED"}) == ["COMBO_REFUSED"]
-    assert _unpaired("INCIDENT", "INCIDENT, COMBO_REFUSED", {"COMBO_REFUSED"}) == ["COMBO_REFUSED"]
-    assert _unpaired("PRIVACY_BLOCKED missing", "PRIVACY_BLOCKED", {"PRIVACY_BLOCKED[missing]"}) == []
-    assert _unpaired("XINCIDENT", "INCIDENT", {"INCIDENT"}) == ["INCIDENT"]                # whole names only
-    w = "| DATE_REFUSED | a | unchanged |\n| MED_MISSING | b | unchanged |\n"
-    re_sign = "## Re-sign of Educator's edited wording (letters_refusals_WORDING.md, {} ids)\n"
-    assert _unpaired(re_sign.format(2), w, {"DATE_REFUSED", "MED_MISSING"}) == []          # table signed whole
-    assert _unpaired(re_sign.format(3), w, {"DATE_REFUSED"}) == ["DATE_REFUSED"]            # count disagrees
-    assert _unpaired(re_sign.format(2), "| DATE_REFUSED | a | unchanged |\n", {"MED_MISSING"}) == ["MED_MISSING"]
+def test_line_in_only_one_register_fails(tmp_path):
+    keys = _refusal_keys()
+    for name in ("letters_refusals_SAFETY.md", "letters_refusals_WORDING.md"):
+        texts = {n: (SIGNED_DIR / n).read_text() for n in ("letters_refusals_SAFETY.md", "letters_refusals_WORDING.md")}
+        cut = tmp_path / name                                             # a temp copy; the signed file is untouched
+        cut.write_text(texts[name].replace("\n- DATE_REFUSED\n", "\n", 1))
+        texts[name] = cut.read_text()
+        assert _unpaired(texts["letters_refusals_SAFETY.md"], texts["letters_refusals_WORDING.md"], keys) \
+            == [f"not in {'safety' if 'SAFETY' in name else 'wording'} register: DATE_REFUSED"]
+    s = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
+    w = (SIGNED_DIR / "letters_refusals_WORDING.md").read_text()
+    assert _unpaired(s.replace("\n- INCIDENT\n", "\n- INCIDENT\n- EXTRA_ID\n", 1), w, keys) == \
+        ["extra in safety register: EXTRA_ID"]
+    assert _unpaired(s, w.replace("- INCIDENT\n", "- INCIDENT\n- INCIDENT\n", 1), keys) == ["repeated: INCIDENT"]
+    assert _unpaired(s.replace(SAFETY_REGISTER, "## x"), w, keys) == ["register missing"]
 
 
 def test_signing_file_row_counts_match_committed_numbers():

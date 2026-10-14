@@ -68,7 +68,7 @@ NOT_COPY_ARG = 'Refused: --not-copy takes one line, like L3. Nothing was written
 # The synthetic-date safeguard. figures keeps its own copy of this same logic; the same boundary tests run in both.
 SCAN_ISO = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
 SCAN_DMY = re.compile(r"(?<![\d.])(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})(?![\d.])")
-DATE_REFUSED = ("Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written.\n"
+DATE_REFUSED = ("Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written. "
                 "If these are real notes, delete them and use synthetic data only.")
 
 
