@@ -1,0 +1,25 @@
+# CORE allowed words: ordinary clinical words used with the same single meaning in every English-speaking
+# country. Never flagged as unconfirmed shorthand. PENDING CLINICIAN SIGNATURE (whole list, round 12).
+# Exact case only ("MRI" allowed; "Mri", "mri" still flagged). Kept as written, never expanded.
+#
+# Sources, by class:
+#  units          - BIPM, The International System of Units (SI Brochure), 9th edition, 2019 (symbols and
+#                   prefixes); ACSQHC, Recommendations for terminology, abbreviations and symbols used in
+#                   medicines documentation, 2016 (mcg preferred; U, IU, cc never used for doses).
+#  pathology      - RCPA, Pathology Units and Terminology Standardisation (PUTS) / SPIA requesting and reporting
+#                   terminology; LOINC common test short names (Regenstrief) for names shared internationally.
+#  investigations - RANZCR and RCR (UK) examination naming; LOINC/RadLex playbook modality names.
+#
+# Already clean before round 12, so not repeated here: CRP, eGFR, HbA1c, INR, ECG (single_meaning.toml, signed);
+# mg, mcg, g, kg, mL, L, dL, mmol, micromol, min, h, units, mU, and any slash unit such as mmol/L (unit rules).
+#
+# Excluded on purpose (more than one meaning, or error-prone): ng (also nasogastric, in shorthand.txt), ms
+# (shorthand.txt), CT (also chlamydia trachomatis), PT (also patient/physiotherapy), PSA (also psoriatic
+# arthritis), CMP (calcium-magnesium-phosphate vs comprehensive metabolic panel), NP, ED, BP, HR, U, IU, cc.
+# Never add anything in shorthand.txt or any sensitive-items detection word (linked_terms.toml); the loader
+# drops such an entry and a test fails.
+
+[allowed]
+units          = ["cm", "mm", "kPa", "mmHg", "nmol", "pmol", "fL", "pg", "kJ"]
+pathology      = ["ESR", "TSH", "APTT", "ALT", "AST", "ALP", "GGT", "LDH", "CK", "BNP", "MCV", "ABG", "VBG", "Hb", "LFT"]
+investigations = ["CXR", "MRI", "EEG", "DXA", "PET"]

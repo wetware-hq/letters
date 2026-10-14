@@ -52,7 +52,7 @@ This letter explains your care and what happens next.
 
 ## What happens next
 
-1. Who: GP [flag: abbreviation, meaning not confirmed]. When: in 1 week. Action: GP [flag: abbreviation, meaning not confirmed] review in 1 week; restart metformin if eating normally [L19]
+1. Who: GP. When: in 1 week. Action: GP review in 1 week; restart metformin if eating normally [L19]
 2. Who: not documented. When: in 6 weeks. Action: repeat chest X-ray in 6 weeks [L20]
 
 ---

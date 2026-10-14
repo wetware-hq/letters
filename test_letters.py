@@ -1,6 +1,6 @@
 import json
 """Regression tests. Each rule has a test that plants its failure. Synthetic data only."""
-import pathlib, re, subprocess, sys
+import pathlib, re, subprocess, sys, tomllib
 import pytest
 import letters as L
 from letters import make_letter, build, build_from_template, check, parse, cumsum, Refused, INCIDENT, ND
@@ -178,7 +178,7 @@ def test_med_change_reason_kept_or_not_documented():
 def test_pending_shows_who_follows_up():
     t = "SYNTH-9\n1937-01-01\nPending: TSH; follow-up: GP\nPending: ferritin"
     md = make_letter(t, "gp-update", "GP")
-    assert f"Who follows up: GP {L.FLAG}" in md and f"ferritin, sent on an undocumented date. Who follows up: {ND}" in md   # no sent date on the line
+    assert "Who follows up: GP." in md and f"GP {L.FLAG}" not in md and f"ferritin, sent on an undocumented date. Who follows up: {ND}" in md   # no sent date on the line
 
 
 def test_pending_cleared_by_result():
@@ -189,7 +189,7 @@ def test_pending_cleared_by_result():
 def test_followup_numbered_with_who_and_when():
     md = make_letter(F("pneumonia_admission.txt"), "discharge", "GP")
     acts = section(md, "Actions")
-    assert acts.startswith(f"1. Who: GP {L.FLAG}. When: in 1 week.")
+    assert acts.startswith("1. Who: GP. When: in 1 week.")   # round 12: GP allowed (au pack)
     assert f"2. Who: {ND}. When: in 6 weeks." in acts
 
 
@@ -4388,3 +4388,73 @@ def test_r12_library_call_file_and_inline_brief_identical(tmp_path, notes, brief
         except L.Refused as e:
             return ("refused", str(e))
     assert run(f.read_text(encoding="utf-8")) == run(brief)
+
+
+# ---------- round 12 bug 2: allowed ordinary clinical words (core list + 'au' locale pack) ----------
+def _r12_raw_allowed():
+    out = {}
+    for p in L.ALLOWED_SHORTHAND_FILES:
+        for cls, words in tomllib.loads(p.read_text(encoding="utf-8"))["allowed"].items():
+            for w in words:
+                out[w] = f"{p.parent.name}/{cls}"
+    return out
+
+
+def test_r12_allowed_list_has_no_detection_word_or_ambiguous_shorthand():
+    raw = _r12_raw_allowed()
+    banned = L.SHORTHAND | L._detection_words() | {"top", "cto", "ct", "ms", "ng", "pe", "cp", "ra", "iv", "u", "iu", "cc"}
+    assert raw and not {w for w in raw if w.lower() in banned}
+    assert set(raw) == set(L.ALLOWED_SHORTHAND)                 # the loader dropped nothing: the files are clean
+    assert not set(raw) & set(L.load_single_meaning())          # signed expansions stay in single_meaning.toml
+    core = {w for w, c in raw.items() if c.startswith("core/")}
+    au = {w for w, c in raw.items() if c.startswith("au/")}
+    assert not core & au and {"GP", "UEC", "EUC", "FBC"} <= au
+
+
+def test_r12_loader_drops_banned_entries(tmp_path):
+    p = tmp_path / "a.toml"
+    p.write_text('[allowed]\nx = ["top", "TOP", "CTO", "HIV", "PrEP", "MS", "FBC"]\n')
+    assert L.load_allowed_shorthand([p]) == frozenset({"FBC"})
+
+
+@pytest.mark.parametrize("tok", ["top", "TOP", "Top", "tOP", "CTO", "cto", "MS", "PE", "IV", "CT"])
+def test_r12_ambiguous_shorthand_still_flagged(tok):
+    assert L.needs_flag(tok, "", tuple(L.load_single_meaning()))
+    assert L.flagged_tokens(f"plan {tok} review")
+
+
+@pytest.mark.parametrize("tok", ["Gp", "gp", "Fbc", "fbc", "Mri", "mmhg", "uec"])
+def test_r12_allowed_words_exact_case_only(tok):
+    assert L.needs_flag(tok, "", tuple(L.load_single_meaning()))
+
+
+@pytest.mark.parametrize("tok", sorted(L.ALLOWED_SHORTHAND))
+def test_r12_allowed_word_not_flagged(tok):
+    assert not L.needs_flag(tok, "", tuple(L.load_single_meaning()))
+
+
+R12_ORDINARY = dict(question="Please review blood pressure and kidney function.", problems=("hypertension",),
+                    meds=("empagliflozin 10 mg daily",),
+                    results=("FBC Hb 132 g/L 1937-08-01", "UEC creatinine 90 micromol/L 1937-08-01",
+                             "LFT ALT 20 U/L 1937-08-01", "blood pressure 150/90 mmHg 1937-08-01",
+                             ),
+                    pending=("TSH, sent 1937-08-01, GP", "CXR, sent 1937-08-01, GP"),
+                    actions=("recheck EUC in 3 months, GP", "MRI brain in 3 months, GP"))
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r12_ordinary_clinical_words_can_final(tmp_path, brief):
+    text = tpl(**R12_ORDINARY)
+    r, out = _run_t(tmp_path, text, "--brief", brief, "--final")
+    assert r.returncode == 0, r.stderr
+    assert "abbreviation" not in r.stderr
+    md = (out / "letter.md").read_text()
+    for w in ("FBC", "UEC", "LFT", "mmHg", "CXR", "MRI", "TSH", "EUC"):
+        assert w in md
+
+
+def test_r12_top_still_blocks_final(tmp_path):
+    text = tpl(**{**R12_ORDINARY, "actions": ("recheck EUC in 3 months, GP", "MRI brain in 3 months, GP",
+                                                 "discuss TOP at review, GP")})
+    r, out = _run_t(tmp_path, text, "--brief", "discharge to GP", "--final")
+    assert r.returncode == 3 and not (out / "letter.md").exists()

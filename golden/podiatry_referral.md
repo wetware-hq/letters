@@ -45,7 +45,7 @@ Please answer the question below.
 
 ## Actions
 
-1. Who: GP [flag: abbreviation, meaning not confirmed]. When: in 4 weeks. Action: GP [flag: abbreviation, meaning not confirmed] review in 4 weeks [L10]
+1. Who: GP. When: in 4 weeks. Action: GP review in 4 weeks [L10]
 
 ---
 

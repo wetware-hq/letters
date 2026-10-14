@@ -887,6 +887,35 @@ def load_single_meaning(path=None):
 
 
 SHORTHAND = {w.lower() for w in _lines(SHORTHAND_FILE)}
+LOCALE = "au"
+ALLOWED_SHORTHAND_FILES = [HERE / "locale" / "core" / "allowed_shorthand.toml",
+                           HERE / "locale" / LOCALE / "allowed_shorthand.toml"]
+
+
+def _detection_words():
+    """Every sensitive-items word (terms, flag-only terms, medicines, brands), lower case, from linked_terms.toml."""
+    out = set()
+    p = HERE / "linked_terms.toml"
+    if p.exists():
+        for item in tomllib.loads(p.read_text(encoding="utf-8")).get("items", {}).values():
+            for k in ("terms", "flag_terms", "medicines"):
+                out.update(t.lower() for t in item.get(k, []))
+            out.update(b.lower() for b in item.get("brands", {}))
+    return out
+
+
+def load_allowed_shorthand(paths=None):
+    """Core list plus the locale pack of ordinary clinical words never flagged as shorthand (exact case). Any entry that is listed
+    shorthand (more than one meaning, e.g. top/CTO) or a sensitive-items detection word is never allowed."""
+    words = set()
+    for p in map(pathlib.Path, paths or ALLOWED_SHORTHAND_FILES):
+        if p.exists():
+            words |= {w for v in tomllib.loads(p.read_text(encoding="utf-8")).get("allowed", {}).values() for w in v}
+    banned = SHORTHAND | _detection_words()
+    return frozenset(w for w in words if w.lower() not in banned)
+
+
+ALLOWED_SHORTHAND = load_allowed_shorthand()
 WORDS = set().union(*(_lines(p) for p in WORDLISTS)) | {m.lower() for m in MONTHS}
 
 
@@ -927,7 +956,7 @@ def reason_flag(tok, prev="", exact=()):
 
 def needs_flag(tok, prev="", exact=()):
     """True if tok must be flagged. exact: abbreviations that may expand as written (reviewed list, resolutions)."""
-    if tok in exact or tok in TOOL_WORDS:
+    if tok in exact or tok in TOOL_WORDS or tok in ALLOWED_SHORTHAND:     # allowed: exact case only
         return False
     low = tok.lower()
     if low in drug_names() or low in drug_words():

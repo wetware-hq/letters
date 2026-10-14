@@ -1,0 +1,18 @@
+# Australian locale pack: ordinary clinical words with one meaning in Australian practice but not used the same
+# way everywhere (e.g. US: CBC, BMP, WBC, PCP). Never flagged as unconfirmed shorthand.
+# PENDING CLINICIAN SIGNATURE (whole list, round 12). Exact case only. Kept as written, never expanded.
+#
+# Sources, by class:
+#  reader_role    - RACGP, Standards for general practices, 5th edition (general practitioner, GP); AHPRA/MBA
+#                   specialist register (specialty "general practice").
+#  pathology      - RCPA, SPIA (Standardised Pathology Informatics in Australia) requesting terminology:
+#                   FBC full blood count; UEC/EUC urea, electrolytes and creatinine (both orders in use); WCC
+#                   white cell count.
+#  investigations - RANZCR examination naming: USS ultrasound scan.
+#
+# Rules as in locale/core/allowed_shorthand.toml: no multi-meaning shorthand, no detection word.
+
+[allowed]
+reader_role    = ["GP"]
+pathology      = ["FBC", "UEC", "EUC", "WCC"]
+investigations = ["USS"]

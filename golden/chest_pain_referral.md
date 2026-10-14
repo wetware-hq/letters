@@ -20,7 +20,7 @@ Please answer the question below.
 ## Background
 
 - hypertension, ex-smoker [L2]
-- 2 Mar 1937: GP [flag: abbreviation, meaning not confirmed] review. Three weeks of exertional chest tightness, settles with rest. [L4]
+- 2 Mar 1937: GP review. Three weeks of exertional chest tightness, settles with rest. [L4]
 - 16 Mar 1937: Review. Symptoms unchanged. [L10]
 
 ## Results
