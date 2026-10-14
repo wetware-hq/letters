@@ -8,13 +8,10 @@ from scripts import check14_sbs as S
 S.pytest_configure(None)
 
 TRUTH = pathlib.Path(os.environ["TRUTH_DIR"])        # the scenario truth folder, read only
-BASE = {   # from each scenario's expected_outputs; synthetic, 1930s dates
-    "S02": "Patient: SYNTH-0201\n1937-08-01 ED triage.\nProblem: chest pain, resolved\nFollow-up: book follow-up\n",
-    "S03b": "Patient: SYNTH-0301\n1937-08-10 Medicine reconciliation.\nMed: metformin 500 mg twice daily\nPlan: send list || pharmacist || today\n",
-    "S05": "Patient: SYNTH-0501\n1937-08-12 Clinic review.\nProblem: low mood screen\nPMHx: mh_q2 Yes\nFollow-up: review in 2 weeks\n",
-    "S12": "Patient: SYNTH-1201\n1939-06-05 Discharge.\nMed: paracetamol 1 g oral four times a day for 5 days\nFollow-up: family doctor review in 1 week 1939-06-12\n",
-}
-SCEN = {"S02": ("discharge", "gp"), "S03b": ("gp-update", "gp"), "S05": ("gp-update", "gp"), "S12": ("discharge", "patient")}
+CASES = tomllib.loads((pathlib.Path(__file__).resolve().parent.parent / "data" / "check14_derived_cases.toml")
+                     .read_text(encoding="utf-8"))           # inputs are data, not code
+BASE = {k: v["note"] for k, v in CASES["scenarios"].items()}
+SCEN = {k: (v["type"], v["audience"]) for k, v in CASES["scenarios"].items()}
 for k in SCEN:                                            # confirm the scenario really has that letters build step
     t = tomllib.loads(next(TRUTH.glob(k + "-*/truth.toml")).read_text())
     assert any("letters: build" in c for c in t["minimum_call_path"]), k
@@ -30,7 +27,7 @@ def injections():
         for b in list(v.get("brands", {}))[:2]:
             yield f"{cat}/brand", f"Med: {b} 1 tablet daily (for {cat})\n"
         if v.get("terms"):
-            t0, m0 = v["terms"][0], (v.get("medicines") or ["aspirin"])[0]
+            t0, m0 = v["terms"][0], (v.get("medicines") or [CASES["fallback_medicine"]])[0]
             yield f"{cat}/medpart", f"Med: {m0} 100 mg daily, {t0} clinic, with food\nAllergy: {t0} trial drug - rash\n"
             yield f"{cat}/result", f"Result: {t0} negative 1937-08-01\n"
 
@@ -41,7 +38,7 @@ for scen, (ltype, aud) in SCEN.items():
         for inc in [None] + ([[label.split("/")[0]]] if "/" in label else []):
             text = BASE[scen] + extra
             try:
-                L.build(text, lt, "GP" if au == "gp" else ("Cardiology" if au == "specialist" else "patient"),
+                L.build(text, lt, CASES["to"][au],
                         audience=au, flags=[], include=inc, privacy=True if au == "patient" else None)
             except Exception:
                 pass                                       # a refusal before or after check 14 is fine; check 14 calls are compared

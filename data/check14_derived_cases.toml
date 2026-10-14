@@ -1,0 +1,23 @@
+# Letter inputs for scripts/check14_derived.py, derived from each scenario's expected_outputs (synthetic, 1930s dates).
+fallback_medicine = "aspirin"          # medicine used when a linked-terms category lists none
+[to]
+gp = "GP"
+specialist = "Cardiology"
+patient = "patient"
+
+[scenarios.S02]
+type = "discharge"
+audience = "gp"
+note = "Patient: SYNTH-0201\n1937-08-01 ED triage.\nProblem: chest pain, resolved\nFollow-up: book follow-up\n"
+[scenarios.S03b]
+type = "gp-update"
+audience = "gp"
+note = "Patient: SYNTH-0301\n1937-08-10 Medicine reconciliation.\nMed: metformin 500 mg twice daily\nPlan: send list || pharmacist || today\n"
+[scenarios.S05]
+type = "gp-update"
+audience = "gp"
+note = "Patient: SYNTH-0501\n1937-08-12 Clinic review.\nProblem: low mood screen\nPMHx: mh_q2 Yes\nFollow-up: review in 2 weeks\n"
+[scenarios.S12]
+type = "discharge"
+audience = "patient"
+note = "Patient: SYNTH-1201\n1939-06-05 Discharge.\nMed: paracetamol 1 g oral four times a day for 5 days\nFollow-up: family doctor review in 1 week 1939-06-12\n"

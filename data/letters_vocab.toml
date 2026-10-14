@@ -1,0 +1,40 @@
+# Domain vocabulary used by letters.py. Moved verbatim out of code (round 13 generalisation guard); same order,
+# same regex text. Changing a list changes behaviour: it needs the same sign-off as the code it came from.
+
+# Recipient wording that makes a sensitive item relevant (regex alternatives, matched case-insensitively).
+[relevant]
+"HIV status" = "infectious|immunolog|hiv|sexual health"
+"PrEP" = "sexual health|infectious|hiv"
+"abuse" = "social work|safeguarding|psychiatr|mental health"
+"psychiatric history" = "psychiatr|mental health|psycholog"
+"Mental Health Act status" = "psychiatr|mental health"
+"sexual health" = "sexual health|infectious"
+"pregnancy loss or termination" = "obstetric|gynaecolog|women"
+"genetic results" = "genetic|clinical genetics"
+
+[owners]
+# words that mark a named owner of an action (regex alternatives, whole word, any case)
+roles = ["fellow", "registrar", "reg", "consultant", "team", "nurse", "GP", "clinic", "service", "SHO", "doctor", "dr",
+         "surgeon", "physician", "pharmacist", "ward", "practice", "cardiology", "nephrology", "renal", "oncology",
+         "haematology", "respiratory", "neurology", "gastroenterology", "endocrinology", "dermatology",
+         "rheumatology", "urology", "microbiology", "micro", "lab", "physio", "dietitian", "midwife", "patient"]
+# words that may sit before an owner role ("renal registrar", "on-call team")
+modifiers = ["renal", "cardiology", "ward", "practice", "medical", "surgical", "respiratory", "on-call", "duty",
+             "specialist", "junior", "senior", "oncology", "haematology", "neurology", "urology", "district"]
+
+[actions]
+# 'Who' words in an action line (regex alternatives, whole word, any case)
+who = ["GP", "general practitioner", "patient", "you", "cardiology", "renal", "endocrinology", "podiatry", "clinic",
+       "ward", "nurse", "pharmacist", "physiotherapy", "team", "surgeon", "specialist", "outpatients"]
+
+[symptoms]
+# words after 'CC:' that are never a symptom (people, places, services)
+not_a_symptom = ["dr", "doctor", "gp", "patient", "pt", "clinic", "team", "nurse", "carer", "family", "daughter",
+                 "son", "wife", "husband", "partner", "mother", "father", "mum", "dad", "sister", "brother", "friend",
+                 "and", "mr", "mrs", "ms", "miss", "prof", "consultant", "department", "dept", "ward", "hospital",
+                 "service", "cardiology", "renal", "podiatry", "neurology", "oncology", "respiratory", "physio",
+                 "pharmacy", "social", "worker", "solicitor", "lawyer", "insurer", "employer", "school", "next", "kin",
+                 "nok"]
+
+[heldout]
+default_to = "General practice"     # recipient when a held-out brief names none

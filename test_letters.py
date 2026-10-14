@@ -5197,3 +5197,26 @@ def test_c14_prefix_linked_terms_same_letter_and_cuts_in_both_orders(monkeypatch
     assert runs[0] == runs[1]
     md = runs[0][0].decode()
     assert "heart" not in md and "Keep walking." in md and "Rest feet." in md and "lithium 250 mg" in md
+
+
+# ---------- generalisation guard (same as stack): no specialty, ward, discipline or drug name in code ----------
+sys.path.insert(0, str(HERE / "scripts"))
+import domainscan  # noqa: E402
+
+
+def test_letters_code_holds_no_domain_literals():
+    hits = [h for h in domainscan.scan(HERE) if not h[0].endswith("domainscan.py")]
+    assert hits == [], "\n".join(f"{f}:{ln} {k} {w}" for f, ln, k, w in hits)
+
+
+def test_scanner_catches_a_planted_literal_and_skips_docstrings(tmp_path):
+    p = tmp_path / "x.py"
+    p.write_text('"""Module about aspirin (prose)."""\nDRUG = "warfarin 5 mg"\nWARD = "ICU"\nok = "edit"\n')
+    hits = {(k, w.lower()) for _, _, k, w in domainscan.scan_file(p)}
+    assert hits == {("drug", "warfarin"), ("ward", "icu")}
+
+
+def test_vocabulary_is_data_not_code():
+    assert domainscan.TERMS_FILE == HERE / "data" / "domain_terms.toml"
+    assert set(domainscan.TERMS) == {"discipline", "specialty", "ward", "drug"}
+    assert "medicine" not in domainscan.TERMS["discipline"]     # plain word for medications in letters

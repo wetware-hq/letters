@@ -158,16 +158,8 @@ SENSITIVE = {
     "psychiatric history": [r"\bdepress", r"\bbipolar", r"\bschizo", r"\bpsychiatr", r"\bpsychos",
                             r"\bself[- ]harm", r"\boverdose", r"\banxiety", r"\bsuicid"],
 }
-RELEVANT = {
-    "HIV status": r"infectious|immunolog|hiv|sexual health",
-    "PrEP": r"sexual health|infectious|hiv",
-    "abuse": r"social work|safeguarding|psychiatr|mental health",
-    "psychiatric history": r"psychiatr|mental health|psycholog",
-    "Mental Health Act status": r"psychiatr|mental health",
-    "sexual health": r"sexual health|infectious",
-    "pregnancy loss or termination": r"obstetric|gynaecolog|women",
-    "genetic results": r"genetic|clinical genetics",
-}
+DOMAIN = tomllib.loads((HERE / "data" / "letters_vocab.toml").read_text(encoding="utf-8"))   # domain words are data
+RELEVANT = dict(DOMAIN["relevant"])
 # H22 items (round 11 signed rulings): detection words come from linked_terms.toml only, whole word or phrase, any case.
 H22_ITEMS = ("Mental Health Act status", "sexual health", "pregnancy loss or termination", "genetic results")
 _LT = tomllib.loads((HERE / "linked_terms.toml").read_text(encoding="utf-8")).get("items", {})
@@ -291,13 +283,10 @@ def split_reaction(part):
     return part.strip(), None
 
 
-OWNER_ROLE = re.compile(r"\b(?:fellow|registrar|reg|consultant|team|nurse|GP|clinic|service|SHO|doctor|dr|surgeon|"
-                        r"physician|pharmacist|ward|practice|cardiology|nephrology|renal|oncology|haematology|"
-                        r"respiratory|neurology|gastroenterology|endocrinology|dermatology|rheumatology|urology|"
-                        r"microbiology|micro|lab|physio|dietitian|midwife|patient)\b", re.I)
+OWNER_ROLE = re.compile(r"\b(?:" + "|".join(DOMAIN["owners"]["roles"]) + r")\b", re.I)
+
 OWNER_ACTION = re.compile(r"\b(?:to\s+(?:arrange|chase|follow|review|check|action|phone|call|book|see)|will)\b", re.I)
-OWNER_MOD = {"renal", "cardiology", "ward", "practice", "medical", "surgical", "respiratory", "on-call", "duty",
-             "specialist", "junior", "senior", "oncology", "haematology", "neurology", "urology", "district"}
+OWNER_MOD = set(DOMAIN["owners"]["modifiers"])
 OWNER_SEP_ANY = re.compile(r"\s[-\u2013\u2014]+\s|:|\(|,")
 
 
@@ -735,8 +724,8 @@ HEADINGS = {
                 "med_changes": "Changes to your medicines", "followup": "What happens next",
                 "exam": "What we found"},
 }
-WHO = re.compile(r"\b(GP|general practitioner|patient|you|cardiology|renal|endocrinology|podiatry|clinic|"
-                 r"ward|nurse|pharmacist|physiotherapy|team|surgeon|specialist|outpatients)\b", re.I)
+WHO = re.compile(r"\b(" + "|".join(DOMAIN["actions"]["who"]) + r")\b", re.I)
+
 WHEN = re.compile(r"\b(?:in|within|after)\s+\d+\s+(?:day|week|month|year)s?\b|\b\d{4}-\d{2}-\d{2}\b|"
                   r"\b(?:today|tomorrow|at discharge|next visit|at next review)\b", re.I)
 
@@ -1473,11 +1462,7 @@ DOSE_CC = re.compile(r"(?<![A-Za-z0-9.])\d+(?:\.\d+)? ?[cC][cC](?![A-Za-z0-9/])"
 NOTE_COPY = re.compile(r"(?<![\w.])(?:cc|c\.c\.|cc'd|cop(?:y|ies|ied|ying))(?![\w])", re.I)
 VIRAL_COPIES = re.compile(r"[<>]?\d[\d,.]*\s*copies\b(?:\s*/\s*\w+)?|\bcopies\s*/\s*\w+", re.I)
 CHIEF_COMPLAINT = re.compile(r"^CC\s*:\s*(.+)$")
-NOT_A_SYMPTOM = {"dr", "doctor", "gp", "patient", "pt", "clinic", "team", "nurse", "carer", "family", "daughter", "son",
-                 "wife", "husband", "partner", "mother", "father", "mum", "dad", "sister", "brother", "friend", "and",
-                 "mr", "mrs", "ms", "miss", "prof", "consultant", "department", "dept", "ward", "hospital", "service",
-                 "cardiology", "renal", "podiatry", "neurology", "oncology", "respiratory", "physio", "pharmacy",
-                 "social", "worker", "solicitor", "lawyer", "insurer", "employer", "school", "next", "kin", "nok"}
+NOT_A_SYMPTOM = set(DOMAIN["symptoms"]["not_a_symptom"])
 
 
 _KNOWN = []
@@ -2736,7 +2721,7 @@ def heldout(path):
         if exp.exists():
             musts = re.findall(r"^(must|must-not):\s*(.+?)\s*$", exp.read_text(encoding="utf-8"), re.M)
         try:
-            md, _ = build(text, brief.get("type", "gp-update"), brief.get("to", "General practice"),
+            md, _ = build(text, brief.get("type", "gp-update"), brief.get("to", DOMAIN["heldout"]["default_to"]),
                           audience=brief.get("audience"))
             ok = expect == "letter" and all((s in md) == (k == "must") for k, s in musts)
             stats["letter"] += 1
@@ -2875,8 +2860,8 @@ def _main(argv=None):
     ap = argparse.ArgumentParser(description="Synthetic notes + brief -> Markdown letter. Nothing else is stored.")
     ap.add_argument("notes", nargs="?", help="notes text file, or - for stdin")
     ap.add_argument("--type", choices=TYPES)
-    ap.add_argument("--to", help="audience or specialty, e.g. Cardiology")
-    ap.add_argument("--brief", help='e.g. "referral to cardiology", or a file holding the brief (sets --type and --to)')
+    ap.add_argument("--to", help="audience or specialty, as the reader is named in the brief")
+    ap.add_argument("--brief", help='e.g. "referral to <specialty>", or a file holding the brief (sets --type and --to)')
     ap.add_argument("--recipient")
     ap.add_argument("--audience", choices=AUDIENCES)
     ap.add_argument("--template", help="Markdown file with {{slot}} placeholders")
