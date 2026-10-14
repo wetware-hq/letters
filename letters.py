@@ -48,6 +48,22 @@ def valid_date(v):
 class Refused(Exception):
     pass
 
+# Refusal lines given ids by Educator (proposed ids confirmed); signed: Physician + Educator, 14 Oct 2026.
+CHECK_SAFE_MULTI_ID = "Refused: notes mention more than one patient identifier."   # held by Physician (re-sign): earlier text kept
+CHECK_WORD_LIMIT = 'Refused: the letter body is {words_total} words, and the limit is about {WORD_LIMIT}. Shorten the letter, then run again.'
+CHECK_SHORTHAND = "Refused: the letter uses shorthand that isn't allowed at {at}. Write it out in full, then run again."
+CHECK_DIRECTION_WORD = 'Refused: the results at {at} use a direction word instead of a value. Give values with dates.'
+CHECK_UNSOURCED = "Refused: the sentence at {at} doesn't cite a line of the notes. Cite the line it comes from, or remove the sentence."
+CHECK_BAD_CITE = "Refused: the sentence at {at} cites a line that isn't in the notes. Correct the line reference, then run again."
+CHECK_SENTENCE_LIMIT = 'Refused: the sentence at {at} is over {SENTENCE_LIMIT} words. Split it, then run again.'
+CHECK_ABBREV = "Refused: the abbreviation at {at} hasn't been flagged or resolved. Write it out in full, or confirm its meaning with `--resolve`."
+CHECK_DOSE_UNIT = "Refused: dose unit not flagged at {at}."   # held by Physician (re-sign): earlier text kept
+CHECK_DATE = "Refused: the date at {at} isn't in the lines of the notes it cites. Use the date from the notes, or cite the right line."
+CHECK_NUMBER = "Refused: the number at {at} isn't in the lines of the notes it cites. Use the number from the notes, or cite the right line."
+CHECK_WORD = "Refused: the word at {at} isn't in the lines of the notes it cites. Use the word from the notes, or cite the right line."
+KEEP_OUT_ARG = 'Refused: --keep-out takes one line, like L3. Nothing was written.'
+NOT_COPY_ARG = 'Refused: --not-copy takes one line, like L3. Nothing was written.'
+
 
 # The synthetic-date safeguard. figures keeps its own copy of this same logic; the same boundary tests run in both.
 SCAN_ISO = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
@@ -81,7 +97,7 @@ def check_safe(text):
     if not ids:
         raise Refused(INCIDENT + " (reason: no SYNTH- identifier)")
     if len(ids) > 1:
-        raise Refused("Refused: notes mention more than one patient identifier.")
+        raise Refused(CHECK_SAFE_MULTI_ID)
     n = first_out_of_range_line(text)
     if n:
         raise Refused(DATE_REFUSED.format(n=n))
@@ -1305,18 +1321,18 @@ def check(md, sources, letter_type):
         at = f"line {cited[0]}" if cited else f"letter line {mdn}"
         for sent in re.split(r"(?<=[.!])\s+", FLAG_ANY.sub("", text)):
             if len(sent.split()) > SENTENCE_LIMIT and SENTENCE_FLAG not in line:
-                problems.append(f"Refused: sentence over {SENTENCE_LIMIT} words at {at}.")
+                problems.append(CHECK_SENTENCE_LIMIT.format(SENTENCE_LIMIT=SENTENCE_LIMIT, at=at))
         if re.search(r"(?<!\w)\?\w", text):
-            problems.append(f"Refused: banned shorthand at {at}.")
+            problems.append(CHECK_SHORTHAND.format(at=at))
         if section in ("Results", "Your test results") and DIRECTION.search(text):
-            problems.append(f"Refused: direction word in results at {at}. Give values with dates.")
+            problems.append(CHECK_DIRECTION_WORD.format(at=at))
         if not cited:
             if text.strip() in EMPTY.values() or text.strip() == NONE_RECORDED or text.strip() in EMPTY_PATIENT.values():
                 continue
-            problems.append(f"Refused: unsourced sentence at {at}.")
+            problems.append(CHECK_UNSOURCED.format(at=at))
             continue
         if any(c not in sources for c in cited):
-            problems.append(f"Refused: cites a line not in the notes at {at}.")
+            problems.append(CHECK_BAD_CITE.format(at=at))
             continue
         src = " ".join(sources[c][0] + " " + (sources[c][1] or "") for c in cited)
         res = {sources[c][0].split(" = ", 1)[0]: sources[c][0].split(" = ", 1)[1] for c in cited if c.startswith("R")}
@@ -1336,29 +1352,29 @@ def check(md, sources, letter_type):
             ab = m.group(0)
             flag = reason_flag if rs is not None and m.start() >= rs else needs_flag
             if flag(ab, prev, exact) and not context_ok(m) and not FLAG_ANY.match(scan, m.end()):
-                problems.append(f"Refused: abbreviation not flagged or resolved at {at}.")
+                problems.append(CHECK_ABBREV.format(at=at))
             prev = ab
         for m in DOSE_U.finditer(scan):
             if not FLAG_ANY.match(scan, m.end()):
-                problems.append(f"Refused: dose unit not flagged at {at}.")
+                problems.append(CHECK_DOSE_UNIT.format(at=at))
         text = FLAG_ANY.sub("", text)
         for m in OUTDATE.finditer(text):
             iso = f"{m.group(3)}-{MONTHS.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
             if iso not in src:
-                problems.append(f"Refused: date not in cited lines at {at}.")
+                problems.append(CHECK_DATE.format(at=at))
         rest = OUTDATE.sub(" ", text)
         srcnums = set(NUM.findall(src))
         for n in NUM.findall(rest):
             if n not in srcnums:
-                problems.append(f"Refused: number not in cited lines at {at}.")
+                problems.append(CHECK_NUMBER.format(at=at))
         sw = _source_words(src)
         for w in WORD.findall(rest):
             lw = w.lower()
             if lw not in sw and lw not in VOCAB and not any(p in sw for p in lw.split("-")):
-                problems.append(f"Refused: word not in cited lines at {at}.")
+                problems.append(CHECK_WORD.format(at=at))
     limit = int(WORD_LIMIT * 1.1)
     if letter_type != "discharge" and words_total > limit:
-        problems.append(f"Refused: letter body is {words_total} words; limit is about {WORD_LIMIT}.")
+        problems.append(CHECK_WORD_LIMIT.format(words_total=words_total, WORD_LIMIT=WORD_LIMIT))
     if problems:
         raise Refused("\n".join(dict.fromkeys(problems)))
     return True
@@ -1480,10 +1496,8 @@ RELATION = re.compile(r"\b(?:son|daughter|wife|husband|partner|mother|father|mum
                       r"neighbor|carer|family|solicitor|lawyer|insurer|employer|school|next of kin|nok)s?\b", re.I)
 SEND_TO = re.compile(r"\b(?:to|for|cc|in)\b:?\s+(?!(?:a|an|any|be|do|read|keep|check|review)\b)(?:the\s+|my\s+|her\s+|his\s+|their\s+)?"
                      r"(?:mr|mrs|ms|miss|dr|prof|[A-Za-z]{2,})", re.I)
-NOTE_COPY_REFUSED = ("Refused: line L{n} mentions a copy. letters never sends copies. If this isn't a copy request, rerun with "
-                     "`--not-copy L{n}`. Nothing was written.")
-NOT_COPY_REFUSED = ("Refused: line L{n} names someone to send a copy to, so `--not-copy` can't be used on it. "
-                    "letters never sends copies. Nothing was written.")
+NOTE_COPY_REFUSED = "Refused: line L{n} mentions a copy. This tool never sends copies. Nothing was written. If this isn't a copy request, run again with `--not-copy L{n}`."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
+NOT_COPY_REFUSED = "Refused: line L{n} names someone to send a copy to, so `--not-copy` can't be used on it. This tool never sends copies. Nothing was written. Remove the copy request from the notes, then run again."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 NOT_COPY_MARK = "Line L{n} marked as not a copy request"
 
 
@@ -1578,8 +1592,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
 # Temporary (13 Oct 2026): combination medicines can't be fully listed yet, so any letter naming one is refused.
 COMBINATION_FILE = HERE / "locale" / LOCALE / "combination.toml"
 # Clinician-only (screen of the person running letters; never a patient view). AWAITING sign-off: docs/RULINGS.md.
-COMBO_PACK_REFUSED = ("Refused: the locale pack has no signed combination-medicine list (needs brands, source and "
-                      "sign-off). Nothing was written.")
+COMBO_PACK_REFUSED = 'Refused: there is no signed list of combination medicines for this locale. The list needs brands, a source and sign-off. Nothing was written. Ask for the list to be completed and signed.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 
 
 def load_combination(path=None):
@@ -1639,6 +1652,39 @@ def letter_by_hand(check_n):
     return {"patient": BY_HAND_LINES["PV-LETTER-BY-HAND"],
             "clinician": {"id": "CQ-LETTER-BY-HAND", "open": True,
                           "line": BY_HAND_LINES["CQ-LETTER-BY-HAND"].replace("[check_n]", str(check_n))}}
+
+
+REFUSAL_LINES_FILE = HERE / "data" / "refusal_lines.toml"
+
+
+def _refusal_patterns():
+    with open(REFUSAL_LINES_FILE, "rb") as fh:
+        rows = tomllib.load(fh)["code"]
+    out = []
+    for r in rows:
+        first = r["text"].split("\n")[0]
+        parts = re.split(r"(\{[^}]*\})", first)
+        rx = "".join(".*?" if re.fullmatch(r"\{[^}]*\}", x) else re.escape(x) for x in parts)
+        out.append((re.compile(rx + (r"(?: \(reason: [A-Za-z -]+\))?$" if r["key"] == "INCIDENT" else "$"), re.S), r["check"]))
+    return out
+
+
+def refusal_check(msg):
+    """The check number of a refusal line, from data/refusal_lines.toml. Fixed numbers only; None if not listed."""
+    first = str(msg).split("\n")[0]
+    return next((c for rx, c in _refusal_patterns() if rx.match(first)), None)
+
+
+def report_refusal(msg, patient, rc=2):
+    """Every refusal: the line goes to the clinician's screen (stderr) only. On a patient-letter request the patient
+    sees PV-LETTER-BY-HAND (stdout, the only patient-visible output) and CQ-LETTER-BY-HAND opens for the clinician
+    (Patient's fallback, 14 Oct 2026). Nothing is written to disk."""
+    print(str(msg), file=sys.stderr)
+    if patient:
+        hand = letter_by_hand(refusal_check(msg) or "not listed")
+        print(hand["patient"])
+        print(hand["clinician"]["line"], file=sys.stderr)
+    return rc
 
 
 def close_letter_by_hand(entry, hand_letter):
@@ -1718,7 +1764,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
 
 
 # ---------- reverse check: every date, number, name and owner in the letter is in the notes or the brief ----------
-REVERSE_REFUSED = "Refused: line L{n} of this letter has a date, number or name that isn't in the notes. Nothing was written."
+REVERSE_REFUSED = "Refused: line L{n} of this letter has a date, number or name that isn't in the notes. Nothing was written. Correct it to match the notes, then run again."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 _LETTER_DATE = re.compile(r"\b(\d{1,2}) (" + "|".join(MONTHS) + r") (\d{4})\b")
 
 
@@ -1804,9 +1850,8 @@ SENTENCE_NOTICE = "Flag: sentence at {lid} is over 25 words. Split it, or keep i
 MED_FLAG = "[flag: medicine may point to something cut]"
 MED_NOTICE = ("Flag: a medicine on line {lid} may tell the reader about something that was cut from this letter. "
               "Keep it, or explain it to the reader.")
-LINKED_REFUSED = "Refused: line {lid} still mentions something this letter was meant to cut. Nothing was written."
-REQUIRED_REFUSED = ("Refused: line {lid} has an allergy reaction or a follow-up owner that this letter leaves out. "
-                    "Nothing was written.")
+LINKED_REFUSED = 'Refused: line {lid} still mentions something this letter was meant to leave out. Nothing was written. Remove the mention, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
+REQUIRED_REFUSED = 'Refused: line {lid} has an allergy reaction or a follow-up owner that this letter leaves out. Nothing was written. Add it to the letter, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 WORD_FLAG = "[flag: word may point to something cut]"
 WORD_NOTICE = ("Flag: a word on line {lid} may tell the reader about something that was cut from this letter. "
                "Keep it, or reword it.")
@@ -1835,7 +1880,7 @@ def _meds_of(items):
 
 CUT_FLAG = "[flag: something cut to keep it private]"
 CUT_NOTICE = "Flag: something on line {lid} was cut to keep it private. Check the reader doesn't need it."
-STOP_REASON_REFUSED = "Refused: line {lid} of the notes has a stop reason that isn't in brackets. Nothing was written."
+STOP_REASON_REFUSED = "Refused: line {lid} of the notes has a stop reason that isn't in brackets. Nothing was written. Put the stop reason in brackets, then run again."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 
 
 # Sensitive result cut (round 11 signed rulings; override: the flag is on screen only, never in letter.md).
@@ -1848,7 +1893,7 @@ _SENS_CUTS = []         # result lines cut as sensitive in the last letter built
 _KEPT_OUT = []          # of those, the lines whose flag --keep-out cleared (screen only)
 
 
-KEEP_OUT_REFUSED = "Refused: line {lid} has no sensitive cut to keep out. Nothing was written."
+KEEP_OUT_REFUSED = "Refused: line {lid} has nothing marked as sensitive, so `--keep-out` can't be used on it. Nothing was written. Check the line number, then run again."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 
 
 def sensitive_result_lines(text, include=(), patient=False):
@@ -2119,7 +2164,7 @@ def refuse_missing_required(md, text, pending_ids=None):
                 raise Refused(REQUIRED_REFUSED.format(lid=lid))
 
 
-PENDING_NONE_REFUSED = "Refused: line {lid} has a test still pending, but this letter says none are. Nothing was written."
+PENDING_NONE_REFUSED = 'Refused: line {lid} has a test still pending, but this letter says none are. Nothing was written. Add the pending test to the letter, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 QUESTION_FLAG = "[flag: no clear question]"
 QUESTION_NOTICE = "Flag: this referral has no clear question. Add one before it's signed."
 QUESTION_NOTICE_ANY = "Flag: this letter has no clear question. Add one before it's signed."
@@ -2128,12 +2173,10 @@ FINAL_REFUSED = ("--final refused: {n} flag(s) still open. Confirm each meaning 
 
 
 COURSE_RX = re.compile(r"\bfor\s+\d+\s+(?:more\s+)?(?:days?|weeks?|months?)\b", re.I)
-COURSE_MISSING = ("Refused: the medicine on line {lid} has a course length in the notes that this letter leaves out. "
-                  "Nothing was written.")
-MED_MISSING = "Refused: a medicine on line {lid} of the notes is missing from this letter. Nothing was written."
-ALLERGY_MISSING = "Refused: an allergy on line {lid} of the notes is missing from this letter. Nothing was written."
-MAX_MISSING = ("Refused: the medicine on line {lid} has a maximum dose in the notes that this letter leaves out. "
-               "Nothing was written.")
+COURSE_MISSING = 'Refused: the medicine on line {lid} has a course length in the notes that this letter leaves out. Nothing was written. Add it to the letter, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
+MED_MISSING = 'Refused: a medicine on line {lid} of the notes is missing from this letter. Nothing was written. Add it to the letter, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
+ALLERGY_MISSING = 'Refused: an allergy on line {lid} of the notes is missing from this letter. Nothing was written. Add it to the letter, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
+MAX_MISSING = 'Refused: the medicine on line {lid} has a maximum dose in the notes that this letter leaves out. Nothing was written. Add it to the letter, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 # Signed frequency equivalents (Physician, 13 Oct 2026). Nothing else counts; od has none.
 FREQ_SIGNED = {"nocte": ["at night"], "mane": ["in the morning"], "daily": ["once a day", "once daily"],
                "bd": ["twice a day"], "tds": ["three times a day"], "qid": ["four times a day"], "prn": ["when needed"],
@@ -2182,7 +2225,7 @@ def _drug_present(body, plain):
     return first is None or re.search(rf"(?<![a-z0-9]){re.escape(first.lower())}(?![a-z0-9])", plain)
 
 
-RESULT_MISSING = "Refused: a result on line {lid} of the notes is missing from this letter. Nothing was written."
+RESULT_MISSING = 'Refused: a result on line {lid} of the notes is missing from this letter. Nothing was written. Add it to the letter, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 
 
 REASON_NOTICE = "Flag: the reason for the medicine on line {lid} has no signed plain words. Check it."
@@ -2243,8 +2286,7 @@ def privacy_check(result):
         raise Refused(PRIVACY_BLOCKED["unset"])
 
 
-FINAL_RAW_REFUSED = ("Refused: --final needs the built letter with its flags, not letter text on its own. "
-                     "Nothing was written.")
+FINAL_RAW_REFUSED = 'Refused: `--final` needs the built letter with its flags, not letter text on its own. Nothing was written. Build the letter first, then run `--final` on it.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 
 
 def finalise(result):
@@ -2419,7 +2461,7 @@ def _letter_lines(md):
 
 MED_SECTIONS = {h["meds"] for h in HEADINGS.values()}
 ACTION_SECTIONS = {h["followup"] for h in HEADINGS.values()}
-ACTION_MISSING = "Refused: an action on line {lid} of the notes is missing from this letter. Nothing was written."
+ACTION_MISSING = 'Refused: an action on line {lid} of the notes is missing from this letter. Nothing was written. Add it to the letter, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 CHANGE_SECTIONS = {h["med_changes"] for h in HEADINGS.values()}
 ALLERGY_SECTIONS = {h["allergies"] for h in HEADINGS.values()}
 
@@ -2445,8 +2487,8 @@ def _v_med_ok(part, plain):
     return all(_freq_present(tok, plain, written) for tok, written in note_freqs(part))
 
 
-WRONG_SECTION = "Refused: {what} on line {lid} of the notes is in the wrong section of this letter. Nothing was written."
-SECTION_ND = 'Refused: the {sec} section says "not documented", but line {lid} of the notes has one. Nothing was written.'
+WRONG_SECTION = 'Refused: {what} on line {lid} of the notes is in the wrong section of this letter. Nothing was written. Move it to the right section, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
+SECTION_ND = 'Refused: the {sec} section says "not documented", but line {lid} of the notes has an entry for it. Nothing was written. Add that entry to the section, then run again.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 
 
 def _section_says_nd(md, heads, empty):
@@ -2548,7 +2590,7 @@ TEMPLATE_FIELDS = ("Patient", "Date", "Recipients", "Question", "Problems", "His
                    "Results", "Pending", "Actions")
 TEMPLATE_REQUIRED = TEMPLATE_FIELDS             # every heading must be there; a list may be empty
 TEMPLATE_LISTS = ("Problems", "Medicines", "Allergies", "Results", "Pending", "Actions")
-TEMPLATE_REFUSED = "Refused: line L{n} of the notes doesn't follow the template. Nothing was written."
+TEMPLATE_REFUSED = "Refused: line L{n} of the notes doesn't follow the template. Nothing was written. Rewrite the line to follow the template, then run again."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 FIELD_RX = re.compile(r"^(?P<f>[A-Za-z]+)\s*:\s*(?P<v>.*)$")
 NKA_RX = re.compile(r"^(?:no known(?: drug)? allergies|nkda|nil known(?: allergies)?)\.?$", re.I)
 
@@ -2648,8 +2690,7 @@ def empty_template_sections(converted):
     return out
 
 
-RECIPIENTS_REFUSED = ("Refused: line L{n} lists more than one recipient. Write a separate letter for each reader. "
-                      "Nothing was written.")
+RECIPIENTS_REFUSED = 'Refused: line L{n} lists more than one recipient. Nothing was written. Write a separate letter for each reader.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 RECIPIENT_SPLIT = re.compile(r"[,;&/+]|\band\b|\balso\b|\bplus\b", re.I)
 
 # The medicine-line grammar lives here only (the reason marker may still change):
@@ -2796,7 +2837,7 @@ BRIEF_REFUSED = ('Refused: brief not understood. Write it as "<kind> to <reader>
                  '"discharge to GP" or "update to patient".')
 SENSITIVE_REFUSED = ("Refused: line L{n} of the brief includes an item that isn't on the sensitive-items list. "
                      "Nothing was written.")      # never echoes the brief's text
-SENSITIVE_REFUSED_NO_LINE = "Refused: the brief includes an item that isn't on the sensitive-items list. Nothing was written."
+SENSITIVE_REFUSED_NO_LINE = "Refused: the brief includes an item that isn't on the sensitive-items list. Nothing was written. Remove the item from the brief, or use one from the list."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 BRIEF_KINDS = {
     "referral": "referral", "refer": "referral", "referral letter": "referral",
     "discharge": "discharge", "discharge summary": "discharge", "discharge letter": "discharge",
@@ -2877,9 +2918,10 @@ def check_template_main(argv=None):
     ap.add_argument("--keep-out", action="append", default=[], metavar="L<n>")   # letter-only; format checked alike
     a = ap.parse_args(argv)
     llm_guard()
+    patient = False
     try:
         if any(not re.fullmatch(r"L\d+", x.strip()) for x in a.keep_out):
-            raise Refused("Refused: --keep-out takes one line, like L3. Nothing was written.")
+            raise Refused(KEEP_OUT_ARG)
         text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
         brief_copy, patient, include = None, False, []
         if a.brief:
@@ -2894,8 +2936,7 @@ def check_template_main(argv=None):
                 if x.strip() not in cuts:
                     raise Refused(KEEP_OUT_REFUSED.format(lid=x.strip()))
     except Refused as e:
-        print(str(e), file=sys.stderr)
-        return 2
+        return report_refusal(e, patient)
     print(TEMPLATE_OK)
     return 0
 
@@ -2907,6 +2948,9 @@ def main(argv=None):
         return _main(argv)
     finally:
         _EMPTY_FIELDS.clear(); _TEMPLATE.clear(); _ROUTES.clear()
+
+
+PATIENT_BRIEF = re.compile(r"^[^,;]*?\bto (?:the )?patient\b", re.I)   # the reader of the brief, before any cc
 
 
 def _main(argv=None):
@@ -2938,19 +2982,21 @@ def _main(argv=None):
         return 0
     brief_copy = None
     include = []
+    patient_req = is_patient_letter(a.to, a.audience)
     if a.brief is not None:
+        btxt = a.brief
+        if "\n" not in btxt and os.path.isfile(btxt):            # a brief file, as the checker takes it
+            btxt = open(btxt, encoding="utf-8").read()
+        patient_req = patient_req or bool(PATIENT_BRIEF.match(btxt.strip()))
         try:
-            btxt = a.brief
-            if "\n" not in btxt and os.path.isfile(btxt):        # a brief file, as the checker takes it
-                btxt = open(btxt, encoding="utf-8").read()
             kind, reader, include, brief_copy = read_brief(btxt)
         except Refused as e:
-            print(str(e), file=sys.stderr)
-            return 2
+            return report_refusal(e, patient_req)
         a.type = a.type or kind
         a.to = a.to or reader
         if is_patient_letter(a.to, None) and not a.audience:
             a.audience = "patient"
+        patient_req = patient_req or is_patient_letter(a.to, a.audience)
     if not (a.notes and a.type and a.to):
         ap.error("notes, --type and --to are required")
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
@@ -2959,25 +3005,23 @@ def _main(argv=None):
         not_copy = []
         for x in a.not_copy:
             if not re.fullmatch(r"L\d+", x.strip()):
-                raise Refused("Refused: --not-copy takes one line, like L3. Nothing was written.")
+                raise Refused(NOT_COPY_ARG)
             not_copy.append(x.strip())
         keep_out = []
         for x in a.keep_out:
             if not re.fullmatch(r"L\d+", x.strip()):
-                raise Refused("Refused: --keep-out takes one line, like L3. Nothing was written.")
+                raise Refused(KEEP_OUT_ARG)
             keep_out.append(x.strip())
         pre_template_checks(text, tpl, brief_copy, is_patient_letter(a.to, a.audience), not_copy)   # before the template
         text = from_template(text)
         _EMPTY_FIELDS.update(empty_template_sections(text))
         _TEMPLATE[:] = [True]
     except Refused as e:
-        print(str(e), file=sys.stderr)
-        return 2
+        return report_refusal(e, patient_req)
     try:
         covered = refuse_copies(text, tpl, brief_copy, is_patient_letter(a.to, a.audience), not_copy)
     except Refused as e:
-        print(str(e), file=sys.stderr)
-        return 2
+        return report_refusal(e, patient_req)
     try:
         flags = []
         result = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
@@ -2985,19 +3029,19 @@ def _main(argv=None):
                        privacy=None if a.privacy is None else a.privacy == "true")
         md, dropped = result
     except ComboRefused as e:                                 # check 2: written by hand; the clinician entry stays open
+        if patient_req:
+            return report_refusal(e, True)
         print(str(e), file=sys.stderr)
         print(letter_by_hand(e.check)["clinician"]["line"], file=sys.stderr)
         return 2
     except Refused as e:
-        print(str(e), file=sys.stderr)
-        return 2
+        return report_refusal(e, patient_req)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
     for lid in keep_out:
         if lid not in _SENS_CUTS:                                       # nothing written, no letter printed
-            print(KEEP_OUT_REFUSED.format(lid=lid), file=sys.stderr)
-            return 2
+            return report_refusal(KEEP_OUT_REFUSED.format(lid=lid), patient_req)
     shown = printed_flags(flags, md)
     for f in shown:
         print(f, file=sys.stderr)
@@ -3021,8 +3065,7 @@ def _main(argv=None):
         try:
             md = finalise(result)
         except Refused as e:
-            print(str(e), file=sys.stderr)
-            return 3
+            return report_refusal(e, patient_req, 3)
     if a.out:
         out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
         (out / "letter.md").write_text(md, encoding="utf-8")

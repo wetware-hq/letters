@@ -1,273 +1,315 @@
-# Every refusal code in letters.py (scripts/refusalcodes.py) and its wording. status: signed (source given),
-# awaiting (named in docs/RULINGS.md as awaiting sign-off) or untraced (no signed source found in the repo or the
-# rulings folder yet; introduced in the commit given). test_refusal_codes_listed keeps this file and the code in step.
+# Every refusal code in letters.py (scripts/refusalcodes.py), its text, the check that raises it (used for the
+# CQ-LETTER-BY-HAND line) and its sign-off status.
+# status: signed = signed in both letters_refusals_SAFETY.md (Physician) and
+#   letters_refusals_WORDING.md (Educator), 14 Oct 2026; held = held by Physician in SAFETY.md (first sign-off or re-sign), not signed;
+#   signed-earlier = signed under an earlier ruling (source given) but not in those two files.
+# test_refusal_codes_listed keeps this file and the code in step; test_refusal_codes_signed_in_both_files is the
+# strict xfail that lists every line not yet signed in both files.
+
+[[code]]
+key = "CHECK_SAFE_MULTI_ID"
+text = "Refused: notes mention more than one patient identifier."
+check = 1
+status = "held"
+source = "letters_refusals_SAFETY.md re-sign: held; earlier text kept"
+
+[[code]]
+key = "CHECK_WORD_LIMIT"
+text = "Refused: the letter body is {words_total} words, and the limit is about {WORD_LIMIT}. Shorten the letter, then run again."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_SHORTHAND"
+text = "Refused: the letter uses shorthand that isn't allowed at {at}. Write it out in full, then run again."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_DIRECTION_WORD"
+text = "Refused: the results at {at} use a direction word instead of a value. Give values with dates."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_UNSOURCED"
+text = "Refused: the sentence at {at} doesn't cite a line of the notes. Cite the line it comes from, or remove the sentence."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_BAD_CITE"
+text = "Refused: the sentence at {at} cites a line that isn't in the notes. Correct the line reference, then run again."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_SENTENCE_LIMIT"
+text = "Refused: the sentence at {at} is over {SENTENCE_LIMIT} words. Split it, then run again."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_ABBREV"
+text = "Refused: the abbreviation at {at} hasn't been flagged or resolved. Write it out in full, or confirm its meaning with `--resolve`."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_DOSE_UNIT"
+text = "Refused: dose unit not flagged at {at}."
+check = 9
+status = "held"
+source = "letters_refusals_SAFETY.md re-sign: held; earlier text kept"
+
+[[code]]
+key = "CHECK_DATE"
+text = "Refused: the date at {at} isn't in the lines of the notes it cites. Use the date from the notes, or cite the right line."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_NUMBER"
+text = "Refused: the number at {at} isn't in the lines of the notes it cites. Use the number from the notes, or cite the right line."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "CHECK_WORD"
+text = "Refused: the word at {at} isn't in the lines of the notes it cites. Use the word from the notes, or cite the right line."
+check = 9
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "KEEP_OUT_ARG"
+text = "Refused: --keep-out takes one line, like L3. Nothing was written."
+check = 18
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "NOT_COPY_ARG"
+text = "Refused: --not-copy takes one line, like L3. Nothing was written."
+check = 18
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "DATE_REFUSED"
 text = "Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written.\nIf these are real notes, delete them and use synthetic data only."
-status = "untraced"
-source = "introduced ca30df7 2026-10-14"
+check = 1
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "NOTE_COPY_REFUSED"
-text = "Refused: line L{n} mentions a copy. letters never sends copies. If this isn't a copy request, rerun with `--not-copy L{n}`. Nothing was written."
-status = "untraced"
-source = "introduced 3fbe293 2026-10-13"
+text = "Refused: line L{n} mentions a copy. This tool never sends copies. Nothing was written. If this isn't a copy request, run again with `--not-copy L{n}`."
+check = 3
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "NOT_COPY_REFUSED"
-text = "Refused: line L{n} names someone to send a copy to, so `--not-copy` can't be used on it. letters never sends copies. Nothing was written."
-status = "untraced"
-source = "introduced 3fbe293 2026-10-13"
+text = "Refused: line L{n} names someone to send a copy to, so `--not-copy` can't be used on it. This tool never sends copies. Nothing was written. Remove the copy request from the notes, then run again."
+check = 3
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "COMBO_PACK_REFUSED"
-text = "Refused: the locale pack has no signed combination-medicine list (needs brands, source and sign-off). Nothing was written."
-status = "awaiting"
-source = "docs/RULINGS.md: awaiting sign-off (clinician-only line)"
+text = "Refused: there is no signed list of combination medicines for this locale. The list needs brands, a source and sign-off. Nothing was written. Ask for the list to be completed and signed."
+check = 2
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "COMBO_REFUSED"
 text = "Refused: line {lid} has a combination medicine that letters can't fully list yet. Nothing was written."
-status = "signed"
+check = 2
+status = "signed-earlier"
 source = "Physician, room message 14 Oct 2026 21:22 (docs/RULINGS.md, check 2)"
 
 [[code]]
 key = "REVERSE_REFUSED"
-text = "Refused: line L{n} of this letter has a date, number or name that isn't in the notes. Nothing was written."
-status = "untraced"
-source = "introduced 10568b4 2026-10-13"
+text = "Refused: line L{n} of this letter has a date, number or name that isn't in the notes. Nothing was written. Correct it to match the notes, then run again."
+check = 13
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "LINKED_REFUSED"
-text = "Refused: line {lid} still mentions something this letter was meant to cut. Nothing was written."
-status = "untraced"
-source = "introduced 2db91fb 2026-10-13"
+text = "Refused: line {lid} still mentions something this letter was meant to leave out. Nothing was written. Remove the mention, then run again."
+check = 14
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "REQUIRED_REFUSED"
-text = "Refused: line {lid} has an allergy reaction or a follow-up owner that this letter leaves out. Nothing was written."
-status = "untraced"
-source = "introduced 2db91fb 2026-10-13"
+text = "Refused: line {lid} has an allergy reaction or a follow-up owner that this letter leaves out. Nothing was written. Add it to the letter, then run again."
+check = 10
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "STOP_REASON_REFUSED"
-text = "Refused: line {lid} of the notes has a stop reason that isn't in brackets. Nothing was written."
-status = "untraced"
-source = "introduced ab97b7f 2026-10-14"
+text = "Refused: line {lid} of the notes has a stop reason that isn't in brackets. Nothing was written. Put the stop reason in brackets, then run again."
+check = 6
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "KEEP_OUT_REFUSED"
-text = "Refused: line {lid} has no sensitive cut to keep out. Nothing was written."
-status = "untraced"
-source = "introduced c7f9888 2026-10-14"
+text = "Refused: line {lid} has nothing marked as sensitive, so `--keep-out` can't be used on it. Nothing was written. Check the line number, then run again."
+check = 18
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "PENDING_NONE_REFUSED"
-text = "Refused: line {lid} has a test still pending, but this letter says none are. Nothing was written."
-status = "untraced"
-source = "introduced 2c0a40d 2026-10-13"
+text = "Refused: line {lid} has a test still pending, but this letter says none are. Nothing was written. Add the pending test to the letter, then run again."
+check = 11
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "COURSE_MISSING"
-text = "Refused: the medicine on line {lid} has a course length in the notes that this letter leaves out. Nothing was written."
-status = "untraced"
-source = "introduced 84b01b9 2026-10-13"
+text = "Refused: the medicine on line {lid} has a course length in the notes that this letter leaves out. Nothing was written. Add it to the letter, then run again."
+check = 12
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "MED_MISSING"
-text = "Refused: a medicine on line {lid} of the notes is missing from this letter. Nothing was written."
-status = "untraced"
-source = "introduced 97ff717 2026-10-13"
+text = "Refused: a medicine on line {lid} of the notes is missing from this letter. Nothing was written. Add it to the letter, then run again."
+check = 12
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "ALLERGY_MISSING"
-text = "Refused: an allergy on line {lid} of the notes is missing from this letter. Nothing was written."
-status = "untraced"
-source = "introduced 97ff717 2026-10-13"
+text = "Refused: an allergy on line {lid} of the notes is missing from this letter. Nothing was written. Add it to the letter, then run again."
+check = 12
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "MAX_MISSING"
-text = "Refused: the medicine on line {lid} has a maximum dose in the notes that this letter leaves out. Nothing was written."
-status = "untraced"
-source = "introduced 97ff717 2026-10-13"
+text = "Refused: the medicine on line {lid} has a maximum dose in the notes that this letter leaves out. Nothing was written. Add it to the letter, then run again."
+check = 12
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "RESULT_MISSING"
-text = "Refused: a result on line {lid} of the notes is missing from this letter. Nothing was written."
-status = "untraced"
-source = "introduced cbef7d1 2026-10-13"
+text = "Refused: a result on line {lid} of the notes is missing from this letter. Nothing was written. Add it to the letter, then run again."
+check = 12
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "PRIVACY_BLOCKED[missing]"
 text = "Blocked: this letter needs the privacy line, and it's missing."
-status = "signed"
+check = 19
+status = "signed-earlier"
 source = "Physician signed, Patient reviewed, 14 Oct 2026 (RULES.md row 19)"
 
 [[code]]
 key = "PRIVACY_BLOCKED[unset]"
 text = "Blocked: the privacy field isn't set. Mark whether this letter needs the privacy line."
-status = "signed"
+check = 19
+status = "signed-earlier"
 source = "Physician signed, Patient reviewed, 14 Oct 2026 (RULES.md row 19)"
 
 [[code]]
 key = "FINAL_RAW_REFUSED"
-text = "Refused: --final needs the built letter with its flags, not letter text on its own. Nothing was written."
-status = "untraced"
-source = "introduced 92d6341 2026-10-14"
+text = "Refused: `--final` needs the built letter with its flags, not letter text on its own. Nothing was written. Build the letter first, then run `--final` on it."
+check = 18
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "ACTION_MISSING"
-text = "Refused: an action on line {lid} of the notes is missing from this letter. Nothing was written."
-status = "untraced"
-source = "introduced a0fe8aa 2026-10-13"
+text = "Refused: an action on line {lid} of the notes is missing from this letter. Nothing was written. Add it to the letter, then run again."
+check = 12
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "WRONG_SECTION"
-text = "Refused: {what} on line {lid} of the notes is in the wrong section of this letter. Nothing was written."
-status = "untraced"
-source = "introduced 4c9f59a 2026-10-13"
+text = "Refused: {what} on line {lid} of the notes is in the wrong section of this letter. Nothing was written. Move it to the right section, then run again."
+check = 12
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "SECTION_ND"
-text = "Refused: the {sec} section says \"not documented\", but line {lid} of the notes has one. Nothing was written."
-status = "untraced"
-source = "introduced 4c9f59a 2026-10-13"
+text = "Refused: the {sec} section says \"not documented\", but line {lid} of the notes has an entry for it. Nothing was written. Add that entry to the section, then run again."
+check = 12
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "TEMPLATE_REFUSED"
-text = "Refused: line L{n} of the notes doesn't follow the template. Nothing was written."
-status = "untraced"
-source = "introduced 13298f9 2026-10-13"
+text = "Refused: line L{n} of the notes doesn't follow the template. Nothing was written. Rewrite the line to follow the template, then run again."
+check = 4
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "RECIPIENTS_REFUSED"
-text = "Refused: line L{n} lists more than one recipient. Write a separate letter for each reader. Nothing was written."
-status = "untraced"
-source = "introduced 13298f9 2026-10-13"
+text = "Refused: line L{n} lists more than one recipient. Nothing was written. Write a separate letter for each reader."
+check = 4
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "BRIEF_REFUSED"
 text = "Refused: brief not understood. Write it as \"<kind> to <reader>\", for example \"discharge to GP\" or \"update to patient\"."
-status = "untraced"
-source = "introduced db64a58 2026-10-13"
+check = 5
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "SENSITIVE_REFUSED"
 text = "Refused: line L{n} of the brief includes an item that isn't on the sensitive-items list. Nothing was written."
-status = "signed"
+check = 5
+status = "signed-earlier"
 source = "rulings: round 11, Physician signed (Unknown Include: item)"
 
 [[code]]
 key = "SENSITIVE_REFUSED_NO_LINE"
-text = "Refused: the brief includes an item that isn't on the sensitive-items list. Nothing was written."
-status = "untraced"
-source = "introduced 92b3650 2026-10-14"
+text = "Refused: the brief includes an item that isn't on the sensitive-items list. Nothing was written. Remove the item from the brief, or use one from the list."
+check = 5
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
 
 [[code]]
 key = "INCIDENT"
 text = "This looks like real patient information. Don't paste it here; delete it from where you copied it and report it to your organisation's privacy officer."
-status = "untraced"
-source = "introduced c6f7f37 2026-10-13"
-
-[[code]]
-key = "check_safe: Refused: notes mention more than one patient identifier."
-text = "Refused: notes mention more than one patient identifier."
-status = "untraced"
-source = "introduced c6f7f37 2026-10-13"
-
-[[code]]
-key = "check: Refused: letter body is {words_total} words; limit is about {WORD_LIMIT}."
-text = "Refused: letter body is {words_total} words; limit is about {WORD_LIMIT}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: banned shorthand at {at}."
-text = "Refused: banned shorthand at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: direction word in results at {at}. Give values with dates."
-text = "Refused: direction word in results at {at}. Give values with dates."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: unsourced sentence at {at}."
-text = "Refused: unsourced sentence at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: cites a line not in the notes at {at}."
-text = "Refused: cites a line not in the notes at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: sentence over {SENTENCE_LIMIT} words at {at}."
-text = "Refused: sentence over {SENTENCE_LIMIT} words at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: abbreviation not flagged or resolved at {at}."
-text = "Refused: abbreviation not flagged or resolved at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: dose unit not flagged at {at}."
-text = "Refused: dose unit not flagged at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: date not in cited lines at {at}."
-text = "Refused: date not in cited lines at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: number not in cited lines at {at}."
-text = "Refused: number not in cited lines at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
-
-[[code]]
-key = "check: Refused: word not in cited lines at {at}."
-text = "Refused: word not in cited lines at {at}."
-status = "untraced"
-source = "introduced d6130d4 2026-10-13"
+check = 1
+status = "held"
+source = "letters_refusals_SAFETY.md: held"
 
 [[code]]
 key = "copy_refusal: Refused: copy request {where}. {PATIENT_COPY_TAIL if patient else COPY_TAIL}"
 text = "Refused: copy request {where}. {PATIENT_COPY_TAIL if patient else COPY_TAIL}"
-status = "untraced"
-source = "introduced fc7996c 2026-10-13"
+check = 3
+status = "held"
+source = "letters_refusals_SAFETY.md: held"
 
 [[code]]
 key = "FINAL_REFUSED"
 text = "--final refused: {n} flag(s) still open. Confirm each meaning with --resolve \"AB=meaning\" (or edit the notes), then run --final again."
-status = "untraced"
-source = "introduced 80f85fa 2026-10-13"
-
-[[code]]
-key = "check_template_main: Refused: --keep-out takes one line, like L3. Nothing was written."
-text = "Refused: --keep-out takes one line, like L3. Nothing was written."
-status = "untraced"
-source = "introduced 92b3650 2026-10-14"
-
-[[code]]
-key = "_main: Refused: --not-copy takes one line, like L3. Nothing was written."
-text = "Refused: --not-copy takes one line, like L3. Nothing was written."
-status = "untraced"
-source = "introduced 3fbe293 2026-10-13"
-
-[[code]]
-key = "_main: Refused: --keep-out takes one line, like L3. Nothing was written."
-text = "Refused: --keep-out takes one line, like L3. Nothing was written."
-status = "untraced"
-source = "introduced 92b3650 2026-10-14"
+check = 18
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
