@@ -7,13 +7,20 @@ import letters as L
 from scripts import check14_sbs as S
 S.pytest_configure(None)
 
-TRUTH = pathlib.Path(os.environ["TRUTH_DIR"])        # the scenario truth folder, read only
+import paths
+TRUTH = paths.truth()                                 # the scenario truth folder (a local setting), read only
+if TRUTH is None:
+    print(L.RUN_TRACES_NOT_RUN)
+    sys.exit(1)                                       # never a pass for the safety bar
 CASES = tomllib.loads((pathlib.Path(__file__).resolve().parent.parent / "data" / "check14_derived_cases.toml")
                      .read_text(encoding="utf-8"))           # inputs are data, not code
 BASE = {k: v["note"] for k, v in CASES["scenarios"].items()}
 SCEN = {k: (v["type"], v["audience"]) for k, v in CASES["scenarios"].items()}
 for k in SCEN:                                            # confirm the scenario really has that letters build step
-    t = tomllib.loads(next(TRUTH.glob(k + "-*/truth.toml")).read_text())
+    found = sorted(TRUTH.glob(k + "-*/truth.toml"))
+    if not found:
+        sys.exit(f"answer file missing: {k}")              # setting present: a missing file fails, never skips
+    t = tomllib.loads(found[0].read_text())
     assert any("letters: build" in c for c in t["minimum_call_path"]), k
 
 
