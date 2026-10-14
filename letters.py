@@ -2846,6 +2846,15 @@ def check_template_main(argv=None):
 
 
 def main(argv=None):
+    """CLI entry. Per-letter module state (template mode, empty fields, routes) never outlives one call, so an
+    in-process call can't change a later library call (round 13 stability fix: found by seeded shuffle)."""
+    try:
+        return _main(argv)
+    finally:
+        _EMPTY_FIELDS.clear(); _TEMPLATE.clear(); _ROUTES.clear()
+
+
+def _main(argv=None):
     ap = argparse.ArgumentParser(description="Synthetic notes + brief -> Markdown letter. Nothing else is stored.")
     ap.add_argument("notes", nargs="?", help="notes text file, or - for stdin")
     ap.add_argument("--type", choices=TYPES)

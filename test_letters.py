@@ -4822,3 +4822,13 @@ def test_r13_pending_action_patient_needs_signed_plain_words(tmp_path):
     assert "FBC (full blood count, a blood test that counts your blood cells), sent on 1 Aug 1937" in md
     assert "Who follows up: GP (your family doctor)." in md
     assert f"XYZ {L.FLAG} panel" in md and "XYZ (" not in md
+
+
+# ---------- round 13 stability: no per-letter state outlives an in-process CLI call ----------
+def test_r13_main_leaves_no_template_state(tmp_path):
+    n = tmp_path / "n.txt"; n.write_text(tpl(question="Please review."))
+    assert L.main([str(n), "--brief", "update to GP", "--out", str(tmp_path / "o")]) == 0
+    assert not L._TEMPLATE and not L._EMPTY_FIELDS and not L._ROUTES and not L._PATIENT_LETTER
+    md = make_letter("Patient: SYNTH-7401\n1937-04-05 Clinic.\nProblem: tiredness\nPlan: review in 4 weeks\n",
+                     "gp-update", "GP")
+    assert "5 Apr 1937" in md
