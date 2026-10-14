@@ -257,7 +257,7 @@ TAGS = {
     "course": "course", "exam": "exam", "o/e": "exam", "discharged": "discharge",
     "patient": "patient", "name": "patient", "id": "patient", "author": "author",
 }
-RES = re.compile(r"^(?P<name>[A-Za-z][A-Za-z0-9 -]*?)\s+(?P<val>[<>]?-?\d+(?:\.\d+)?)\s*(?P<unit>[^\s,;]*)\s*(?P<note>.*)$")
+RES = re.compile(r"^(?P<name>[A-Za-z][A-Za-z0-9 -]*?)\s+(?P<val>[<>]?-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?P<unit>[^\s,;]*)\s*(?P<note>.*)$")
 MEDP = re.compile(r"^(?P<drug>.*?)\s*(?:\((?P<k>for|reason:?|indication:?)\s*(?P<v>[^)]*)\))?\s*$", re.I)
 HEDGE = re.compile(r"^(?:possible|probable|likely|suspected|query)\s+", re.I)
 NEG = re.compile(r"^(?:no|denies|nil)\s+(?P<what>.+)$", re.I)
@@ -889,6 +889,40 @@ TOKEN = re.compile(r"(?<![A-Za-z0-9.'])(?:c/o|o/e|(?:[A-Za-z]\.){2,}|"
                    r"(?:mmol|micromol|mcg|mg|g|kg|mL|mU|IU|U|units?)/(?:L|dL|min|kg|day|h)\b|"
                    r"[A-Za-z][A-Za-z0-9]*(?:'[a-z]+)?)")
 UNITS = {"mg", "mcg", "g", "kg", "mL", "L", "dL", "mmol", "micromol", "min", "mU", "h", "units", "unit"}
+UNITS_FILE = HERE / "locale" / "core" / "units.toml"
+
+
+def load_units(path=None):
+    """Signed units (round 13): {unit: patient wording ('' = no brackets)} and the always-flagged set."""
+    p = pathlib.Path(path) if path else UNITS_FILE
+    if not p.exists():
+        return {}, frozenset()
+    d = tomllib.loads(p.read_text(encoding="utf-8"))
+    return (dict(d.get("units", {})), frozenset(d.get("always_flagged", {}).get("units", [])),
+            frozenset(d.get("patient_wording_unsigned", {}).get("units", [])))
+
+
+UNIT_WORDING, UNIT_ALWAYS, UNIT_PATIENT_UNSIGNED = load_units()
+_UNIT_ALT = "|".join(re.escape(u) for u in sorted(UNIT_WORDING, key=len, reverse=True))
+UNIT_AFTER_NUMBER = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(\s?)(" + _UNIT_ALT + r")(?![\w/^\u00b2])")
+
+
+def unit_after_number(m):
+    """A TOKEN match that is a signed unit straight after a number (optional space): never a shorthand flag."""
+    tok = m.group(0)
+    if tok not in UNIT_WORDING or tok in UNIT_ALWAYS:
+        return False
+    return re.search(r"\d\s?$", m.string[:m.start()]) is not None
+
+
+def patient_units(text):
+    """Patient letters: UNIT (wording) on every use, straight after a number; no second bracket; '' = no brackets."""
+    def sub(m):
+        w = UNIT_WORDING.get(m.group(3), "")
+        if not w or re.match(r"\s*\(", text[m.end():]):
+            return m.group(0)
+        return f"{m.group(0)} ({w})"
+    return UNIT_AFTER_NUMBER.sub(sub, text)
 ROMAN_CTX = {"stage", "grade", "class", "type", "types", "phase", "nyha"}
 # u/U/iu/IU as a dose unit is a known misreading risk (10u read as 100): always flagged, attached or detached.
 # cc as a dose unit ("5 cc saline") follows the same rule (Physician-requested); it is never a copy request.
@@ -1014,10 +1048,12 @@ def needs_flag(tok, prev="", exact=()):
     low = tok.lower()
     if low in drug_names() or low in drug_words():
         return False                                        # recognised medicine or brand (or part of one)
+    if tok in UNIT_ALWAYS:
+        return True                                         # U, IU, cc, ug, bare mU: always flagged (round 13)
     if "/" in tok and tok not in ("c/o", "o/e"):
         return False                                        # slash unit, e.g. mmol/L
-    if tok in UNITS:
-        return False
+    if tok in UNITS or tok in UNIT_WORDING:
+        return False                                        # a bare unit is not flagged (round 13 ruling 3)
     if low in ("max", "maximum"):
         return False                                        # dose-limit word: kept as written ('max X per week')
     if re.fullmatch(r"[IVX]+", tok) and prev.lower() in ROMAN_CTX:
@@ -1039,6 +1075,8 @@ def context_ok(m):
     """Signed context exemptions (ruling 14 Oct 2026) for a TOKEN match m: 'Ms' straight before a capitalised name
     (Ms Brown) is a title; 'ms' straight after a number (QTc 480 ms) is milliseconds. Neither is flagged."""
     tok, s = m.group(0), m.string
+    if unit_after_number(m):
+        return True
     if tok == "Ms" and re.match(r"\.?\s+[A-Z][a-z]", s[m.end():]):
         return True
     return tok == "ms" and re.search(r"\d\s*$", s[:m.start()]) is not None
@@ -1105,9 +1143,12 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
     flags = [] if flags is None else flags
     seen, out, med = set(), [], False
     med_heads = {h[k] for h in HEADINGS.values() for k in ("meds", "med_changes")}
+    res_heads = {h["results"] for h in HEADINGS.values()}
+    res = False
     for line in lines:
         if line.startswith("## "):
             med = line[3:].strip() in med_heads
+            res = line[3:].strip() in res_heads
         if not re.match(r"^(- |\d+\. |\| (?!Test \|))", line):
             out.append(line); continue
         text, ids = split_ids(line)
@@ -1151,6 +1192,8 @@ def wording(lines, audience, resolved=None, single=None, flags=None):
             seen.add(ab)
             return f"{full} ({ab})"
         text = TOKEN.sub(sub, text)
+        if audience == "patient" and res:
+            text = patient_units(text)                       # results only; medicine lines stay as signed
         def dose(m):
             if FLAG_ANY.match(text, m.end()):
                 return m.group(0)
@@ -1203,6 +1246,8 @@ def _source_words(src, single=None):
     for pat, rep in PLAIN:
         if re.search(pat, src):
             words |= _words(rep)
+    for m in UNIT_AFTER_NUMBER.finditer(src):           # signed unit wording, earned by the unit in the line
+        words |= _words(UNIT_WORDING.get(m.group(3), ""))
     for ab, plain in PLAIN_WORDS.items():              # signed patient plain words, earned by the word in the line
         if ab in tokens(src):
             words |= _words(plain)
@@ -1256,7 +1301,8 @@ def check(md, sources, letter_type):
         if section in ROUTE_SECTIONS:
             scan = route_slot(scan, ids, plain=True)[1].replace(ROUTE_SLOT, "route")   # signed route slot: checked in wording()
         forms = [(f, ab) for ab, d in single.items() for f in (d["clinical"], d["patient"])] + \
-                [(f, ab) for ab, f in res.items()] + [(f"{ab} ({f})", ab) for ab, f in PLAIN_WORDS.items()]
+                [(f, ab) for ab, f in res.items()] + [(f"{ab} ({f})", ab) for ab, f in PLAIN_WORDS.items()] + \
+                [(f"{u} ({w})", u) for u, w in UNIT_WORDING.items() if w]
         for f, ab in sorted(forms, key=lambda x: -len(x[0])):
             scan = scan.replace(f"{f} ({ab})", ab).replace(f, ab)
         exact = tuple(res) + tuple(single)
@@ -1632,6 +1678,7 @@ def reverse_check(md, text, extra="", template=None):
     single = load_single_meaning()
     expans = " ".join(v["clinical"] + " " + v["patient"] for v in single.values()).lower()
     expans += " " + " ".join(PLAIN_WORDS.values()).lower()     # signed patient plain words
+    expans += " " + " ".join(UNIT_WORDING.values()).lower()    # signed unit wording
     body = md.split("\n---\n")[0]
     tool |= {"dear", "who", "when", "action", "changed", "from", "now", "stopped", "started", "restarted", "reason",
              "change", "resolved", "ruled", "out", "sent", "undocumented", "date", "follows", "up"}

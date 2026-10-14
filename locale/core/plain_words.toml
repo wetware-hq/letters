@@ -4,15 +4,10 @@
 # and no second one is added. Words with no entry here stay flagged in patient letters; CT stays flagged.
 # Only words on the allowed list (allowed_shorthand.toml) take effect; shorthand.txt and detection words never do.
 
+# Round 13: fL, pg, cm, mm, kPa, mmHg moved to units.toml (the units list wins).
 [plain_words]
-cm = "centimetres"
-mm = "millimetres"
-kPa = "kilopascals, a unit of pressure"
-mmHg = "millimetres of mercury, a unit of pressure"
 nmol = "nanomoles, a tiny amount of a substance"
 pmol = "picomoles, an even tinier amount of a substance"
-fL = "femtolitres, a unit for the size of blood cells"
-pg = "picograms, a tiny unit of weight"
 kJ = "kilojoules, a unit of energy in food"
 ESR = "a blood test for inflammation"
 TSH = "a blood test of thyroid function"

@@ -22,6 +22,6 @@
 # drops such an entry and a test fails.
 
 [allowed]
-units          = ["cm", "mm", "kPa", "mmHg", "nmol", "pmol", "fL", "pg", "kJ"]
+units          = ["nmol", "pmol", "kJ"]   # round 13: cm, mm, kPa, mmHg, fL, pg moved to units.toml
 pathology      = ["ESR", "TSH", "APTT", "ALT", "AST", "ALP", "GGT", "LDH", "CK", "BNP", "MCV", "ABG", "VBG", "Hb", "LFT"]
 investigations = ["CXR", "MRI", "EEG", "DXA", "PET"]

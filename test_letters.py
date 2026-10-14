@@ -4584,3 +4584,94 @@ def test_r12_plain_words_clinician_letter_unchanged(tmp_path):
     for w, plain in L.PLAIN_WORDS.items():
         assert f"{w} ({plain})" not in md
     assert "- CXR clear 1937-08-01" in md and f"CXR {L.FLAG}" not in md and f"CT {L.FLAG}" in md
+
+
+# ---------- round 13 item 1: units (locale/core/units.toml) ----------
+def _r13(results=(), meds=("empagliflozin 10 mg daily",)):
+    return tpl(question="Please review.", problems=("review",), meds=meds, results=results,
+               actions=("review in 2 weeks, GP",))
+
+
+def _r13_run(tmp_path, text, brief, *extra):
+    r, out = _run_t(tmp_path, text, "--brief", brief, *extra)
+    md = (out / "letter.md").read_text() if (out / "letter.md").exists() else ""
+    return r, md
+
+
+def test_r13_each_word_has_exactly_one_entry():
+    files = [L.UNITS_FILE] + L.PLAIN_WORDS_FILES
+    seen = {}
+    for p in files:
+        d = tomllib.loads(p.read_text())
+        for w in d.get("units", {}) if p == L.UNITS_FILE else d.get("plain_words", {}):
+            seen.setdefault(w, []).append(p.name)
+    assert all(len(v) == 1 for v in seen.values()), {k: v for k, v in seen.items() if len(v) > 1}
+    for w in ("fL", "pg", "cm", "mm", "kPa", "mmHg"):
+        assert w in L.UNIT_WORDING and w not in L.PLAIN_WORDS and w not in L.ALLOWED_SHORTHAND
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r13_alt_u_per_litre_passes(tmp_path, brief):
+    r, md = _r13_run(tmp_path, _r13(("ALT 40 U/L 1937-08-01",)), brief)
+    assert r.returncode == 0, r.stderr
+    assert "40 U/L" in md and f"U/L {L.FLAG}" not in md
+    assert ("40 U/L (units per litre)" in md) == (brief != "discharge to GP")
+
+
+@pytest.mark.parametrize("s", ["dose 10 U", "dose 10 IU", "IU", "10 cc", "ug", "mU"])
+def test_r13_always_flagged_units(s):
+    assert L.flagged_tokens(s, tuple(L.load_single_meaning())) or L.DOSE_U.search(s)
+
+
+@pytest.mark.parametrize("s", ["wait 30 s", "drank 2 L", "Hb 132 g/L", "TSH 2.1 mU/L", "vitamin D 50 IU/L",
+                               "pulse 80 bpm", "MCV 90 fL", "mg", "kPa", "insulin 10 units"])
+def test_r13_units_pass(s):
+    assert not L.flagged_tokens(s, tuple(L.load_single_meaning())) and not L.DOSE_U.search(s)
+
+
+def test_r13_citation_bracket_never_unit_matched():
+    t = "- CXR clear 1937-08-01 [L14]"
+    assert L.patient_units(t) == t and not L.UNIT_AFTER_NUMBER.search("on 1937 [L14]")
+
+
+def test_r13_patient_results_wording_no_double_and_no_brackets_for_percent_and_celsius(tmp_path):
+    text = _r13(("Hb 132 g/L (grams per litre) 1937-08-01", "sats 95 % 1937-08-01", "temperature 38 °C 1937-08-01",
+                 "vitamin D 50 IU/L 1937-08-01", "TSH 2.1 mU/L 1937-08-01"))
+    assert L.patient_units("Hb 132 g/L (grams per litre)") == "Hb 132 g/L (grams per litre)"
+    assert L.patient_units("sats 95 %, 38 °C") == "sats 95 %, 38 °C"
+    assert L.patient_units("50 IU/L, 2.1 mU/L") == ("50 IU/L (international units per litre), "
+                                                     "2.1 mU/L (milliunits per litre)")
+    r, md = _r13_run(tmp_path, text, "letter to the patient")
+    assert "(grams per litre) (grams per litre)" not in md and "% (" not in md and "°C (" not in md
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r13_insulin_units_in_full_no_brackets(tmp_path, brief):
+    r, md = _r13_run(tmp_path, _r13(meds=("insulin glargine 10 units nocte",)), brief)
+    assert r.returncode == 0, r.stderr
+    assert "10 units" in md and "units (" not in md and f"units {L.FLAG}" not in md
+
+
+def test_r13_medicine_lines_get_no_unit_wording_and_same_dose_check(tmp_path):
+    """Ruling 1: unit wording in results only; dose checks read the source line, so a medicine line gives the same
+    dose-check result with and without plain words."""
+    med = "paracetamol 1 g qid max 4 g in 24 hours"
+    text = _r13(meds=(med,))
+    rp, mdp = _r13_run(tmp_path / "p", text, "letter to the patient")
+    rg, mdg = _r13_run(tmp_path / "g", text, "discharge to GP")
+    assert rp.returncode == rg.returncode == 0, rp.stderr + rg.stderr
+    assert "(grams)" not in mdp
+    notes = L.from_template(text)
+    for md, aud in ((mdp, "patient"), (mdg, "gp")):
+        assert L.verify_letter(md, notes, aud)
+        bad = re.sub(r"no more than 4 g in 24 hours|max 4 g in 24 hours", "", md)
+        with pytest.raises(L.Refused, match="maximum dose"):
+            L.verify_letter(bad, notes, aud)
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r13_blood_pressure_kept_together_as_written(tmp_path, brief):
+    r, md = _r13_run(tmp_path, _r13(("blood pressure 150/90 mmHg 1937-08-01",)), brief, "--final")
+    assert r.returncode == 0, r.stderr
+    assert "150/90 mmHg" in md and "150 /90" not in md
+    assert "H-R13-BP" in (HERE / "HAZARD_LOG.md").read_text()

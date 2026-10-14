@@ -1,0 +1,44 @@
+# Units (core). First set, from named sources; citations UNVERIFIED. Signed by clinical reviewer.
+# Sources named: BIPM SI Brochure, 9th ed. (2019); RCPA PUTS units recommendations; ACSQHC medicines
+# terminology recommendations (2016) for error-prone dose units.
+# A unit is accepted only straight after a number (optional space); then it is not a shorthand flag.
+# Wording is spelled out in RESULTS lines of patient letters only (ruling); medicine lines stay as signed.
+# Patient letters print UNIT (wording) on every use in results, no second bracket if one is already written; an empty
+# wording prints the unit with no brackets (% and °C). Clinician letters keep the text unchanged.
+# Single-letter s and L count only after a number; citation brackets such as [L14] are never unit-matched.
+
+[units]
+"g/L" = "grams per litre"
+"mg/L" = "milligrams per litre"
+"µg/L" = "micrograms per litre"
+"mmol/L" = "millimoles per litre"
+"µmol/L" = "micromoles per litre"
+"nmol/L" = "nanomoles per litre"
+"pmol/L" = "picomoles per litre"
+"U/L" = "units per litre"
+"×10^9/L" = "billion per litre"
+"×10^12/L" = "million million per litre"
+"fL" = "femtolitres, the size of a blood cell"
+"pg" = "picograms, a tiny weight"
+"mm/h" = "millimetres per hour"
+"mL/min/1.73m²" = "how well your kidneys filter, adjusted for body size"
+"mg" = "milligrams"
+"g" = "grams"
+"kg" = "kilograms"
+"mcg" = "micrograms"
+"mL" = "millilitres"
+"L" = "litres"
+"mmHg" = "millimetres of mercury, a measure of pressure"
+"kPa" = "kilopascals, a measure of pressure"
+"bpm" = "beats per minute"
+"cm" = "centimetres"
+"mm" = "millimetres"
+"s" = "seconds"
+"IU/L" = "international units per litre"
+"mU/L" = "milliunits per litre"
+"%" = ""
+"°C" = ""
+
+# Always flagged everywhere, even straight after a number (misreading risk).
+[always_flagged]
+units = ["U", "IU", "cc", "ug", "mU"]   # bare mU flagged; mU/L and IU/L straight after a number are allowed

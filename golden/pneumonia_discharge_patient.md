@@ -43,7 +43,7 @@ This letter explains your care and what happens next.
 
 ## Your test results
 
-- a blood test for inflammation (CRP): 180 mg/L on 1 Jun 1937, 90 mg/L on 3 Jun 1937, 40 mg/L on 4 Jun 1937 [L6, L11, L16]
+- a blood test for inflammation (CRP): 180 mg/L (milligrams per litre) on 1 Jun 1937, 90 mg/L (milligrams per litre) on 3 Jun 1937, 40 mg/L (milligrams per litre) on 4 Jun 1937 [flag: long sentence] [L6, L11, L16]
 
 ## Tests we are still waiting on
 
