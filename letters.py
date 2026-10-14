@@ -22,6 +22,8 @@ WORD_LIMIT = 400          # target; refused above WORD_LIMIT * 1.1, except disch
 SENTENCE_LIMIT = 25       # words per sentence
 
 SYNTH = re.compile(r"\bSYNTH-[A-Za-z0-9]+\b")
+# An event-id reference, e.g. SYNTH-EP-1002#7: an episode number and an event number. Never a patient identifier.
+EVENT_ID = re.compile(r"(?<![\w#-])SYNTH-EP-\d+#\d+(?![\w#-])")
 ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 DMY = re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})\b")
 LONGNUM = re.compile(r"(?<![\w.])\+?\d(?:[\s-]?\d){7,}(?![\w.])")
@@ -75,7 +77,7 @@ def first_out_of_range_line(text):
 
 # ---------- safety ----------
 def check_safe(text):
-    ids = set(SYNTH.findall(text))
+    ids = set(SYNTH.findall(EVENT_ID.sub(" ", text)))       # event ids may sit beside the one patient id
     if not ids:
         raise Refused(INCIDENT + " (reason: no SYNTH- identifier)")
     if len(ids) > 1:
@@ -1097,10 +1099,17 @@ def needs_flag(tok, prev="", exact=()):
     return low not in WORDS     # nbm, cx (and Nbm at sentence start); drug names too (acceptable)
 
 
+def in_event_id(m):
+    """True when the token match m sits inside an event-id reference (SYNTH-EP-1002#7): never an abbreviation."""
+    return any(e.start() <= m.start() and m.end() <= e.end() for e in EVENT_ID.finditer(m.string))
+
+
 def context_ok(m):
     """Signed context exemptions (ruling 14 Oct 2026) for a TOKEN match m: 'Ms' straight before a capitalised name
     (Ms Brown) is a title; 'ms' straight after a number (QTc 480 ms) is milliseconds. Neither is flagged."""
     tok, s = m.group(0), m.string
+    if in_event_id(m):
+        return True
     if unit_after_number(m):
         return True
     if tok == "Ms" and re.match(r"\.?\s+[A-Z][a-z]", s[m.end():]):

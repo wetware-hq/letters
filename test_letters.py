@@ -5120,3 +5120,43 @@ def test_c13_sourced_line_passes_header_above_date_skipped_and_no_extra_ok():
     assert _c13("- review in 2 weeks [L3]") is None
     assert _c13("- review in 2 weeks [L3]", pre="Smithers clinic 99\n") is None
     assert _c13("- review in 2 weeks [L3]", extra=None) is None
+
+
+# ---------- check 1: event-id references (SYNTH-EP-<episode>#<event>) beside the one patient id ----------
+EV_NOTE = "Patient: SYNTH-1002\n1937-06-03 Clinic review. Event SYNTH-EP-1002#7 noted.\nPlan: review event SYNTH-EP-1002#7 in 2 weeks\n"
+
+
+def test_c1_event_id_beside_patient_id_is_allowed():
+    assert L.check_safe(EV_NOTE) == "SYNTH-1002"
+
+
+@pytest.mark.parametrize("bad", ["SYNTH-EP-1002", "SYNTH-EP-1002#7x", "SYNTH-EP-1002#", "SYNTH-EP#7", "SYNTH-EP-1002#7#2",
+                                 "SYNTH-EP-1002#7-3"])
+def test_c1_malformed_event_id_still_counts_as_a_second_identifier(bad):
+    with pytest.raises(Refused) as e:
+        L.check_safe(EV_NOTE.replace("SYNTH-EP-1002#7 noted", bad + " noted"))
+    assert str(e.value) == "Refused: notes mention more than one patient identifier."
+
+
+def test_c1_event_id_never_hides_a_second_patient_or_a_missing_one():
+    with pytest.raises(Refused, match="more than one patient identifier"):
+        L.check_safe(EV_NOTE + "Plan: see SYNTH-2002\n")
+    with pytest.raises(Refused, match="no SYNTH- identifier"):
+        L.check_safe("1937-06-03 Event SYNTH-EP-1002#7 noted.\n")
+
+
+@pytest.mark.parametrize("aud", ["gp", "patient"])
+def test_c1_no_abbreviation_flag_inside_event_id(aud):
+    flags = []
+    md = build(EV_NOTE, "gp-update", "GP" if aud == "gp" else "patient", audience=aud, flags=flags, privacy=True)[0]
+    assert "Event SYNTH-EP-1002#7 noted." in md and "review event SYNTH-EP-1002#7 in 2 weeks" in md
+    assert not any("SYNTH" in f or f.startswith("EP") for f in flags)
+
+
+def test_c1_in_event_id_exact_bounds():
+    s = "Event SYNTH-EP-1002#7 noted EP"
+    at = lambda tok, i=0: list(re.finditer(re.escape(tok), s))[i]
+    assert L.in_event_id(at("SYNTH")) and L.in_event_id(at("7")) and L.in_event_id(at("EP"))
+    assert L.in_event_id(at("SYNTH-EP-1002#7"))
+    assert not L.in_event_id(at("Event")) and not L.in_event_id(at("noted")) and not L.in_event_id(at("EP", 1))
+    assert not L.in_event_id(at("Event SYNTH")) and not L.in_event_id(at("7 noted"))

@@ -5,7 +5,7 @@ The 19 safety checks in `docs/SAFETY_CHECKS.md`, each with its signer, class and
 
 | # | Check | Signer | Class | Tests |
 |---|---|---|---|---|
-| 1 | Synthetic-data guard | Physician | safety | test_refuses_non_synthetic, test_fixtures_synthetic_1937 |
+| 1 | Synthetic-data guard | Physician | safety | test_refuses_non_synthetic, test_fixtures_synthetic_1937, test_c1_event_id_beside_patient_id_is_allowed, test_c1_malformed_event_id_still_counts_as_a_second_identifier, test_c1_event_id_never_hides_a_second_patient_or_a_missing_one, test_c1_no_abbreviation_flag_inside_event_id, test_c1_in_event_id_exact_bounds |
 | 2 | Combination-medicine refusal | Physician | safety | test_combination_brand_refused, test_combination_brand_cli_writes_nothing, test_r12_letter_command_inline_and_file_brief_identical, test_c2_combination_refusal_names_the_parsed_line_not_a_comment |
 | 3 | Copy and recipient refusals | Physician | safety | test_patient_letter_copy_via_brief_refused, test_patient_letter_copy_via_template_refused, test_patient_letter_copy_via_notes_refused, test_gp_letter_copy_via_brief_refused, test_c3_copy_refusal_defaults_to_clinician_wording, test_c3_recipients_line_with_two_readers_refused_before_template_check |
 | 4 | Template check | Physician | safety | test_r10_template_refusals_name_first_line, test_r10_template_free_text_notes_refused, test_c4_template_recipients_two_readers_refused, test_c4_template_list_header_value_only_nil_known_allergies |
