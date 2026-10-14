@@ -634,7 +634,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 st["meds"][k] = {"drug": drug, "ind": ind, "date": d, "ids": (old["ids"] if old else []) + ids,
                                  "cut": cut and not ind}
             elif kind == "stop":
-                if not _TEMPLATE and re.search(r"(?<!\()\breason\s*:", line, re.I) and not re.search(r"\(\s*reason\s*:", line, re.I):
+                if not any(_TEMPLATE) and re.search(r"(?<!\()\breason\s*:", line, re.I) and not re.search(r"\(\s*reason\s*:", line, re.I):
                     raise Refused(STOP_REASON_REFUSED.format(lid=lid))      # unbracketed: never partly parsed
                 mm = MEDP.match(body)
                 drug, reason = mm.group("drug").strip(), mm.group("v") if (mm.group("k") or "").lower().startswith("reason") else None
@@ -645,7 +645,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 if not reason and any(lid in d_.split(":")[0].split(",") and "cut" in d_ for d_ in dropped):
                     reason = "reason not included"               # a stated reason was cut on purpose
                 sd = ISO.search(drug)
-                sdate = sd.group(0) if sd else (None if _TEMPLATE else d)   # own date first; never the letter's date
+                sdate = sd.group(0) if sd else (None if any(_TEMPLATE) else d)   # own date first; never the letter's date
                 drug = re.sub(r"\s+", " ", ISO.sub(" ", drug)).strip(" ,;-") if sd else drug
                 k = _mkey(drug)
                 old = st["meds"].pop(k, None)
@@ -683,7 +683,7 @@ def cumsum(entries, to="", dropped=None, keep_indications=False):
                 k = name.lower()
                 st["pending"].pop(k, None)
                 h = st["results"].setdefault(k, {"name": name, "values": []})
-                h["values"].append((rd.group(0) if rd else (None if _TEMPLATE else d), r.group("val"), r.group("unit"), r.group("note").strip(), lid))
+                h["values"].append((rd.group(0) if rd else (None if any(_TEMPLATE) else d), r.group("val"), r.group("unit"), r.group("note").strip(), lid))
             elif kind == "pending":
                 sm = re.search(r";\s*sent:\s*(\d{4}-\d{2}-\d{2})", body)
                 sent = sm.group(1) if sm else None
@@ -1019,7 +1019,7 @@ _PATIENT_LETTER = []    # [True] while a patient letter is built: allowed words 
 def allowed_word(tok):
     """Allowed words clear the shorthand flag in clinician letters only. In patient letters they stay flagged unless
     a signed plain-words entry exists (single_meaning.toml, handled before this check)."""
-    return (tok in ALLOWED_SHORTHAND or tok in TEST_NAMES) and (not _PATIENT_LETTER or tok in patient_wording())
+    return (tok in ALLOWED_SHORTHAND or tok in TEST_NAMES) and (not any(_PATIENT_LETTER) or tok in patient_wording())
 WORDS = set().union(*(_lines(p) for p in WORDLISTS)) | {m.lower() for m in MONTHS}
 
 
@@ -1577,6 +1577,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
 
 # Temporary (13 Oct 2026): combination medicines can't be fully listed yet, so any letter naming one is refused.
 COMBINATION_FILE = HERE / "locale" / LOCALE / "combination.toml"
+# Clinician-only (screen of the person running letters; never a patient view). AWAITING sign-off: docs/RULINGS.md.
 COMBO_PACK_REFUSED = ("Refused: the locale pack has no signed combination-medicine list (needs brands, source and "
                       "sign-off). Nothing was written.")
 
@@ -1745,7 +1746,7 @@ def reverse_check(md, text, extra="", template=None):
     'no more than X in 24 hours'). A date may be reformatted, never recalculated. Line refs are exempt."""
     raw = {f"L{n}": l for n, l in enumerate(text.splitlines(), 1)}
     for lid, (_, d) in parse(text)[1].items():             # a line's own dated entry is a notes date for it
-        if d and not (bool(_TEMPLATE) if template is None else template):   # never the template Date field (the letter's own date)
+        if d and not (any(_TEMPLATE) if template is None else template):   # never the template Date field (the letter's own date)
             raw[lid] = raw.get(lid, "") + " " + d
     allnotes = text + "\n" + (extra or "")
     tool = _tool_words()
@@ -1959,9 +1960,7 @@ def _shows_reason(line, meds):
 
 def flag_linked_medicines(md, text, dropped, flags):
     items = _cut_items(dropped)
-    if not items:
-        return md
-    meds = _meds_of(items)
+    meds = _meds_of(items)                                # no cut items: no medicines, so nothing is flagged
     soft = [t for v in items.values() for t in v.get("flag_terms", [])]
     src = _source_lines(text)
     lines = md.split("\n")
@@ -2207,7 +2206,7 @@ def printed_flags(flags, md):
         for fl in found:
             if fl.strip() == REASON_FLAG:
                 notice = REASON_NOTICE.format(lid=ids[-1])
-            elif ids[-1] in named or any(i in named for i in ids):
+            elif any(i in named for i in ids):
                 continue
             else:
                 notice = OPEN_NOTICE.format(lid=ids[-1])

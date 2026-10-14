@@ -12,6 +12,10 @@ Source: Physician, room message 14 Oct 2026, 21:22 (UTC+11), scope signed by Phy
 - The list lives in the locale pack (locale/<pack>/combination.toml) with a source and a reviewer sign-off.
   letters refuses to run if the list, its source or its sign-off is missing.
 
+### Awaiting sign-off
+- COMBO_PACK_REFUSED, the missing-pack line (clinician-only; never shown to a patient):
+  "Refused: the locale pack has no signed combination-medicine list (needs brands, source and sign-off). Nothing was written."
+
 ### Lift conditions (all needed; lifting is out of scope for this release)
 1. A combination table in the locale pack, checked against each country's product information.
 2. A test that the letter names every part of each combination.

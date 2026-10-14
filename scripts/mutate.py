@@ -11,55 +11,21 @@ survives runs the FULL suite with -x and a timeout. Killed = any test failed or 
   python3 scripts/mutate.py list            # count mutants
   python3 scripts/mutate.py run [-j N] [--only ID,ID] [--timeout S]
 """
-import argparse, ast, concurrent.futures as cf, json, os, pathlib, re, shutil, subprocess, sys, tempfile
+import argparse, ast, concurrent.futures as cf, json, os, pathlib, re, shutil, subprocess, sys, tempfile, tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "letters.py"
-# check number -> functions holding its logic (see RULES.md / docs/SAFETY_CHECKS.md)
-TARGETS = {
-    1: ["check_safe", "first_out_of_range_line", "valid_date", "date_in_range", "in_event_id"],
-    2: ["refuse_combination_brands", "load_combination", "_combo_rx", "letter_by_hand", "close_letter_by_hand"],
-    3: ["refuse_copies", "refuse_note_copies", "pre_template_checks"],
-    4: ["from_template"],
-    5: ["read_brief"],
-    6: ["cumsum:result"], 7: ["cumsum:result", "result_sensitive_cats"],
-    8: ["sensitive_result_lines", "mark_linked_items"],
-    9: ["check"],
-    10: ["refuse_missing_required"],
-    11: ["_build:pending_none"],
-    12: ["verify_letter"],
-    13: ["reverse_check"],
-    14: ["apply_cut_rule", "flag_cuts"],
-    15: ["verify_letter:leak"],
-    16: ["flag_long_sentences"],
-    17: ["_has_question"],
-    18: ["finalise"],
-    19: ["privacy_check"],
-}
+# the functions to mutate: safety_functions.toml (every function implementing a safety row; no hand-picked list)
+FUNCS = tomllib.loads((ROOT / "safety_functions.toml").read_text(encoding="utf-8"))["functions"]
+ROWS = {f["name"]: f["rows"] for f in FUNCS}
 CMP = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.GtE, ast.GtE: ast.Lt, ast.Gt: ast.LtE, ast.LtE: ast.Gt,
        ast.In: ast.NotIn, ast.NotIn: ast.In, ast.Is: ast.IsNot, ast.IsNot: ast.Is}
 
 
 def _regions(tree, src):
-    """(check, func name, first line, last line) for every target; ':part' narrows to a marked part."""
+    """(first row, func name, first line, last line) for every listed function."""
     funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-    lines = src.splitlines()
-    out = []
-    for chk, names in TARGETS.items():
-        for spec in names:
-            name, _, part = spec.partition(":")
-            f = funcs[name]
-            lo, hi = f.lineno, f.end_lineno
-            if part == "result":                       # the 'elif kind == "result":' branch of cumsum
-                lo = next(i for i in range(lo, hi) if 'elif kind == "result":' in lines[i - 1])
-                hi = next(i for i in range(lo + 1, hi) if re.match(r"\s+elif kind == ", lines[i - 1])) - 1
-            elif part == "pending_none":
-                lo = next(i for i in range(lo, hi) if 'EMPTY["pending"] in md' in lines[i - 1]); hi = lo + 2
-            elif part == "leak":
-                lo = next(i for i in range(lo, hi) if "is_cut(" in lines[i - 1] and "for" not in lines[i - 1])
-                hi = lo + 2
-            out.append((chk, spec, lo, hi))
-    return out
+    return [(ROWS[name][0], name, funcs[name].lineno, funcs[name].end_lineno) for name in ROWS]
 
 
 def mutants():
@@ -94,7 +60,7 @@ def mutants():
             if key in seen:
                 continue
             seen.add(key)
-            out.append({"id": len(out) + 1, "check": rs[0][0], "func": rs[0][1], "line": node.lineno,
+            out.append({"id": len(out) + 1, "check": rs[0][0], "rows": ROWS[rs[0][1]], "func": rs[0][1], "line": node.lineno,
                         "col": node.col_offset, "node": type(node).__name__, "op": kind, "k": k})
     return out
 
@@ -178,7 +144,7 @@ def run_one(m, timeout):
         repo = pathlib.Path(d) / "letters"
         shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc"))
         (repo / "letters.py").write_text(mutated_source(m), encoding="utf-8")
-        tests = rule_tests().get(m["check"], [])
+        tests = sorted({t for r in m["rows"] for t in rule_tests().get(r, [])})
         stage = _pytest(repo, ["-k", " or ".join(tests)], timeout) if tests else "survived"
         if stage == "survived":
             stage = _pytest(repo, [], timeout)

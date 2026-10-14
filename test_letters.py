@@ -5301,3 +5301,228 @@ def test_c2_clinician_entry_stays_open_until_a_letter_is_written_by_hand():
     assert L.close_letter_by_hand(e, "   ")["open"] is True
     assert L.close_letter_by_hand(e, None)["open"] is True
     assert L.close_letter_by_hand(e, "Dear colleague, ...")["open"] is False and e["open"] is True
+
+
+# ---------- safety_functions.toml lists every safety function (Director's ruling) ----------
+import safetyscan  # noqa: E402
+
+
+def test_safety_functions_listed():
+    miss = safetyscan.missing((HERE / "letters.py").read_text(encoding="utf-8"), safetyscan.listed())
+    assert miss == {}, "not in safety_functions.toml: " + ", ".join(f"{n} ({', '.join(k)})" for n, k in miss.items())
+
+
+def test_safety_functions_list_names_real_functions_and_rows():
+    import ast
+    names = {n.name for n in ast.walk(ast.parse((HERE / "letters.py").read_text())) if isinstance(n, ast.FunctionDef)}
+    fs = tomllib.loads((HERE / "safety_functions.toml").read_text())["functions"]
+    assert all(f["name"] in names and f["rows"] and all(1 <= r <= 19 for r in f["rows"]) for f in fs)
+    assert len({f["name"] for f in fs}) == len(fs)
+
+
+def test_safety_functions_scan_catches_a_planted_omission(tmp_path):
+    src = (HERE / "letters.py").read_text(encoding="utf-8")
+    names = safetyscan.listed() - {"privacy_check"}
+    assert safetyscan.missing(src, names) == {"privacy_check": ["refuses"]}
+    planted = src + '\n\ndef sneaky(x):\n    raise Refused("Refused: x. Nothing was written.")\n'
+    assert safetyscan.missing(planted, safetyscan.listed()) == {"sneaky": ["refuses"]}
+    planted = src + '\n\ndef opens(x):\n    return {"id": "CQ-LETTER-BY-HAND"}\n\n\ndef writes(p):\n    p.write_text("x")\n'
+    assert set(safetyscan.missing(planted, safetyscan.listed())) == {"opens", "writes"}
+
+
+# ---------- refusal codes: static listing against data/refusal_lines.toml ----------
+import refusalcodes  # noqa: E402
+
+
+def _refusal_registry():
+    return {c["key"]: c for c in tomllib.loads((HERE / "data" / "refusal_lines.toml").read_text())["code"]}
+
+
+def test_refusal_codes_listed():
+    code, reg = refusalcodes.codes(), _refusal_registry()
+    assert set(code) == set(reg), (sorted(set(code) - set(reg)), sorted(set(reg) - set(code)))
+    assert all(reg[k]["text"] == t for k, t in code.items())
+    assert all(reg[k]["status"] in ("signed", "awaiting", "untraced") and reg[k]["source"].strip() for k in reg)
+
+
+def test_refusal_codes_awaiting_are_named_in_rulings_and_clinician_only():
+    rulings = (HERE / "docs" / "RULINGS.md").read_text()
+    waiting = [c for c in _refusal_registry().values() if c["status"] == "awaiting"]
+    assert [c["key"] for c in waiting] == ["COMBO_PACK_REFUSED"]
+    for c in waiting:
+        assert c["key"] in rulings.split("### Awaiting sign-off")[1] and c["text"] in rulings
+    assert L.COMBO_PACK_REFUSED not in L.letter_by_hand(2)["patient"]
+    assert not issubclass(type(Refused(L.COMBO_PACK_REFUSED)), L.ComboRefused)    # no patient written-by-hand view
+
+
+def test_refusal_codes_listing_catches_a_new_code():
+    src = (HERE / "letters.py").read_text() + '\n\nNEW_REFUSED = "Refused: something new. Nothing was written."\n'
+    assert set(refusalcodes.codes(src)) - set(_refusal_registry()) == {"NEW_REFUSED"}
+
+
+# ---------- whole-list mutation: direct tests (Director ruling, 14 Oct 21:35) ----------
+_WL_PSY = """Patient: SYNTH-5401
+1937-06-03 Clinic review.
+Problem: ingrown toenail
+PMHx: bipolar disorder
+Med: lithium 250 mg twice daily (for bipolar disorder)
+Follow-up: review in 2 weeks
+"""
+_WL_MED_L5 = L.MED_NOTICE.format(lid="L5")
+
+
+def test_wl_question_flag_sits_on_the_letter_line():
+    md, _ = L.build(_WL_PSY, "gp-update", "Podiatry")
+    line = next(x for x in md.split("\n") if L.QUESTION_FLAG in x)
+    assert line.startswith("**Letter:**")
+
+
+def test_wl_build_rejects_unknown_type():
+    import pytest
+    with pytest.raises(ValueError, match="unknown type"):
+        L.build(_WL_PSY, "no-such-type", "GP")
+
+
+def test_wl_allowed_word_stays_flagged_in_patient_letter_only(monkeypatch):
+    monkeypatch.setattr(L, "ALLOWED_SHORTHAND", frozenset(L.ALLOWED_SHORTHAND) | {"ZQX"})
+    t = "Patient: SYNTH-5401\n1937-06-03 Clinic review.\nProblem: ingrown toenail\nFollow-up: ZQX in 2 weeks, GP\n"
+    for aud, to, want in (("gp", "GP", []), ("patient", "Patient", ["ZQX [L4]"])):
+        f = []
+        L.build(t, "gp-update", to, audience=aud, flags=f)
+        assert [x for x in f if "ZQX" in x] == want
+
+
+def test_wl_flag_linked_medicines_direct():
+    f = []
+    md, dropped = L.build(_WL_PSY, "gp-update", "Podiatry", flags=f)
+    assert f.count(_WL_MED_L5) == 3            # cut rule twice + linked-medicine check once (screen dedupes)
+    g = []
+    assert L.flag_linked_medicines(md, _WL_PSY, dropped, g) == md
+    assert g == [_WL_MED_L5]
+    assert L.flag_linked_medicines(md, _WL_PSY, dropped, None) == md
+    h = []
+    assert L.flag_linked_medicines(md, _WL_PSY, [], h) == md and h == []
+
+
+def test_wl_drop_cut_change_reasons():
+    nr = f"- Changed: x 1 mg.{L.NO_REASON_CHANGE} [L3]"
+    cr = f"- Changed: y 2 mg.{L.CUT_CHANGE_REASON} [L4]"
+    f = []
+    out = L.drop_cut_change_reasons(nr + "\n" + cr, f)
+    assert out == "- Changed: x 1 mg. [L3]\n- Changed: y 2 mg. [L4]"
+    assert f == [L.NO_REASON_NOTICE.format(lid="L3"), L.MED_NOTICE.format(lid="L4")]
+    assert L.drop_cut_change_reasons(nr + "\n" + cr, None) == out      # no flag list: no crash
+
+
+def test_wl_printed_flags():
+    hdr = "# Letter [flag: abbreviation, meaning not confirmed]"
+    assert L.printed_flags([], hdr) == ["Flag: this letter has an open flag. Check it."]
+    assert L.printed_flags(["X [L9]"], hdr) == [L.line_only_flag("X [L9]")]
+    two = "- a [flag: abbreviation, meaning not confirmed] [L5]\n- b [flag: abbreviation, meaning not confirmed] [L5]"
+    assert L.printed_flags([], two) == [L.OPEN_NOTICE.format(lid="L5")]
+    multi = "- c [flag: abbreviation, meaning not confirmed] [L3, L4]"
+    assert L.printed_flags(["Y [L3]"], multi) == [L.line_only_flag("Y [L3]")]
+
+
+def test_wl_wording_initial_state_and_flag_format():
+    h = L.HEADINGS["gp"]
+    f = []
+    assert L.wording(["- zorbaxa 10 mg [L1]"], "gp", flags=f) == ["- zorbaxa [flag: abbreviation, meaning not confirmed] 10 mg [L1]"]
+    assert f == ["zorbaxa [L1]"]
+    f = []
+    L.wording(["- insulin 10 u daily [L1]"], "gp", flags=f)
+    assert f == ["10 u [L1]"]
+    f = []
+    L.wording(["- insulin 10 u daily"], "gp", flags=f)
+    assert f == ["10 u"]
+    assert "grams per litre" not in L.wording(["- Hb 120 g/L [L1]"], "patient")[0]
+    f = []
+    out = L.wording(["## " + h["meds"], "- Zor 10 mg [L1]", "- Zorbaxa 10 mg [L2]"], "gp", flags=f)
+    assert out[1] == "- Zor [flag: abbreviation, meaning not confirmed] 10 mg [L1]"
+    assert f == ["Zor [L1]", "Zorbaxa (drug name, check spelling) [L2]"]
+
+
+def test_wl_cli_requires_notes_type_and_to(tmp_path):
+    n = tmp_path / "n.txt"
+    n.write_text(_WL_PSY)
+    r = subprocess.run(CLI + [str(n)], capture_output=True, text=True)
+    assert r.returncode == 2 and "notes, --type and --to are required" in r.stderr
+
+
+def test_wl_cli_out_makes_nested_folders(tmp_path):
+    out = tmp_path / "a" / "b"
+    r = subprocess.run(CLI + [str(TPL / "chest_pain.txt"), "--type", "referral", "--to", "Cardiology clinic",
+                              "--out", str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "SYNTH-1001" in (out / "letter.md").read_text()
+
+
+def test_wl_cli_template_result_without_date_has_no_letter_date(tmp_path):
+    n = tmp_path / "t.txt"
+    n.write_text((TPL / "chest_pain.txt").read_text().replace(
+        "- LDL 3.2 mmol/L 1937-03-16\n", "- LDL 3.2 mmol/L 1937-03-16\n- Hb 120 g/L\n"))
+    r = subprocess.run(CLI + [str(n), "--type", "referral", "--to", "Cardiology clinic"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "- Hb: 120 g/L [L17]" in r.stdout
+
+
+def _wl_st(notes, to="Rheumatology", **k):
+    e, _ = L.parse("Patient: SYNTH-5401\n" + notes)
+    return L.cumsum(e, to, **k)
+
+
+def test_wl_cumsum_first_date_and_defaults():
+    st = _wl_st("1937-06-03 Clinic review.\n1937-06-10 Clinic review.\n")
+    assert (st["first"], st["last"]) == ("1937-06-03", "1937-06-10")
+    e, _ = L.parse("Patient: SYNTH-5401\n1937-06-03 Clinic review.\nMed: lithium 250 mg daily (for bipolar disorder)\n")
+    a, b = L.cumsum(e), L.cumsum(e, "")
+    assert a["meds"] == b["meds"] and a["dropped"] == b["dropped"] and a["dropped"]   # cut by default
+
+
+def test_wl_cumsum_empty_body_and_followup_who_only():
+    st = _wl_st("1937-06-03 Clinic review.\n.\nReview with the patient\n")
+    assert all(b for _, b, _ in st["narrative"])
+    assert [b for b, _ in st["followup"]] == ["Review with the patient"]
+    assert [b for b, _ in _wl_st("1937-06-03 Clinic review.\nReview in 2 weeks\n")["followup"]] == ["Review in 2 weeks"]
+
+
+def test_wl_cumsum_negation_pops_only_its_own_problem():
+    st = _wl_st("1937-06-03 Clinic review.\nProblem: gout\nNo pneumonia\n")
+    assert list(st["problems"]) == ["gout"] and not st["resolved"]
+    st = _wl_st("1937-06-03 Clinic review.\nProblem: gout\nNo gout\n")
+    assert not st["problems"] and list(st["resolved"]) == ["gout"]
+
+
+def test_wl_cumsum_reason_vs_indication_and_inheritance():
+    st = _wl_st("1937-06-03 Clinic review.\nMed: aspirin 100 mg daily (reason: stroke prevention)\n"
+                "Med: allopurinol 100 mg daily (for gout)\n1937-06-10 Clinic review.\n"
+                "Med: allopurinol 300 mg daily (for gout)\nMed: aspirin 150 mg daily\n")
+    assert st["meds"]["aspirin"]["ind"] is None
+    assert st["meds"]["allopurinol"]["ind"] == "gout"
+    assert [c["reason"] for c in st["med_changes"]] == [None, None]
+    st = _wl_st("1937-06-03 Clinic review.\nMed: allopurinol 100 mg daily (for gout)\n"
+                "1937-06-10 Clinic review.\nMed: allopurinol 300 mg daily\n")
+    assert st["meds"]["allopurinol"]["ind"] == "gout"
+
+
+def test_wl_cumsum_cut_reason_and_cut_flag_only_for_own_line():
+    base = "1937-06-03 Clinic review.\nMed: allopurinol 100 mg daily\n1937-06-10 Clinic review.\nMed: allopurinol 300 mg daily\n"
+    # L5 is the changed medicine line, L3 the earlier one
+    for dropped, reason, cut in (([], None, False),
+                                 (["L5: indication for allopurinol cut (x, not relevant to y)"], "reason not included", True),
+                                 (["L3: indication for allopurinol cut (x, not relevant to y)"], None, False),
+                                 (["L5: reason cut"], "reason not included", False),
+                                 (["L5: kept (x)"], None, False)):
+        st = _wl_st(base, dropped=list(dropped))
+        assert st["med_changes"][0]["reason"] == reason, dropped
+        assert st["meds"]["allopurinol"]["cut"] is cut, dropped
+    st = _wl_st("1937-06-03 Clinic review.\nMed: allopurinol 100 mg daily (for gout)\n",
+                dropped=["L3: indication for allopurinol cut (x, not relevant to y)"])
+    assert st["meds"]["allopurinol"]["cut"] is False          # an indication is shown: not marked cut
+
+
+def test_wl_cumsum_stop_reason_only_for_own_cut():
+    stop = "1937-06-03 Clinic review.\nStopped: ramipril\n"
+    assert _wl_st(stop)["med_changes"][0]["reason"] is None
+    assert _wl_st(stop, dropped=["L9: x cut (y)"])["med_changes"][0]["reason"] is None
+    assert _wl_st(stop, dropped=["L3: x cut (y)"])["med_changes"][0]["reason"] == "reason not included"
