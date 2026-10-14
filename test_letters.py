@@ -819,7 +819,7 @@ def test_10u_insulin_flagged_and_checker_refuses_unflagged():
     text = "Patient: SYNTH-3501\n1937-05-01 Clinic review.\nProblem: needs 10u insulin at night\nFollow-up: review in 2 weeks"
     res = build(text, "gp-update", "General practice", flags=(fl := [])); md, flags = res[0], fl
     assert f"10u {L.FLAG} insulin" in md and any(f.startswith("10u") for f in flags)
-    with pytest.raises(Refused, match="dose unit not flagged at line L"):
+    with pytest.raises(Refused, match="the dose unit at line L"):
         check(md.replace(f"10u {L.FLAG}", "10u"), parse(text)[1], "gp-update")
     with pytest.raises(Refused, match="flag"):
         L.finalise(res)
@@ -950,6 +950,9 @@ def _nline(text):
     return f"at L{len(text.splitlines())}"
 
 
+PV_LINE = L.BY_HAND_LINES["PV-LETTER-BY-HAND"]
+
+
 def _clin(r):
     """The clinician's screen after a refusal, without the CQ-LETTER-BY-HAND line (Patient's fallback)."""
     return "\n".join(x for x in r.stderr.strip().splitlines() if not x.startswith("For a clinician to write:"))
@@ -1016,7 +1019,7 @@ def test_non_patient_letters_refuse_copies_and_have_no_privacy_line(tmp_path):
 # ---------- every letter: copy requests refused, never dropped silently ----------
 CKD = TPL / "ckd_update.txt"
 CKD_FREE = HERE / "fixtures" / "ckd_update.txt"
-EXACT_TAIL = ("letters can't send copies. Write a separate letter for each reader, "
+EXACT_TAIL = ("This tool can't send copies. Write a separate letter for each reader, "
               "so nobody assumes someone was copied in when they weren't.")
 
 
@@ -1027,16 +1030,16 @@ def _gp_cli(tmp_path, notes=CKD, brief="update to GP", extra=()):
     return r, out
 
 
-def _assert_gp_refused(r, out, where):
+def _assert_gp_refused(r, out, where, patient_named=False):
     assert r.returncode == 2
     assert _clin(r) == _copy_msg(where, EXACT_TAIL)
-    assert r.stdout == "" and (not out.exists() or list(out.iterdir()) == [])
+    assert r.stdout == (PV_LINE + "\n" if patient_named else "") and _hand_ok(r) and (not out.exists() or list(out.iterdir()) == [])
 
 
 @pytest.mark.parametrize("brief", ["update to GP, cc cardiology", "update to GP copy to renal",
                                    "update to GP; copied to patient", "update to GP c.c. renal"])
 def test_gp_letter_copy_via_brief_refused(tmp_path, brief):
-    _assert_gp_refused(*_gp_cli(tmp_path, brief=brief), "in the brief")
+    _assert_gp_refused(*_gp_cli(tmp_path, brief=brief), "in the brief", "patient" in brief)   # fails closed
 
 
 @pytest.mark.parametrize("tpl", ["{{header}}\n{{meds}}\ncc: {{cc}}\n{{footer}}", "{{header}}\n{{copy_to}}\n{{footer}}",
@@ -1090,7 +1093,7 @@ def test_cc_dose_unit_not_refused_but_flagged(tmp_path):
     flags = []
     md, _ = build(text, "gp-update", "GP", flags=flags)
     assert f"5 cc {L.FLAG}" in md and len(flags) == 1 and md.count(L.FLAG) == 1
-    with pytest.raises(Refused, match="dose unit not flagged at line L"):
+    with pytest.raises(Refused, match="the dose unit at line L"):
         check(md.replace(f"5 cc {L.FLAG}", "5 cc"), parse(text)[1], "gp-update")
     assert "cc" in L._lines(L.SHORTHAND_FILE)
 
@@ -1256,7 +1259,7 @@ def test_brief_kinds(brief, kind, reader):
 def test_unknown_brief_refused_without_echo(tmp_path, brief):
     out = tmp_path / "o"
     r = subprocess.run(CLI + [str(CKD), "--brief", brief, "--out", str(out)], capture_output=True, text=True)
-    assert r.returncode == 2 and _clin(r) == BRIEF_MSG and r.stdout == ""
+    assert r.returncode == 2 and _clin(r) == BRIEF_MSG and r.stdout == PV_LINE + "\n"   # fails closed
     assert "Synthname" not in r.stdout + r.stderr
     assert not out.exists() or list(out.iterdir()) == []
 
@@ -5140,7 +5143,7 @@ def test_c1_event_id_beside_patient_id_is_allowed():
 def test_c1_malformed_event_id_still_counts_as_a_second_identifier(bad):
     with pytest.raises(Refused) as e:
         L.check_safe(EV_NOTE.replace("SYNTH-EP-1002#7 noted", bad + " noted"))
-    assert str(e.value) == "Refused: notes mention more than one patient identifier."
+    assert str(e.value) == L.CHECK_SAFE_MULTI_ID
 
 
 def test_c1_event_id_never_hides_a_second_patient_or_a_missing_one():
@@ -5548,20 +5551,27 @@ def _norm(s):
 
 
 def _signed_in_both():
-    """{id: signed text} for lines signed in both files (Physician safety, Educator wording)."""
+    """{id: signed text} for lines signed in both files (Physician safety, Educator wording), all rounds."""
     safety = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
     wording = (SIGNED_DIR / "letters_refusals_WORDING.md").read_text()
-    held = " ".join(re.findall(r"^(?:Still held|Held)[^:]*: (.*)$", safety, re.M))
-    held_ids = {w for w in re.findall(r"\b[A-Za-z_]+\b", held) if w in ("copy_refusal", "INCIDENT") or
-                re.fullmatch(r"[A-Z][A-Z_]+", w)}
+    ids = lambda s: {w for w in re.findall(r"\b[A-Za-z_]+\b", s) if w in ("copy_refusal", "INCIDENT")
+                     or re.fullmatch(r"[A-Z][A-Z_]{3,}", w)}
+    held = ids(" ".join(re.findall(r"^(?:Still held|Held)[^:]*: (.*)$", safety, re.M)))
+    released = ids(" ".join(re.findall(r"^Signed: (.*)$", safety.split("## Holds released")[1], re.M))) \
+        if "## Holds released" in safety else set()
     out = {}
     for line in wording.splitlines():
         cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
         if len(cells) >= 3 and re.match(r"^[A-Z][A-Z_]+( \(|$)", cells[0]):
-            rid = cells[0].split(" (")[0]
-            if rid not in held_ids:
-                out[rid] = cells[1] if cells[2] == "unchanged" else cells[2]
-    return out
+            out[cells[0].split(" (")[0]] = cells[1] if cells[2] == "unchanged" else cells[2]
+    ends = re.findall(r'^- (?:Not a patient letter|Patient letter): "(.*)"$', wording, re.M)
+    if len(ends) == 2:
+        out["copy_refusal"] = tuple(ends)
+    return {k: v for k, v in out.items() if k not in held or k in released}
+
+
+def _code_text(k, t):
+    return (L.copy_refusal("{where}", False), L.copy_refusal("{where}", True)) if k.startswith("copy_refusal") else t
 
 
 def _sample(text):
@@ -5569,24 +5579,27 @@ def _sample(text):
     return re.sub(r"\{[^}]*\}", "L3", text) if "{where}" not in text else L.copy_refusal("in the brief")
 
 
-@pytest.mark.xfail(strict=True, reason="Held by Physician (copy_refusal, INCIDENT) and 4 lines signed under earlier "
-                                        "rulings that are not in the two signed files; see the failure list")
 def test_refusal_codes_signed_in_both_files():
+    """Plain failing test until both files cover every line; scripts/pre-push blocks a push on it."""
     signed = _signed_in_both()
     unsigned = []
     for k, t in refusalcodes.codes().items():
-        if k not in signed or _norm(signed[k].replace("`", "")) != _norm(t.replace("`", "")):
-            unsigned.append(k)
+        key = "copy_refusal" if k.startswith("copy_refusal") else k
+        want, have = signed.get(key), _code_text(k, t)
+        n = (lambda x: tuple(_norm(i.replace("`", "")) for i in x)) if isinstance(have, tuple) else \
+            (lambda x: _norm(x.replace("`", "")))
+        if want is None or n(want) != n(have):
+            unsigned.append(key)
     assert not unsigned, "not signed in both files: " + "; ".join(unsigned)
 
 
 def test_refusal_signed_lines_used_word_for_word():
     signed, code = _signed_in_both(), refusalcodes.codes()
-    assert len(signed) == 36 and set(signed) <= set(code)
-    for k, t in signed.items():
+    plain = {k: v for k, v in signed.items() if k != "copy_refusal"}
+    assert len(plain) == 38 and set(plain) <= set(code)
+    for k, t in plain.items():
         assert _norm(code[k]) == _norm(t), k
-    assert L.CHECK_SAFE_MULTI_ID == "Refused: notes mention more than one patient identifier."   # held: earlier text
-    assert L.CHECK_DOSE_UNIT == "Refused: dose unit not flagged at {at}."                        # held: earlier text
+    assert signed["copy_refusal"] == (L.copy_refusal("{where}", False), L.copy_refusal("{where}", True))
 
 
 def test_refusal_check_numbers_resolve_for_every_code():
@@ -5757,7 +5770,7 @@ def test_patient_fallback_every_code(key, monkeypatch, capsys):
 def test_copy_refusal_endings_listed_and_never_reach_a_patient(tmp_path):
     assert L.copy_refusal("in the brief", False) == "Refused: copy request in the brief. " + L.COPY_TAIL
     assert L.copy_refusal("in the brief", True) == "Refused: copy request in the brief. " + L.PATIENT_COPY_TAIL
-    assert L.COPY_TAIL == ("letters can't send copies. Write a separate letter for each reader, "
+    assert L.COPY_TAIL == ("This tool can't send copies. Write a separate letter for each reader, "
                            "so nobody assumes someone was copied in when they weren't.")
     assert L.PATIENT_COPY_TAIL == ("A letter to the patient can't be copied to anyone else. "
                                    "Write a separate letter for each other reader.")
@@ -5803,3 +5816,39 @@ def test_check_safe_writes_nothing(monkeypatch, tmp_path):
     monkeypatch.undo()
     assert list(tmp_path.iterdir()) == []
     assert "writes the session" not in safetyscan.kinds_of("check_safe") if hasattr(safetyscan, "kinds_of") else True
+
+
+# fails closed: what counts as a patient letter (Physician, 15 Oct 2026)
+def _fc(tmp_path, *args):
+    out = tmp_path / "o"
+    n = tmp_path / "n.txt"
+    n.write_text((TPL / "chest_pain.txt").read_text() + "Copy to: Dr A. Synth\n")   # every run refuses (copy line)
+    r = subprocess.run(CLI + [str(n), *args, "--out", str(out)], capture_output=True, text=True)
+    assert r.returncode == 2 and not out.exists()
+    assert r.stdout == PV + "\n" and "For a clinician to write:" in r.stderr, (r.stdout, r.stderr)
+
+
+@pytest.mark.parametrize("args", [["--type", "gp-update", "--to", "Patient"],
+                                  ["--type", "gp-update", "--to", "GP", "--audience", "patient"]])
+def test_fail_closed_to_or_audience_names_the_patient(tmp_path, args):
+    _fc(tmp_path, *args)
+
+
+@pytest.mark.parametrize("brief", ["update to GP; copied to patient", "update to GP, cc the patient",
+                                   "referral to cardiology, copy to patient"])
+def test_fail_closed_patient_anywhere_in_the_brief(tmp_path, brief):
+    _fc(tmp_path, "--brief", brief)
+
+
+@pytest.mark.parametrize("brief", ["zzz qqq", "to whom it may concern"])
+def test_fail_closed_brief_cannot_be_read(tmp_path, brief):
+    _fc(tmp_path, "--brief", brief, "--to", "GP", "--type", "gp-update")
+
+
+def test_pre_push_blocks_on_the_signed_test():
+    hook = (HERE / "scripts" / "pre-push").read_text()
+    assert "test_refusal_codes_signed_in_both_files" in hook and "exit 1" in hook
+    t = (HERE / "test_letters.py").read_text()
+    i = t.index("def test_refusal_codes_signed_in_both_files")
+    assert "xfail" not in t[t.rindex("\n\n\n", 0, i):i]                    # a plain test, never xfail
+    assert len(re.findall(r"xfail\(raises=Refused, strict=True, reason=\"temporary combination", t)) == 4   # 4 sites = the 5 check 2 cases

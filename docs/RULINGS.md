@@ -24,22 +24,24 @@ Source: Physician, room message 14 Oct 2026, 21:22 (UTC+11), scope signed by Phy
 Until lifted, the 5 strict xfail tests that rely on these brands stay as they are.
 
 
-## Refusal lines (room rulings, 14 Oct 2026)
+## Refusal lines (room rulings, 14-15 Oct 2026)
 Sources (read-only, the room's signed files): letters_refusals_SAFETY.md (Physician) and letters_refusals_WORDING.md (Educator).
-Registry: data/refusal_lines.toml (44 codes: 36 signed in both files, 4 held, 4 signed under earlier rulings).
+Registry: data/refusal_lines.toml (44 codes).
 
-- Signed in both files: 36 ids (37 sites, KEEP_OUT_ARG covers 2). Their wording is used word for word.
-- Held by Physician, earlier text kept (not signed): copy_refusal (both endings), INCIDENT, CHECK_DOSE_UNIT
-  (until Engineer quotes who flags the unit), CHECK_SAFE_MULTI_ID ("Nothing was written." only once check_safe is
-  shown to write nothing; test_check_safe_writes_nothing now shows it).
-- Signed under earlier rulings, not in the two files: COMBO_REFUSED, PRIVACY_BLOCKED[missing], PRIVACY_BLOCKED[unset],
-  SENSITIVE_REFUSED.
-- test_refusal_codes_signed_in_both_files is a strict xfail that lists every one of these 8 until both files cover it.
+- Signed in both files and used word for word: 38 ids (KEEP_OUT_ARG covers 2 sites) plus copy_refusal (both endings).
+  Round 2 (15 Oct) released CHECK_SAFE_MULTI_ID, CHECK_DOSE_UNIT and copy_refusal ("This tool can't send copies.").
+- Not yet signed in both files: INCIDENT (both reasons signed; the fixed text waits for Educator after the Engineer quote),
+  COMBO_REFUSED, PRIVACY_BLOCKED[missing], PRIVACY_BLOCKED[unset], SENSITIVE_REFUSED (signed under earlier rulings;
+  to be copied into both files once Engineer quotes them).
+- test_refusal_codes_signed_in_both_files is a plain test and fails until both files cover every line.
+  scripts/pre-push (installed as .git/hooks/pre-push) blocks a push while it fails. The branch wip/letters merges into
+  main only once it passes.
 
-### Patient's fallback
-Any refusal on a patient-letter request prints PV-LETTER-BY-HAND (stdout, the only patient-visible output) and opens
-CQ-LETTER-BY-HAND for the clinician with the check number from the registry. The refusal line goes to stderr only.
-Nothing is written to disk.
+### Patient letters fail closed (Physician, 15 Oct 2026)
+A request counts as a patient letter if --to or --audience names the patient, if the patient appears anywhere in the
+brief (as a reader or a copy recipient), or if the brief can't be read. Any refusal on such a request prints
+PV-LETTER-BY-HAND (stdout, the only patient-visible output) and opens CQ-LETTER-BY-HAND for the clinician with the
+check number from the registry. The refusal line goes to stderr only. Nothing is written to disk.
 
 ### Conditions that can never be true
 None found. Every refusal line has a test that triggers its condition.

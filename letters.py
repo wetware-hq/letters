@@ -49,7 +49,7 @@ class Refused(Exception):
     pass
 
 # Refusal lines given ids by Educator (proposed ids confirmed); signed: Physician + Educator, 14 Oct 2026.
-CHECK_SAFE_MULTI_ID = "Refused: notes mention more than one patient identifier."   # held by Physician (re-sign): earlier text kept
+CHECK_SAFE_MULTI_ID = "Refused: the notes mention more than one patient identifier. Nothing was written. Use notes for one patient only."   # signed round 2, 15 Oct 2026
 CHECK_WORD_LIMIT = 'Refused: the letter body is {words_total} words, and the limit is about {WORD_LIMIT}. Shorten the letter, then run again.'
 CHECK_SHORTHAND = "Refused: the letter uses shorthand that isn't allowed at {at}. Write it out in full, then run again."
 CHECK_DIRECTION_WORD = 'Refused: the results at {at} use a direction word instead of a value. Give values with dates.'
@@ -57,7 +57,7 @@ CHECK_UNSOURCED = "Refused: the sentence at {at} doesn't cite a line of the note
 CHECK_BAD_CITE = "Refused: the sentence at {at} cites a line that isn't in the notes. Correct the line reference, then run again."
 CHECK_SENTENCE_LIMIT = 'Refused: the sentence at {at} is over {SENTENCE_LIMIT} words. Split it, then run again.'
 CHECK_ABBREV = "Refused: the abbreviation at {at} hasn't been flagged or resolved. Write it out in full, or confirm its meaning with `--resolve`."
-CHECK_DOSE_UNIT = "Refused: dose unit not flagged at {at}."   # held by Physician (re-sign): earlier text kept
+CHECK_DOSE_UNIT = "Refused: the dose unit at {at} hasn't been flagged for checking. Check the unit against the notes, then run again."   # signed round 2, 15 Oct 2026
 CHECK_DATE = "Refused: the date at {at} isn't in the lines of the notes it cites. Use the date from the notes, or cite the right line."
 CHECK_NUMBER = "Refused: the number at {at} isn't in the lines of the notes it cites. Use the number from the notes, or cite the right line."
 CHECK_WORD = "Refused: the word at {at} isn't in the lines of the notes it cites. Use the word from the notes, or cite the right line."
@@ -1464,7 +1464,7 @@ def llm_guard():
                          "Unset it to run.")
 
 
-COPY_TAIL = ("letters can't send copies. Write a separate letter for each reader, "
+COPY_TAIL = ("This tool can't send copies. Write a separate letter for each reader, "
              "so nobody assumes someone was copied in when they weren't.")
 COPY_REFUSED = COPY_TAIL  # stable tail; the full message is "Refused: copy request <where>. " + COPY_TAIL
 PATIENT_PRIVACY = "This letter includes private details about your health. It's yours to share or keep private."
@@ -2925,8 +2925,10 @@ def check_template_main(argv=None):
         text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
         brief_copy, patient, include = None, False, []
         if a.brief:
-            kind, reader, include, brief_copy = read_brief(open(a.brief, encoding="utf-8").read())
-            patient = is_patient_letter(reader, None)
+            btxt = open(a.brief, encoding="utf-8").read()
+            patient = True                                       # fails closed until the brief is read
+            kind, reader, include, brief_copy = read_brief(btxt)
+            patient = is_patient_letter(reader, None) or bool(PATIENT_BRIEF.search(btxt))
         pre_template_checks(text, None, brief_copy, patient, [x.strip() for x in a.not_copy])
         converted = from_template(text)
         check_safe(converted)                    # the same synthetic-data safeguard the letter command runs
@@ -2950,7 +2952,7 @@ def main(argv=None):
         _EMPTY_FIELDS.clear(); _TEMPLATE.clear(); _ROUTES.clear()
 
 
-PATIENT_BRIEF = re.compile(r"^[^,;]*?\bto (?:the )?patient\b", re.I)   # the reader of the brief, before any cc
+PATIENT_BRIEF = re.compile(r"\bpatient\b", re.I)   # fails closed: the patient as any reader or copy recipient
 
 
 def _main(argv=None):
@@ -2987,11 +2989,11 @@ def _main(argv=None):
         btxt = a.brief
         if "\n" not in btxt and os.path.isfile(btxt):            # a brief file, as the checker takes it
             btxt = open(btxt, encoding="utf-8").read()
-        patient_req = patient_req or bool(PATIENT_BRIEF.match(btxt.strip()))
+        patient_req = patient_req or bool(PATIENT_BRIEF.search(btxt))
         try:
             kind, reader, include, brief_copy = read_brief(btxt)
         except Refused as e:
-            return report_refusal(e, patient_req)
+            return report_refusal(e, True)                       # a brief that can't be read: fails closed
         a.type = a.type or kind
         a.to = a.to or reader
         if is_patient_letter(a.to, None) and not a.audience:

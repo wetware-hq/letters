@@ -8,10 +8,10 @@
 
 [[code]]
 key = "CHECK_SAFE_MULTI_ID"
-text = "Refused: notes mention more than one patient identifier."
+text = "Refused: the notes mention more than one patient identifier. Nothing was written. Use notes for one patient only."
 check = 1
-status = "held"
-source = "letters_refusals_SAFETY.md re-sign: held; earlier text kept"
+status = "signed"
+source = "both files, round 2 (15 Oct 2026)"
 
 [[code]]
 key = "CHECK_WORD_LIMIT"
@@ -64,10 +64,10 @@ source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)
 
 [[code]]
 key = "CHECK_DOSE_UNIT"
-text = "Refused: dose unit not flagged at {at}."
+text = "Refused: the dose unit at {at} hasn't been flagged for checking. Check the unit against the notes, then run again."
 check = 9
-status = "held"
-source = "letters_refusals_SAFETY.md re-sign: held; earlier text kept"
+status = "signed"
+source = "both files, round 2 (15 Oct 2026)"
 
 [[code]]
 key = "CHECK_DATE"
@@ -298,14 +298,14 @@ key = "INCIDENT"
 text = "This looks like real patient information. Don't paste it here; delete it from where you copied it and report it to your organisation's privacy officer."
 check = 1
 status = "held"
-source = "letters_refusals_SAFETY.md: held"
+source = "reasons signed round 2; fixed text awaits Educator after Engineer quote"
 
 [[code]]
 key = "copy_refusal: Refused: copy request {where}. {PATIENT_COPY_TAIL if patient else COPY_TAIL}"
 text = "Refused: copy request {where}. {PATIENT_COPY_TAIL if patient else COPY_TAIL}"
 check = 3
-status = "held"
-source = "letters_refusals_SAFETY.md: held"
+status = "signed"
+source = "both files, round 2 (15 Oct 2026); both endings"
 
 [[code]]
 key = "FINAL_REFUSED"
