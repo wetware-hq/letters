@@ -1647,7 +1647,7 @@ BY_HAND_LINES = {
 
 
 # CQ-LETTER-READER-ENDED: Educator r14 text, Physician safety re-sign (letters_refusals_*.md, 15 Oct 2026).
-# RUN-TRACES-NOT-RUN: Educator text, Physician safety sign (letters_refusals_SAFETY.md, 15 Oct 2026). Developers only.
+# RUN-TRACES-NOT-RUN: signed in forms_orders_lines_SIGNED.md, its one signed source (room ruling 15 Oct 09:42).
 RUN_TRACES_NOT_RUN = ("Safety traces not run: the held-out answer files aren't on this computer. This run doesn't show "
                       "that the stack is safe, and it doesn't count towards a release.")
 READER_ENDED_LINE = ("For a clinician to write: this letter is addressed under a permission to act for the patient "

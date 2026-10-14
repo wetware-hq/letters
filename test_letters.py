@@ -5299,7 +5299,8 @@ def test_c2_by_hand_lines_match_signed_wording_and_patient_sees_no_details():
     low = h["patient"].lower()
     assert not any(w in low for w in ["check", "2", "medicine", "refus"] + list(L.load_combination()) +
                    [c.lower() for c in L.SENSITIVE])
-    signed = HERE.parent / "wording" / "forms_orders_lines_SIGNED.md"     # the one signed source of these lines
+    import paths
+    signed = paths.reused_signed() or HERE.parent / "wording" / "forms_orders_lines_SIGNED.md"   # the one source
     rows = dict(re.findall(r"^\| ([A-Z][A-Z0-9-]+) \| (.+?) \|$", signed.read_text(), re.M))  # missing file: fails
     for k, v in L.BY_HAND_LINES.items():
         assert rows[k] == v, k                                              # word for word; fails if the source changes
@@ -6064,9 +6065,17 @@ def test_reader_grants_reasons():
 
 
 # ---------------------------------------------------------------- traces setting (room rulings 08:07-08:09)
+@pytest.mark.needs_signed
 def test_run_traces_not_run_line_copied_word_for_word():
-    s = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
-    assert f'RUN-TRACES-NOT-RUN signed (Educator text): "{L.RUN_TRACES_NOT_RUN}"' in s
+    import paths
+    rows = re.findall(r"^\| RUN-TRACES-NOT-RUN \| (?:[a-z]+ \| )?([^|]*?) \|$", paths.reused_signed().read_text(), re.M)
+    assert rows == [L.RUN_TRACES_NOT_RUN]                         # one row, word for word, from its one source
+
+
+@pytest.mark.needs_signed
+def test_no_line_id_signed_in_more_than_one_file():
+    import paths, signing
+    assert signing.duplicates(paths.wording_dirs()) == {}       # one signed source per line id
 
 
 @pytest.mark.parametrize("cmd", [["scripts/pre-push"], [sys.executable, "scripts/check14_derived.py"]])
@@ -6113,3 +6122,50 @@ def test_mutation_hash_edited_function_body_fails(tmp_path):
     assert not mutation_hash.fresh(root)
     (root / mutation_hash.RECORD).unlink()
     assert not mutation_hash.fresh(root)
+
+
+# ---------------------------------------------------------------- pairing (room ruling 15 Oct 09:51)
+def _wording_table(wording):
+    out = []
+    for line in wording.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
+        if len(cells) >= 3 and re.match(r"^[A-Z][A-Z_]+( \(|$)", cells[0]):
+            out.append(cells[0].split(" (")[0])
+    return out
+
+
+def _unpaired(safety, wording, keys):
+    """Refusal line ids not signed in BOTH files. Educator's wording file must name the id. Physician's safety file
+    either names it or signs Educator's id table as a whole ("Re-sign of Educator's edited wording
+    (letters_refusals_WORDING.md, N ids)"), which covers the table only when N is the table's own row count.
+    Holds are checked separately (test_refusal_codes_signed_in_both_files)."""
+    named = lambda k, t: re.search(rf"(?<![A-Za-z_]){re.escape(k.split('[')[0])}(?![A-Za-z_])", t) is not None
+    table = _wording_table(wording)
+    m = re.search(r"^## Re-sign of Educator's edited wording \(letters_refusals_WORDING\.md, (\d+) ids\)", safety, re.M)
+    covered = set(table) if m and int(m.group(1)) == len(table) else set()
+    return sorted(k for k in keys if not (named(k, wording) and (named(k, safety) or k in covered)))
+
+
+def test_every_refusal_line_signed_in_both_paired_files():
+    safety = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
+    wording = (SIGNED_DIR / "letters_refusals_WORDING.md").read_text()
+    keys = {"copy_refusal" if k.startswith("copy_refusal") else k for k in refusalcodes.codes()}
+    assert keys and _unpaired(safety, wording, keys) == []
+
+
+def test_line_in_only_one_paired_file_fails():
+    assert _unpaired("INCIDENT and COMBO_REFUSED signed", "INCIDENT only", {"INCIDENT", "COMBO_REFUSED"}) == ["COMBO_REFUSED"]
+    assert _unpaired("INCIDENT", "INCIDENT, COMBO_REFUSED", {"COMBO_REFUSED"}) == ["COMBO_REFUSED"]
+    assert _unpaired("PRIVACY_BLOCKED missing", "PRIVACY_BLOCKED", {"PRIVACY_BLOCKED[missing]"}) == []
+    assert _unpaired("XINCIDENT", "INCIDENT", {"INCIDENT"}) == ["INCIDENT"]                # whole names only
+    w = "| DATE_REFUSED | a | unchanged |\n| MED_MISSING | b | unchanged |\n"
+    re_sign = "## Re-sign of Educator's edited wording (letters_refusals_WORDING.md, {} ids)\n"
+    assert _unpaired(re_sign.format(2), w, {"DATE_REFUSED", "MED_MISSING"}) == []          # table signed whole
+    assert _unpaired(re_sign.format(3), w, {"DATE_REFUSED"}) == ["DATE_REFUSED"]            # count disagrees
+    assert _unpaired(re_sign.format(2), "| DATE_REFUSED | a | unchanged |\n", {"MED_MISSING"}) == ["MED_MISSING"]
+
+
+def test_signing_file_row_counts_match_committed_numbers():
+    want = tomllib.loads((HERE / "data" / "signed_counts.toml").read_text())
+    got = len(_wording_table((SIGNED_DIR / "letters_refusals_WORDING.md").read_text()))
+    assert got == want["letters_refusals_WORDING_table"], f"row count read off the file: {got}"
