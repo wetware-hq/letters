@@ -1576,21 +1576,75 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
 
 
 # Temporary (13 Oct 2026): combination medicines can't be fully listed yet, so any letter naming one is refused.
-COMBO_BRANDS = ("biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy", "entresto")
-COMBO_RX = re.compile(r"(?<![a-z0-9])(?:" + "|".join(COMBO_BRANDS) + r")(?![a-z0-9])", re.I)
+COMBINATION_FILE = HERE / "locale" / LOCALE / "combination.toml"
+COMBO_PACK_REFUSED = ("Refused: the locale pack has no signed combination-medicine list (needs brands, source and "
+                      "sign-off). Nothing was written.")
+
+
+def load_combination(path=None):
+    """Check 2's list from the locale pack. letters won't run without a list, a source and a sign-off."""
+    p = COMBINATION_FILE if path is None else path
+    try:
+        d = tomllib.loads(p.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        raise Refused(COMBO_PACK_REFUSED)
+    brands = [b for b in d.get("brands", []) if isinstance(b, str) and b.strip()]
+    if not brands or not str(d.get("source", "")).strip() or not str(d.get("signed_off_by", "")).strip() \
+            or not str(d.get("signed_off_on", "")).strip():
+        raise Refused(COMBO_PACK_REFUSED)
+    return tuple(brands)
+
+
+def _combo_rx(brands):
+    return re.compile(r"(?<![a-z0-9])(?:" + "|".join(re.escape(b) for b in brands) + r")(?![a-z0-9])", re.I)
+
+
+try:
+    COMBO_BRANDS = load_combination()                    # listed combination medicines (locale pack, same order)
+except Refused:
+    COMBO_BRANDS = ()                                    # every run is refused instead (refuse_combination_brands)
 COMBO_REFUSED = "Refused: line {lid} has a combination medicine that letters can't fully list yet. Nothing was written."
+
+
+class ComboRefused(Refused):
+    """Check 2 refusal: the letter must be written by hand (PV-/CQ-LETTER-BY-HAND)."""
+    check = 2
 
 
 def refuse_combination_brands(text):
     """Any line, any letter type or audience. Gives the line number only, never the drug name."""
-    if not COMBO_RX.search(text):
+    rx = _combo_rx(load_combination())                   # the pack is read on every run: no list, no letter
+    if not rx.search(text):
         return
     for e in parse(text)[0]:
         for lid, line in e["lines"]:
-            if COMBO_RX.search(line):
-                raise Refused(COMBO_REFUSED.format(lid=lid))
-    n = next(k for k, l in enumerate(text.splitlines(), 1) if COMBO_RX.search(l))
-    raise Refused(COMBO_REFUSED.format(lid=f"L{n}"))
+            if rx.search(line):
+                raise ComboRefused(COMBO_REFUSED.format(lid=lid))
+    n = next(k for k, l in enumerate(text.splitlines(), 1) if rx.search(l))
+    raise ComboRefused(COMBO_REFUSED.format(lid=f"L{n}"))
+
+
+# Signed lines (forms_orders_lines_SIGNED.md, round 12, Physician 14 Oct 2026), copied word for word.
+BY_HAND_LINES = {
+    "PV-LETTER-BY-HAND": "Your care team will write this letter for you themselves. You don't need to do anything.",
+    "CQ-LETTER-BY-HAND": "For a clinician to write: this letter couldn't be made automatically (check [check_n]). "
+                         "It stays open until you write it.",
+}
+
+
+def letter_by_hand(check_n):
+    """What each screen shows when a check means the letter must be written by hand. The patient line names no
+    medicine, condition or check; the clinician entry stays open until a letter is written by hand."""
+    return {"patient": BY_HAND_LINES["PV-LETTER-BY-HAND"],
+            "clinician": {"id": "CQ-LETTER-BY-HAND", "open": True,
+                          "line": BY_HAND_LINES["CQ-LETTER-BY-HAND"].replace("[check_n]", str(check_n))}}
+
+
+def close_letter_by_hand(entry, hand_letter):
+    """Closes the clinician entry only when a hand-written letter is supplied."""
+    if not (hand_letter or "").strip():
+        return entry
+    return dict(entry, open=False)
 
 
 def _has_question(md, audience):
@@ -2931,6 +2985,10 @@ def _main(argv=None):
                        a.resolve, flags, include, not_copy, keep_out,
                        privacy=None if a.privacy is None else a.privacy == "true")
         md, dropped = result
+    except ComboRefused as e:                                 # check 2: written by hand; the clinician entry stays open
+        print(str(e), file=sys.stderr)
+        print(letter_by_hand(e.check)["clinician"]["line"], file=sys.stderr)
+        return 2
     except Refused as e:
         print(str(e), file=sys.stderr)
         return 2

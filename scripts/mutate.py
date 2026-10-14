@@ -18,7 +18,7 @@ SRC = ROOT / "letters.py"
 # check number -> functions holding its logic (see RULES.md / docs/SAFETY_CHECKS.md)
 TARGETS = {
     1: ["check_safe", "first_out_of_range_line", "valid_date", "date_in_range", "in_event_id"],
-    2: ["refuse_combination_brands"],
+    2: ["refuse_combination_brands", "load_combination", "_combo_rx", "letter_by_hand", "close_letter_by_hand"],
     3: ["refuse_copies", "refuse_note_copies", "pre_template_checks"],
     4: ["from_template"],
     5: ["read_brief"],

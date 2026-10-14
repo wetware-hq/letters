@@ -1,0 +1,7 @@
+# Combination medicines letters can't fully list yet (check 2, signed safety rule). Any note line naming one is
+# refused with the line number only; nothing is written. Lower case, in this order. letters will not run without
+# this list, its source and its sign-off. Lifting check 2 needs the conditions in docs/RULINGS.md.
+source = "letters check 2 signed list (13 Oct 2026; Entresto added round 11). Not yet checked against product information: that is a lift condition."
+signed_off_by = "Physician"
+signed_off_on = "2026-10-14"
+brands = ["biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy", "entresto"]

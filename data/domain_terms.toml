@@ -9,4 +9,5 @@ specialty = ["cardiology", "oncology", "neurology", "paediatrics", "pediatrics",
 ward = ["ICU", "HDU", "CCU", "NICU", "ED", "emergency department", "Emergency Department", "Ward 4B"]
 drug = ["aspirin", "paracetamol", "acetaminophen", "ramipril", "warfarin", "heparin", "insulin", "metformin",
         "morphine", "amoxicillin", "ibuprofen", "apixaban", "rivaroxaban", "enoxaparin", "furosemide",
-        "atorvastatin", "prednisolone", "salbutamol", "crp"]
+        "atorvastatin", "prednisolone", "salbutamol", "crp",
+        "biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy", "entresto"]   # letters: combination brands

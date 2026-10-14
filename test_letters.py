@@ -5220,3 +5220,84 @@ def test_vocabulary_is_data_not_code():
     assert domainscan.TERMS_FILE == HERE / "data" / "domain_terms.toml"
     assert set(domainscan.TERMS) == {"discipline", "specialty", "ward", "drug"}
     assert "medicine" not in domainscan.TERMS["discipline"]     # plain word for medications in letters
+
+
+
+# ---------- check 2: combination list in the locale pack; refusal and written-by-hand (Physician and Director) ----------
+def test_c2_all_current_combination_brands_in_locale_pack():
+    assert L.load_combination() == ("biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy", "entresto")
+    assert L.COMBINATION_FILE == HERE / "locale" / L.LOCALE / "combination.toml"
+    assert set(L.COMBO_BRANDS) <= {t.lower() for t in domainscan.TERMS["drug"]}       # can't come back into code
+
+
+C2_PACK = 'source = "s"\nsigned_off_by = "Physician"\nsigned_off_on = "2026-10-14"\nbrands = ["truvada"]\n'
+
+
+@pytest.mark.parametrize("case,pack", [
+    ("no file", None),
+    ("no list", C2_PACK.replace('brands = ["truvada"]\n', "")),
+    ("empty list", C2_PACK.replace('["truvada"]', "[]")),
+    ("no source", C2_PACK.replace('source = "s"\n', "")),
+    ("blank source", C2_PACK.replace('"s"', '" "')),
+    ("no sign-off", C2_PACK.replace('signed_off_by = "Physician"\n', "")),
+    ("no sign-off date", C2_PACK.replace('signed_off_on = "2026-10-14"\n', "")),
+    ("not toml", "brands = ["),
+    ("blank brand only", C2_PACK.replace('["truvada"]', '[" "]')),
+    ("non-text brand only", C2_PACK.replace('["truvada"]', "[1]")),
+])
+def test_c2_letters_refuses_to_run_without_a_signed_combination_list(tmp_path, monkeypatch, case, pack):
+    p = tmp_path / "combination.toml"
+    if pack is not None:
+        p.write_text(pack)
+    monkeypatch.setattr(L, "COMBINATION_FILE", p)
+    with pytest.raises(Refused) as e:
+        make_letter(COMBO_NOTES.format(line="Med: aspirin 100 mg daily"), "gp-update", "GP")
+    assert str(e.value) == L.COMBO_PACK_REFUSED
+
+
+def test_c2_complete_pack_runs(tmp_path, monkeypatch):
+    p = tmp_path / "combination.toml"; p.write_text(C2_PACK)
+    monkeypatch.setattr(L, "COMBINATION_FILE", p)
+    assert "aspirin" in make_letter(COMBO_NOTES.format(line="Med: aspirin 100 mg daily"), "gp-update", "GP")
+    with pytest.raises(Refused):
+        make_letter(COMBO_NOTES.format(line="Med: Truvada 1 tablet daily"), "gp-update", "GP")
+
+
+@pytest.mark.parametrize("brand", ["Truvada", "Descovy"])
+@pytest.mark.parametrize("aud,to", [("gp", "GP"), ("patient", "patient")])
+def test_c2_truvada_descovy_refused_written_by_hand(tmp_path, brand, aud, to):
+    notes = tmp_path / "n.txt"; out = tmp_path / "out"
+    notes.write_text(tpl(question="Why is she tired?", problems=["tiredness"], meds=[f"{brand} 1 tablet daily"]))
+    r = subprocess.run([sys.executable, str(HERE / "letters.py"), str(notes), "--type", "gp-update", "--to", to,
+                        "--audience", aud, "--privacy", "true", "--out", str(out)], capture_output=True, text=True)
+    screen = r.stdout + r.stderr
+    assert r.returncode == 2 and COMBO_MSG.format(n=9) in screen                     # check 2's signed line
+    assert L.letter_by_hand(2)["clinician"]["line"] in screen                        # CQ-LETTER-BY-HAND, open
+    assert not out.exists() or not any(out.iterdir())                               # no letter made
+    assert brand.lower() not in screen.lower()                                       # brand in no output
+    with pytest.raises(L.ComboRefused) as e:
+        L.refuse_combination_brands(notes.read_text())
+    assert e.value.check == 2 and brand.lower() not in str(e.value).lower()
+
+
+def test_c2_by_hand_lines_match_signed_wording_and_patient_sees_no_details():
+    h = L.letter_by_hand(2)
+    assert h["patient"] == "Your care team will write this letter for you themselves. You don't need to do anything."
+    assert h["clinician"] == {"id": "CQ-LETTER-BY-HAND", "open": True, "line": "For a clinician to write: this letter "
+                              "couldn't be made automatically (check 2). It stays open until you write it."}
+    low = h["patient"].lower()
+    assert not any(w in low for w in ["check", "2", "medicine", "refus"] + list(L.load_combination()) +
+                   [c.lower() for c in L.SENSITIVE])
+    signed = HERE.parent / "wording" / "forms_orders_lines_SIGNED.md"     # the signed lines file, when present
+    if signed.exists():
+        rows = dict(re.findall(r"^\| ([A-Z][A-Z0-9-]+) \| (.+?) \|$", signed.read_text(), re.M))
+        for k, v in L.BY_HAND_LINES.items():
+            assert rows[k] == v, k
+
+
+def test_c2_clinician_entry_stays_open_until_a_letter_is_written_by_hand():
+    e = L.letter_by_hand(2)["clinician"]
+    assert L.close_letter_by_hand(e, "")["open"] is True
+    assert L.close_letter_by_hand(e, "   ")["open"] is True
+    assert L.close_letter_by_hand(e, None)["open"] is True
+    assert L.close_letter_by_hand(e, "Dear colleague, ...")["open"] is False and e["open"] is True
