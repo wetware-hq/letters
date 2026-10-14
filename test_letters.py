@@ -4779,3 +4779,46 @@ def test_r13_audit_leak_refusal_on_finished_letter():
     leaked = md.replace("## Problems\n\n", "## Problems\n\n- HIV [L6]\n", 1)
     with pytest.raises(L.Refused):
         L.verify_letter(leaked, notes, "gp")
+
+
+# ---------- round 13 item 4: pending and action lines (Physician ruling) ----------
+R13_PA = dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
+              pending=("FBC, sent 1937-08-01, GP", "XYZ panel, sent 1937-08-02, cardiology"),
+              actions=("repeat FBC in 1 week, GP", "do not restart empagliflozin until review, GP",
+                       "discuss TOP in 2 weeks, GP"))
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r13_pending_action_lines_keep_shorthand_check(tmp_path, brief):
+    """Ruling: the shorthand check stays on pending and action lines in every letter, clinician letters included."""
+    text = tpl(**R13_PA)
+    r, md = _r13_run(tmp_path, text, brief)
+    assert r.returncode == 0, r.stderr
+    assert f"XYZ {L.FLAG}" in md and f"TOP {L.FLAG}" in md
+    for frag in ("XYZ", "TOP"):
+        assert line_of(text, frag) in r.stderr
+    r, out = _run_t(tmp_path / "f", text, "--brief", brief, "--final")
+    assert r.returncode == 3 and not (out / "letter.md").exists()
+
+
+@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+def test_r13_pending_action_facts_as_written_in_signed_layout(tmp_path, brief):
+    """Ruling: item, owner, timing and negation stay as written; layout is the signed one."""
+    text = tpl(**R13_PA)
+    r, md = _r13_run(tmp_path, text, brief)
+    plain = re.sub(r" \([^()]*\)", "", L.FLAG_ANY.sub("", md))           # drop signed wording brackets and flags
+    plain = re.sub(r" +", " ", plain)
+    assert f"- FBC, sent on 1 Aug 1937. Who follows up: GP. [{line_of(text, 'FBC, sent')}]" in plain
+    assert f"- XYZ panel, sent on 2 Aug 1937. Who follows up: cardiology. [{line_of(text, 'XYZ')}]" in plain
+    assert f"1. Who: GP. When: in 1 week. Action: repeat FBC in 1 week [{line_of(text, 'repeat FBC')}]" in plain
+    assert ("2. Who: GP. When: not documented. Action: do not restart empagliflozin until review "
+            f"[{line_of(text, 'do not restart')}]") in plain
+    assert "3. Who: GP. When: in 2 weeks. Action: discuss TOP in 2 weeks" in plain
+
+
+def test_r13_pending_action_patient_needs_signed_plain_words(tmp_path):
+    """Ruling: in patient letters a flagged term needs a signed plain-word entry: FBC and GP have one; XYZ doesn't."""
+    r, md = _r13_run(tmp_path, tpl(**R13_PA), "letter to the patient")
+    assert "FBC (full blood count, a blood test that counts your blood cells), sent on 1 Aug 1937" in md
+    assert "Who follows up: GP (your family doctor)." in md
+    assert f"XYZ {L.FLAG} panel" in md and "XYZ (" not in md
