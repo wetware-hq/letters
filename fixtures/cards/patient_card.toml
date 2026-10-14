@@ -1,0 +1,37 @@
+# Synthetic patient card for letters' reader-id tests (cards format; invented person, 1930s dates).
+[header]
+card_id = "SYNTH-CARD-1001"
+kind = "patient"
+display_name = "R. Tamsin"
+person_name = "R. Tamsin"
+role = "patient"
+scope = ["read"]
+issued = "1937-01-04"
+expires = "1937-12-31"
+episode_id = "SYNTH-EP-1001"
+
+[[grant]]
+grant_id = "SYNTH-GR-0001"
+agent_id = "SYNTH-AG-0001"
+agent_name = "Helper"
+categories = ["general"]
+granted = "1937-01-05"
+
+[[grant]]
+grant_id = "SYNTH-GR-0003"
+agent_id = "SYNTH-AG-0003"
+agent_name = "Warden"
+categories = ["general"]
+granted = "1937-01-05"
+rel = "guardian"
+person_name = "J. Corrow"
+
+[[grant_event]]
+grant_id = "SYNTH-GR-0001"
+event = "granted"
+at = "1937-01-05"
+
+[[grant_event]]
+grant_id = "SYNTH-GR-0003"
+event = "granted"
+at = "1937-01-05"

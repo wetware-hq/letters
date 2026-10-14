@@ -1,0 +1,5 @@
+# Reader ids (Physician, 15 Oct 2026). A reader or copy recipient counts only by id; names are never matched.
+# A letter takes the by-hand route (PV-LETTER-BY-HAND + CQ-LETTER-BY-HAND) on a refusal unless every reader
+# resolves to an id of a kind listed in `normal`, and none is the patient or holds a grant to act for them.
+# Who acts for the patient comes from the cards grant data (a grant with a rel), never from this file.
+normal = ["SYNTH-REG"]            # provider registration ids (cards header registration_id)

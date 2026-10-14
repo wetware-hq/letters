@@ -1617,7 +1617,7 @@ try:
     COMBO_BRANDS = load_combination()                    # listed combination medicines (locale pack, same order)
 except Refused:
     COMBO_BRANDS = ()                                    # every run is refused instead (refuse_combination_brands)
-COMBO_REFUSED = "Refused: line {lid} has a combination medicine that letters can't fully list yet. Nothing was written."
+COMBO_REFUSED = "Refused: line {lid} has a combination medicine that this tool can't fully list yet. Nothing was written."   # signed round 3, 15 Oct 2026
 
 
 class ComboRefused(Refused):
@@ -1644,6 +1644,12 @@ BY_HAND_LINES = {
     "CQ-LETTER-BY-HAND": "For a clinician to write: this letter couldn't be made automatically (check [check_n]). "
                          "It stays open until you write it.",
 }
+
+
+# CQ-LETTER-READER-ENDED: Educator r14 text, Physician safety re-sign (letters_refusals_*.md, 15 Oct 2026).
+READER_ENDED_LINE = ("For a clinician to write: this letter is addressed under a permission to act for the patient "
+                     "that has ended. Don't send it under that permission. Write to the patient, or to whoever has "
+                     "permission to act for them now. It stays open until you write it.")
 
 
 def letter_by_hand(check_n):
@@ -1685,6 +1691,99 @@ def report_refusal(msg, patient, rc=2):
         print(hand["patient"])
         print(hand["clinician"]["line"], file=sys.stderr)
     return rc
+
+
+READERS = tomllib.loads((HERE / "data" / "readers.toml").read_text(encoding="utf-8"))
+READER_ID = re.compile(r"SYNTH(?:-(?:REG|CARD|AG))?-\d{1,6}")
+CARDS_DIR = pathlib.Path(os.environ.get("LETTERS_CARDS_DIR", HERE.parent / "cards"))
+
+
+def load_patient_card(path):
+    """The patient's card, typed and checked by cards' own loader (read-only use of cards; no change to it)."""
+    if str(CARDS_DIR) not in sys.path:
+        sys.path.insert(0, str(CARDS_DIR))
+    import cards                                         # noqa: E402  the cards repository's loader
+    return cards.load(pathlib.Path(path).read_text(encoding="utf-8"))
+
+
+def _id_kind(rid):
+    return rid.rsplit("-", 1)[0]
+
+
+def acts_for_patient(card, rid):
+    """True when this id has ever held a grant on the patient's card (cards grant data). A card keeps every grant,
+    so revoked or expired grants still count (ruling, 15 Oct 2026). Never by name."""
+    return any(g["agent_id"] == rid for g in (card or {}).get("grants", {}).values())
+
+
+GRANT_ID = re.compile(r"SYNTH-GR-\d{1,6}")
+SCENARIO_DATE = re.compile(r"19[3]\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])")
+
+
+def reader_grants(card, reader_ids, grant_ids, now):
+    """Fails closed; ids only, never names. Returns (route, cleared): route None when no reader acts for the patient
+    and no grant id is given, "current" when every grant holder writes under a current grant, "ended" when one is
+    addressed under a revoked or expired grant (even if the same person holds a newer one), else a by-hand reason.
+    cleared: the reader ids whose current grant id was given. Grant state comes from cards' one read path."""
+    ids, gids = [r.strip() for r in reader_ids], [g.strip() for g in grant_ids]
+    holders = [r for r in ids if acts_for_patient(card, r)]
+    if not holders and not gids:
+        return None, ()
+    if card is None or not SCENARIO_DATE.fullmatch(now or ""):
+        return "grant data unreadable", ()
+    grants, ended, cleared = card.get("grants", {}), False, []
+    for g in gids:
+        if not GRANT_ID.fullmatch(g) or g not in grants or grants[g].get("agent_id") not in holders:
+            return "unknown grant id", ()
+    for r in holders:
+        mine = [g for g in gids if grants[g]["agent_id"] == r]
+        if not mine:
+            return "no grant id", ()
+        for g in mine:
+            st = _cards().grant_state(card, g, now)
+            if st in ("revoked", "expired"):
+                ended = True
+            elif st != "current":
+                return "grant not current", ()
+        cleared.append(r)
+    return ("ended" if ended else "current"), tuple(cleared)
+
+
+def _cards():
+    if str(CARDS_DIR) not in sys.path:
+        sys.path.insert(0, str(CARDS_DIR))
+    import cards                                         # noqa: E402  the cards repository's one grant read path
+    return cards
+
+
+def needs_hand(to, audience, brief_ok, n_readers, reader_ids, notes, card=None, cleared=()):
+    """Fails closed. Returns why the letter takes the by-hand route on a refusal, or None when every reader resolves,
+    by id, to a normal reader who is neither the patient nor someone holding a grant to act for them.
+    No name is ever matched."""
+    if is_patient_letter(to, audience):
+        return "patient named"
+    if not brief_ok:
+        return "brief not read"
+    ids = [r.strip() for r in reader_ids]
+    if len(ids) < n_readers or any(not READER_ID.fullmatch(r) for r in ids):
+        return "reader without id"
+    pids = set(SYNTH.findall(EVENT_ID.sub(" ", notes)))
+    card_id = (card or {}).get("header", {}).get("card_id")
+    for r in ids:
+        if r in pids or r == card_id:
+            return "patient"
+        if r in cleared:                                 # writes under a current grant id (reader_grants)
+            continue
+        if acts_for_patient(card, r):
+            return "acts for patient"
+        if _id_kind(r) not in READERS["normal"]:
+            return "not a reader id"
+    return None
+
+
+def brief_readers(brief_text):
+    """How many readers a brief names: its reader plus one per copy request."""
+    return 1 + len(COPY_WORDS.findall(brief_text or ""))
 
 
 def close_letter_by_hand(entry, hand_letter):
@@ -2836,7 +2935,7 @@ def heldout(path):
 BRIEF_REFUSED = ('Refused: brief not understood. Write it as "<kind> to <reader>", for example '
                  '"discharge to GP" or "update to patient".')
 SENSITIVE_REFUSED = ("Refused: line L{n} of the brief includes an item that isn't on the sensitive-items list. "
-                     "Nothing was written.")      # never echoes the brief's text
+                     "Nothing was written. Remove the item from the brief, or use one from the list.")   # round 3; never echoes the brief
 SENSITIVE_REFUSED_NO_LINE = "Refused: the brief includes an item that isn't on the sensitive-items list. Nothing was written. Remove the item from the brief, or use one from the list."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 BRIEF_KINDS = {
     "referral": "referral", "refer": "referral", "referral letter": "referral",
@@ -2918,7 +3017,7 @@ def check_template_main(argv=None):
     ap.add_argument("--keep-out", action="append", default=[], metavar="L<n>")   # letter-only; format checked alike
     a = ap.parse_args(argv)
     llm_guard()
-    patient = False
+    patient, by_hand = False, False
     try:
         if any(not re.fullmatch(r"L\d+", x.strip()) for x in a.keep_out):
             raise Refused(KEEP_OUT_ARG)
@@ -2926,9 +3025,9 @@ def check_template_main(argv=None):
         brief_copy, patient, include = None, False, []
         if a.brief:
             btxt = open(a.brief, encoding="utf-8").read()
-            patient = True                                       # fails closed until the brief is read
+            by_hand = True                                       # fails closed: no reader ids here
             kind, reader, include, brief_copy = read_brief(btxt)
-            patient = is_patient_letter(reader, None) or bool(PATIENT_BRIEF.search(btxt))
+            patient = is_patient_letter(reader, None)
         pre_template_checks(text, None, brief_copy, patient, [x.strip() for x in a.not_copy])
         converted = from_template(text)
         check_safe(converted)                    # the same synthetic-data safeguard the letter command runs
@@ -2938,7 +3037,7 @@ def check_template_main(argv=None):
                 if x.strip() not in cuts:
                     raise Refused(KEEP_OUT_REFUSED.format(lid=x.strip()))
     except Refused as e:
-        return report_refusal(e, patient)
+        return report_refusal(e, patient or by_hand)
     print(TEMPLATE_OK)
     return 0
 
@@ -2950,9 +3049,6 @@ def main(argv=None):
         return _main(argv)
     finally:
         _EMPTY_FIELDS.clear(); _TEMPLATE.clear(); _ROUTES.clear()
-
-
-PATIENT_BRIEF = re.compile(r"\bpatient\b", re.I)   # fails closed: the patient as any reader or copy recipient
 
 
 def _main(argv=None):
@@ -2977,6 +3073,12 @@ def _main(argv=None):
     ap.add_argument("--privacy", choices=("true", "false"),
                     help="check 19: does this letter need the privacy line? Required for --final on patient letters")
     ap.add_argument("--heldout", help="external folder of held-out synthetic notes; reports a failure rate")
+    ap.add_argument("--reader-id", action="append", default=[], metavar="SYNTH-REG-<n>",
+                    help="the id of each reader and copy recipient (names are never matched)")
+    ap.add_argument("--card", help="the patient's card (cards TOML), for who holds a grant to act for them")
+    ap.add_argument("--grant-id", action="append", default=[], metavar="SYNTH-GR-<n>",
+                    help="the grant each reader who acts for the patient is written to under")
+    ap.add_argument("--now", help="the scenario date (YYYY-MM-DD) a grant is checked at; never the wall clock")
     a = ap.parse_args(argv)
     llm_guard()
     if a.heldout:
@@ -2984,12 +3086,12 @@ def _main(argv=None):
         return 0
     brief_copy = None
     include = []
-    patient_req = is_patient_letter(a.to, a.audience)
+    n_readers = 1
     if a.brief is not None:
         btxt = a.brief
         if "\n" not in btxt and os.path.isfile(btxt):            # a brief file, as the checker takes it
             btxt = open(btxt, encoding="utf-8").read()
-        patient_req = patient_req or bool(PATIENT_BRIEF.search(btxt))
+        n_readers = brief_readers(btxt)
         try:
             kind, reader, include, brief_copy = read_brief(btxt)
         except Refused as e:
@@ -2998,11 +3100,22 @@ def _main(argv=None):
         a.to = a.to or reader
         if is_patient_letter(a.to, None) and not a.audience:
             a.audience = "patient"
-        patient_req = patient_req or is_patient_letter(a.to, a.audience)
     if not (a.notes and a.type and a.to):
         ap.error("notes, --type and --to are required")
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
     tpl = open(a.template, encoding="utf-8").read() if a.template else None
+    try:
+        card = load_patient_card(a.card) if a.card else None
+    except Exception:
+        card = None                                              # a card that can't be read: grants unknown
+    route, cleared = reader_grants(card, a.reader_id, a.grant_id, a.now)
+    if route == "ended":                                         # CQ-LETTER-READER-ENDED: nothing written
+        print(READER_ENDED_LINE, file=sys.stderr)
+        return 2
+    if route not in (None, "current"):                           # a grant holder that doesn't resolve: by hand now
+        return report_refusal(f"Grant: {route}.", True)
+    patient_req = bool(needs_hand(a.to, a.audience, True, n_readers, a.reader_id, text, card, cleared)) \
+        or bool(a.card and card is None)
     try:
         not_copy = []
         for x in a.not_copy:

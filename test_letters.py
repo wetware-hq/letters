@@ -8,6 +8,8 @@ from letters import make_letter, build, build_from_template, check, parse, cumsu
 HERE = pathlib.Path(__file__).parent
 F = lambda n: (HERE / "fixtures" / n).read_text()
 CLI = [sys.executable, str(HERE / "letters.py")]
+READER = ["--reader-id", "SYNTH-REG-0007"]          # a GP reader, by id (names are never matched)
+READER2 = READER + ["--reader-id", "SYNTH-REG-0008"]  # and a second, for a copy recipient with an id
 GOLDEN = [
     ("chest_pain.txt", "referral", "Cardiology", "Dr A. Synth", None, "chest_pain_referral.md"),
     ("pneumonia_admission.txt", "discharge", "General practice", None, "gp", "pneumonia_discharge_gp.md"),
@@ -589,7 +591,7 @@ def test_ambiguous_abbreviation_flagged_not_expanded_and_final_refused(tmp_path,
     assert not any(g in md.lower() for g in guesses)
     with pytest.raises(Refused, match="flag"):
         L.finalise(res)
-    r = subprocess.run(CLI + [str(_notes(tmp_path, ab)), "--type", "gp-update", "--to", "GP", "--final"],
+    r = subprocess.run(CLI + [str(_notes(tmp_path, ab)), "--type", "gp-update", "--to", "GP", "--final", *READER],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "--final refused" in r.stderr and r.stdout == ""
     assert "Flag: an abbreviation on line L6 has no confirmed meaning." in r.stderr   # listed by line only
@@ -1025,7 +1027,8 @@ EXACT_TAIL = ("This tool can't send copies. Write a separate letter for each rea
 
 def _gp_cli(tmp_path, notes=CKD, brief="update to GP", extra=()):
     out = tmp_path / "out"
-    r = subprocess.run(CLI + [str(notes), "--brief", brief, "--out", str(out), *extra],
+    ids = READER if "patient" in brief else READER2                       # the patient as copy recipient: no id
+    r = subprocess.run(CLI + [str(notes), "--brief", brief, "--out", str(out), *ids, *extra],
                        capture_output=True, text=True)
     return r, out
 
@@ -2186,7 +2189,7 @@ def test_template_cannot_drop_results():
 
 # ---------- temporary combination-medicine refusal (13 Oct 2026) ----------
 COMBO_NOTES = ("Patient: SYNTH-7202\n1937-04-05 Clinic.\nProblem: tiredness\n{line}\nPlan: review in 4 weeks\n")
-COMBO_MSG = "Refused: line L{n} has a combination medicine that letters can't fully list yet. Nothing was written."
+COMBO_MSG = "Refused: line L{n} has a combination medicine that this tool can't fully list yet. Nothing was written."
 
 
 @pytest.mark.parametrize("brand", ["Biktarvy", "triumeq", "DOVATO", "Genvoya", "Truvada", "descovy"])
@@ -2584,7 +2587,7 @@ def test_r9_combination_refusal_and_linked_terms_unchanged():
 def _run_t(tmp_path, text, *args):
     tmp_path.mkdir(parents=True, exist_ok=True)
     n = tmp_path / "n.txt"; n.write_text(text); out = tmp_path / "o"
-    r = subprocess.run(CLI + [str(n), *args, "--out", str(out)], capture_output=True, text=True)
+    r = subprocess.run(CLI + [str(n), *args, *READER, "--out", str(out)], capture_output=True, text=True)
     return r, out
 
 
@@ -3052,8 +3055,7 @@ def test_r11_brief_include_line_accepted(tmp_path, brief, items):
 def test_r11_brief_include_unknown_item_still_refused(tmp_path):
     r, out = _run_t(tmp_path, (pathlib.Path(L.__file__).parent / "fixtures/template/podiatry_referral.txt").read_text(),
                     "--brief", "referral to podiatry\nInclude: alcohol history")
-    assert r.returncode == 2 and _clin(r) == ("Refused: line L2 of the brief includes an item that "
-                                                      "isn't on the sensitive-items list. Nothing was written.")
+    assert r.returncode == 2 and _clin(r) == L.SENSITIVE_REFUSED.format(n=2)
 
 
 
@@ -3589,7 +3591,8 @@ H22_NOTES = ("Patient: SYNTH-9311\nDate: 1938-11-20\nRecipients: Podiatry clinic
              "Question: Please assess the left forefoot callus.\nProblems:\n- left forefoot callus\n"
              "History: {hist}. Painful callus left forefoot.\nMedicines:\n- paracetamol 1 g four times daily oral "
              "reason: pain\nAllergies:\n- No known allergies\nResults:\nPending:\nActions:\n- review in 4 weeks\n")
-SENS_MSG = "Refused: line L{n} of the brief includes an item that isn't on the sensitive-items list. Nothing was written."
+SENS_MSG = ("Refused: line L{n} of the brief includes an item that isn't on the sensitive-items list. Nothing was written. "
+            "Remove the item from the brief, or use one from the list.")
 
 
 def test_r11k_include_list_is_h22():
@@ -5567,6 +5570,16 @@ def _signed_in_both():
     ends = re.findall(r'^- (?:Not a patient letter|Patient letter): "(.*)"$', wording, re.M)
     if len(ends) == 2:
         out["copy_refusal"] = tuple(ends)
+    final = safety.split("## Final 5")[1] if "## Final 5" in safety else ""
+    final_ids = {k for k in ("INCIDENT", "COMBO_REFUSED", "SENSITIVE_REFUSED") if k in final} | \
+        {f"PRIVACY_BLOCKED[{w}]" for w in ("missing", "unset") if f"PRIVACY_BLOCKED {w}" in final}
+    r3 = wording.split("## Round 3")[1] if "## Round 3" in wording else ""
+    for m in re.finditer(r'^- ([A-Z_]+)(?: (missing|unset))?: "([^"]+)"(.*)$', r3, re.M):
+        key = f"{m.group(1)}[{m.group(2)}]" if m.group(2) else m.group(1)
+        confirmed = "needs Physician confirm" not in m.group(4) or re.search(
+            rf"^- {re.escape(m.group(1))}\b.*\bSigned\.", safety, re.M)
+        if key in final_ids and confirmed:
+            out[key] = m.group(3)
     return {k: v for k, v in out.items() if k not in held or k in released}
 
 
@@ -5596,7 +5609,7 @@ def test_refusal_codes_signed_in_both_files():
 def test_refusal_signed_lines_used_word_for_word():
     signed, code = _signed_in_both(), refusalcodes.codes()
     plain = {k: v for k, v in signed.items() if k != "copy_refusal"}
-    assert len(plain) == 38 and set(plain) <= set(code)
+    assert len(plain) >= 42 and set(plain) <= set(code)   # 43 once Physician confirms SENSITIVE_REFUSED
     for k, t in plain.items():
         assert _norm(code[k]) == _norm(t), k
     assert signed["copy_refusal"] == (L.copy_refusal("{where}", False), L.copy_refusal("{where}", True))
@@ -5627,7 +5640,8 @@ def test_unreached_check_sentence_limit_line():
 
 def test_unreached_not_copy_arg_line(tmp_path):
     r = subprocess.run(CLI + [str(TPL / "chest_pain.txt"), "--type", "referral", "--to", "Cardiology clinic",
-                              "--not-copy", "History", "--out", str(tmp_path / "o")], capture_output=True, text=True)
+                              "--not-copy", "History", *READER, "--out", str(tmp_path / "o")], capture_output=True,
+                       text=True)
     assert r.returncode == 2 and _clin(r) == L.NOT_COPY_ARG and r.stdout == ""
     assert not (tmp_path / "o").exists()
 
@@ -5728,7 +5742,7 @@ def test_no_refusal_text_reaches_letter_queue_or_log(tmp_path, edit, extra, pati
     n.write_text(edit((TPL / "chest_pain.txt").read_text()))
     out = tmp_path / "out"
     to = ["--to", "Patient" if patient or "--brief" in extra else "Cardiology clinic"]
-    r = subprocess.run(CLI + [str(n), "--type", "gp-update", *to, *extra, "--out", str(out)],
+    r = subprocess.run(CLI + [str(n), "--type", "gp-update", *to, *extra, *READER, "--out", str(out)],
                        capture_output=True, text=True, cwd=tmp_path)
     assert r.returncode == 2, r.stderr
     assert not out.exists() and sorted(p.name for p in tmp_path.iterdir()) == ["notes.txt"]   # nothing written
@@ -5776,7 +5790,7 @@ def test_copy_refusal_endings_listed_and_never_reach_a_patient(tmp_path):
                                    "Write a separate letter for each other reader.")
     for brief, patient in (("update to patient, cc GP", True), ("update to GP, cc cardiology", False)):
         out = tmp_path / brief.replace(" ", "_").replace(",", "")
-        r = subprocess.run(CLI + [str(TPL / "chest_pain.txt"), "--brief", brief, "--out", str(out)],
+        r = subprocess.run(CLI + [str(TPL / "chest_pain.txt"), "--brief", brief, *READER2, "--out", str(out)],
                            capture_output=True, text=True)
         assert r.returncode == 2 and not out.exists()
         tail = L.PATIENT_COPY_TAIL if patient else L.COPY_TAIL
@@ -5836,8 +5850,8 @@ def test_fail_closed_to_or_audience_names_the_patient(tmp_path, args):
 
 @pytest.mark.parametrize("brief", ["update to GP; copied to patient", "update to GP, cc the patient",
                                    "referral to cardiology, copy to patient"])
-def test_fail_closed_patient_anywhere_in_the_brief(tmp_path, brief):
-    _fc(tmp_path, "--brief", brief)
+def test_fail_closed_copy_recipient_without_id(tmp_path, brief):
+    _fc(tmp_path, "--brief", brief, "--reader-id", "SYNTH-REG-0007")        # the copy recipient has no id
 
 
 @pytest.mark.parametrize("brief", ["zzz qqq", "to whom it may concern"])
@@ -5852,3 +5866,199 @@ def test_pre_push_blocks_on_the_signed_test():
     i = t.index("def test_refusal_codes_signed_in_both_files")
     assert "xfail" not in t[t.rindex("\n\n\n", 0, i):i]                    # a plain test, never xfail
     assert len(re.findall(r"xfail\(raises=Refused, strict=True, reason=\"temporary combination", t)) == 4   # 4 sites = the 5 check 2 cases
+
+
+# reader ids (Physician, 15 Oct 2026): by id only, never by name; grants from the cards grant data
+CARD = HERE / "fixtures" / "cards" / "patient_card.toml"
+GP_ID = "SYNTH-REG-0007"
+
+
+def _rd(tmp_path, notes_extra, *args):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    n = tmp_path / "n.txt"
+    n.write_text((TPL / "chest_pain.txt").read_text() + notes_extra)
+    out = tmp_path / "o"
+    r = subprocess.run(CLI + [str(n), "--type", "gp-update", "--to", "GP", *args, "--out", str(out)],
+                       capture_output=True, text=True)
+    return r, out
+
+
+def _by_hand(r, out):
+    assert r.returncode == 2 and not out.exists()
+    assert r.stdout == PV + "\n" and "For a clinician to write:" in r.stderr, (r.stdout, r.stderr)
+
+
+def test_reader_patient_id_takes_by_hand_route(tmp_path):
+    _by_hand(*_rd(tmp_path, "Copy to: Dr A. Synth\n", "--reader-id", "SYNTH-1001"))
+    _by_hand(*_rd(tmp_path / "c", "Copy to: Dr A. Synth\n", "--reader-id", "SYNTH-CARD-1001", "--card", str(CARD)))
+
+
+def test_reader_guardian_id_takes_by_hand_route(tmp_path):
+    _by_hand(*_rd(tmp_path, "Copy to: Dr A. Synth\n", "--reader-id", "SYNTH-AG-0003", "--card", str(CARD)))
+    card = L.load_patient_card(CARD)
+    assert L.acts_for_patient(card, "SYNTH-AG-0003") is True                # grant with rel = guardian
+    assert L.acts_for_patient(card, "SYNTH-AG-0001") is True                # any grant ever held counts
+    assert L.acts_for_patient(card, GP_ID) is False and L.acts_for_patient(None, "SYNTH-AG-0003") is False
+
+
+@pytest.mark.parametrize("ids", [[], ["Dr A. Synth"], ["Dr A. Snyth"], ["SYNTH-REG-x"]])
+def test_reader_name_without_id_takes_by_hand_route(tmp_path, ids):
+    args = [x for i in ids for x in ("--reader-id", i)]
+    _by_hand(*_rd(tmp_path, "Copy to: Dr A. Synth\n", *args))
+
+
+def test_reader_gp_id_goes_through_normally(tmp_path):
+    r, out = _rd(tmp_path, "", "--reader-id", GP_ID, "--card", str(CARD))
+    assert r.returncode == 0 and (out / "letter.md").exists(), r.stderr
+    r, out = _rd(tmp_path / "x", "Copy to: Dr A. Synth\n", "--reader-id", GP_ID, "--card", str(CARD))
+    assert r.returncode == 2 and r.stdout == "" and "For a clinician to write:" not in r.stderr   # plain refusal
+
+
+def test_gp_letter_saying_the_patient_presented_goes_through(tmp_path):
+    n = tmp_path / "n.txt"
+    n.write_text((TPL / "chest_pain.txt").read_text().replace(
+        "History: hypertension,", "History: the patient presented with hypertension,"))
+    out = tmp_path / "o"
+    r = subprocess.run(CLI + [str(n), "--brief", "update to GP", "--reader-id", GP_ID, "--out", str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0 and (out / "letter.md").exists() and r.stdout == "", r.stderr
+    n.write_text(n.read_text() + "Copy to: Dr A. Synth\n")
+    r = subprocess.run(CLI + [str(n), "--brief", "update to GP", "--reader-id", GP_ID], capture_output=True, text=True)
+    assert r.returncode == 2 and r.stdout == ""                             # refused, but not the by-hand route
+
+
+def test_needs_hand_reasons():
+    t, card = (TPL / "chest_pain.txt").read_text(), L.load_patient_card(CARD)
+    nh = lambda ids, **k: L.needs_hand(k.get("to", "GP"), k.get("aud"), k.get("ok", True), k.get("n", 1), ids, t,
+                                       k.get("card", card))
+    assert nh([GP_ID]) is None
+    assert nh([GP_ID], to="Patient") == "patient named" and nh([GP_ID], aud="patient") == "patient named"
+    assert nh([GP_ID], ok=False) == "brief not read"
+    assert nh([]) == "reader without id" and nh([GP_ID], n=2) == "reader without id"
+    assert nh([GP_ID, "A. Synth"], n=2) == "reader without id"
+    assert nh(["SYNTH-1001"]) == "patient" and nh(["SYNTH-CARD-1001"]) == "patient"
+    assert nh(["SYNTH-AG-0003"]) == "acts for patient"
+    assert nh(["SYNTH-AG-0001"]) == "acts for patient" and nh(["SYNTH-AG-0003"], card=None) == "not a reader id"
+    assert nh(["SYNTH-2002"]) == "not a reader id"
+    assert nh([GP_ID, "SYNTH-AG-0003"], n=2) == "acts for patient" and nh([GP_ID, "SYNTH-REG-0008"], n=2) is None
+    assert L.brief_readers("update to GP") == 1 and L.brief_readers("update to GP, cc renal") == 2
+    assert L.brief_readers(None) == 1
+
+
+def test_reader_rules_match_no_names():
+    src = (HERE / "letters.py").read_text()
+    body = src[src.index("def needs_hand("):src.index("def brief_readers(")]
+    assert "display_name" not in body and "person_name" not in body and "agent_name" not in body
+    assert "PATIENT_BRIEF" not in src                                      # the word rule is gone
+    assert L.READERS == {"normal": ["SYNTH-REG"]}
+
+
+def test_reader_ended_line_copied_word_for_word():
+    w = (SIGNED_DIR / "letters_refusals_WORDING.md").read_text()
+    s = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
+    assert re.search(r"^## CQ-LETTER-READER-ENDED signed for safety", s, re.M)
+    assert re.findall(r'^CQ-LETTER-READER-ENDED: "(.*)"$', w, re.M)[-1] == L.READER_ENDED_LINE     # latest text
+    assert f'"{L.READER_ENDED_LINE}"' in s.split("Physician safety re-sign")[-1]               # Physician re-sign
+
+
+# ---------------------------------------------------------------- grant ids (ruling 15 Oct ~07:00)
+GRANT4 = ('\n[[grant]]\ngrant_id = "SYNTH-GR-0004"\nagent_id = "SYNTH-AG-0003"\nagent_name = "Guardian"\n'
+          'categories = ["general"]\ngranted = "1937-01-25"\nrel = "guardian"\nperson_name = "A. Guardian"\n')
+EVT = '\n[[grant_event]]\ngrant_id = "{}"\nevent = "{}"\nat = "{}"\n'
+
+
+def _gcard(tmp_path, *evs, regrant=False):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    t = CARD.read_text()
+    if regrant:
+        head, sep, tail = t.partition("\n[[grant_event]]")
+        t = head + GRANT4 + sep + tail
+    t += "".join(EVT.format(*e) for e in evs)
+    if regrant:
+        t += EVT.format("SYNTH-GR-0004", "granted", "1937-01-25")              # appended after the revocation
+    p = tmp_path / "card.toml"
+    p.write_text(t)
+    return str(p)
+
+
+def _g(tmp_path, card, *extra, now="1937-02-01"):
+    args = ["--reader-id", "SYNTH-AG-0003", "--card", card, *extra] + (["--now", now] if now else [])
+    return _rd(tmp_path / "run", "", *args)
+
+
+def _ended(r, out):
+    assert r.returncode == 2 and r.stdout == "" and not out.exists(), (r.stdout, r.stderr)
+    assert L.READER_ENDED_LINE in r.stderr
+
+
+def _normal(r, out):
+    assert r.returncode == 0 and (out / "letter.md").exists(), r.stderr
+
+
+def test_revoked_guardian_raises_reader_ended(tmp_path):
+    c = _gcard(tmp_path, ("SYNTH-GR-0003", "revoked", "1937-01-20"))
+    _ended(*_g(tmp_path, c, "--grant-id", "SYNTH-GR-0003"))
+
+
+def test_grant_expiring_partway_through_a_trace(tmp_path):
+    c = _gcard(tmp_path, ("SYNTH-GR-0003", "expired", "1937-02-10"))
+    _normal(*_g(tmp_path / "a", c, "--grant-id", "SYNTH-GR-0003", now="1937-02-09"))
+    _ended(*_g(tmp_path / "b", c, "--grant-id", "SYNTH-GR-0003", now="1937-02-10"))   # at the scenario time
+    _ended(*_g(tmp_path / "c", c, "--grant-id", "SYNTH-GR-0003", now="1937-03-01"))
+
+
+def test_revoke_regrant_then_old_grant_is_ended(tmp_path):
+    c = _gcard(tmp_path, ("SYNTH-GR-0003", "revoked", "1937-01-20"), regrant=True)
+    _ended(*_g(tmp_path / "a", c, "--grant-id", "SYNTH-GR-0003"))
+    _ended(*_g(tmp_path / "b", c, "--grant-id", "SYNTH-GR-0003", "--grant-id", "SYNTH-GR-0004"))
+    _by_hand(*_g(tmp_path / "c", c))                                          # same person, no grant id
+    _normal(*_g(tmp_path / "d", c, "--grant-id", "SYNTH-GR-0004"))           # same person, current grant id
+
+
+@pytest.mark.parametrize("extra,now", [
+    (["--grant-id", "SYNTH-GR-0099"], "1937-02-01"),       # unknown grant id
+    (["--grant-id", "SYNTH-GR-0001"], "1937-02-01"),       # someone else's grant
+    (["--grant-id", "GR-0003"], "1937-02-01"),             # broken grant id
+    (["--grant-id", "SYNTH-GR-0003"], None),               # no scenario time
+    (["--grant-id", "SYNTH-GR-0003"], "2026-10-15"),       # wall-clock date, not the scenario clock
+    (["--grant-id", "SYNTH-GR-0003"], "1937-01-04"),       # before the grant began
+])
+def test_broken_or_missing_grant_data_by_hand(tmp_path, extra, now):
+    _by_hand(*_g(tmp_path, str(CARD), *extra, now=now))
+
+
+def test_broken_card_history_by_hand(tmp_path):
+    bad = _gcard(tmp_path, ("SYNTH-GR-0003", "paused", "1937-01-20"))
+    _by_hand(*_g(tmp_path / "a", bad, "--grant-id", "SYNTH-GR-0003"))
+    r, out = _rd(tmp_path / "b", "", "--reader-id", GP_ID, "--grant-id", "SYNTH-GR-0003", "--now", "1937-02-01")
+    _by_hand(r, out)                                                          # grant id without a card
+
+
+def test_current_guardian_view_shows_no_earlier_revocation(tmp_path):
+    c = _gcard(tmp_path, ("SYNTH-GR-0003", "revoked", "1937-01-20"), regrant=True)
+    r, out = _g(tmp_path, c, "--grant-id", "SYNTH-GR-0004")
+    _normal(r, out)
+    shown = r.stdout + r.stderr + (out / "letter.md").read_text()
+    assert "1937-01-20" not in shown and "SYNTH-GR-0003" not in shown and "revok" not in shown.lower()
+
+
+def test_patient_only_letter_is_not_by_hand(tmp_path):
+    out = tmp_path / "o"
+    r = subprocess.run(CLI + [str(TPL / "chest_pain.txt"), "--type", "gp-update", "--to", "Patient", "--audience",
+                              "patient", "--out", str(out)], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout == "" and PV not in r.stdout and (out / "letter.md").exists(), r.stderr
+
+
+def test_reader_grants_reasons():
+    card = L.load_patient_card(CARD)
+    rg = lambda ids, gids, now="1937-02-01", c=card: L.reader_grants(c, ids, gids, now)
+    assert rg([GP_ID], []) == (None, ())
+    assert rg(["SYNTH-AG-0003"], []) == ("no grant id", ())
+    assert rg(["SYNTH-AG-0003"], ["SYNTH-GR-0003"]) == ("current", ("SYNTH-AG-0003",))
+    assert rg([GP_ID], ["SYNTH-GR-0003"]) == ("unknown grant id", ())
+    assert rg(["SYNTH-AG-0003"], ["SYNTH-GR-0003"], c=None) == ("grant data unreadable", ())
+    assert rg(["SYNTH-AG-0003"], ["SYNTH-GR-0003"], now="1937-13-01") == ("grant data unreadable", ())
+    assert rg(["SYNTH-AG-0003", "SYNTH-AG-0001"], ["SYNTH-GR-0003"]) == ("no grant id", ())
+    assert rg(["SYNTH-AG-0003", "SYNTH-AG-0001"], ["SYNTH-GR-0003", "SYNTH-GR-0001"])[0] == "current"
+    assert rg([" SYNTH-AG-0003 "], [" SYNTH-GR-0003 "])[0] == "current"
+    assert L.needs_hand("GP", None, True, 1, ["SYNTH-AG-0003"], "", card, ("SYNTH-AG-0003",)) is None
