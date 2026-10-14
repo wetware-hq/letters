@@ -16,7 +16,10 @@ def main():
         print(letters.RUN_TRACES_NOT_RUN)
         return 1
     files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
-    problems = [f"{f}: answer file in the commit" for f in files if any(ANSWER.fullmatch(p) for p in f.split("/"))]
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import mutation_hash
+    problems = [] if mutation_hash.fresh() else [mutation_hash.STALE]
+    problems += [f"{f}: answer file in the commit" for f in files if any(ANSWER.fullmatch(p) for p in f.split("/"))]
     py = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     if subprocess.run(py + ["test_letters.py::test_refusal_codes_signed_in_both_files"], cwd=ROOT).returncode:
         problems.append("a refusal line is not signed in both files (test_refusal_codes_signed_in_both_files)")

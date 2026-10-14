@@ -184,6 +184,11 @@ def main(argv=None):
     for m in done:
         if m["result"] == "survived":
             print(f"SURVIVED #{m['id']} check {m['check']} {m['func']} line {m['line']} {m['op']}")
+    if killed == len(done) and not a.only:              # a full run with every mutant killed: record the hash
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        import mutation_hash
+        mutation_hash.record()
+        print("mutation hash recorded in mutation_hash.txt")
     return 0 if killed == len(done) else 1
 
 

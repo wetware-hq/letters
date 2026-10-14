@@ -5299,11 +5299,10 @@ def test_c2_by_hand_lines_match_signed_wording_and_patient_sees_no_details():
     low = h["patient"].lower()
     assert not any(w in low for w in ["check", "2", "medicine", "refus"] + list(L.load_combination()) +
                    [c.lower() for c in L.SENSITIVE])
-    signed = HERE.parent / "wording" / "forms_orders_lines_SIGNED.md"     # the signed lines file, when present
-    if signed.exists():
-        rows = dict(re.findall(r"^\| ([A-Z][A-Z0-9-]+) \| (.+?) \|$", signed.read_text(), re.M))
-        for k, v in L.BY_HAND_LINES.items():
-            assert rows[k] == v, k
+    signed = HERE.parent / "wording" / "forms_orders_lines_SIGNED.md"     # the one signed source of these lines
+    rows = dict(re.findall(r"^\| ([A-Z][A-Z0-9-]+) \| (.+?) \|$", signed.read_text(), re.M))  # missing file: fails
+    for k, v in L.BY_HAND_LINES.items():
+        assert rows[k] == v, k                                              # word for word; fails if the source changes
 
 
 def test_c2_clinician_entry_stays_open_until_a_letter_is_written_by_hand():
@@ -6082,3 +6081,35 @@ def test_missing_answer_file_fails_when_set(tmp_path):
     envv = dict(os.environ, LETTERS_TRUTH=str(tmp_path))
     r = subprocess.run([sys.executable, "scripts/check14_derived.py"], cwd=HERE, capture_output=True, text=True, env=envv)
     assert r.returncode != 0 and "answer file missing" in r.stderr
+
+
+# ---------------------------------------------------------------- mutation hash (room ruling 15 Oct 08:23)
+sys.path.insert(0, str(HERE / "scripts"))
+import mutation_hash  # noqa: E402
+
+
+def _mh_copy(tmp_path):
+    import shutil
+    for f in ("safety_functions.toml", "letters.py"):
+        shutil.copy(HERE / f, tmp_path / f)
+    mutation_hash.record(tmp_path)
+    return tmp_path
+
+
+def test_mutation_hash_unchanged_passes(tmp_path):
+    root = _mh_copy(tmp_path)
+    assert mutation_hash.fresh(root)
+    p = root / "letters.py"
+    p.write_text(p.read_text().replace("def needs_hand(", "# a comment\ndef needs_hand(", 1))
+    assert mutation_hash.fresh(root)                                       # comments don't count
+
+
+def test_mutation_hash_edited_function_body_fails(tmp_path):
+    root = _mh_copy(tmp_path)
+    p = root / "letters.py"
+    t = p.read_text()
+    assert 'return "no grant id", ()' in t
+    p.write_text(t.replace('return "no grant id", ()', 'return "no grant", ()', 1))
+    assert not mutation_hash.fresh(root)
+    (root / mutation_hash.RECORD).unlink()
+    assert not mutation_hash.fresh(root)
