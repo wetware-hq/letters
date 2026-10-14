@@ -4868,3 +4868,19 @@ def test_c19_privacy_never_inferred_from_notes():
     assert res.privacy is None
     with pytest.raises(L.Refused, match=re.escape(L.PRIVACY_BLOCKED["unset"])):
         L.finalise(res)
+
+
+# ---------- RULES.md and scripts/rulecheck.py ----------
+def test_rulecheck_exits_0():
+    r = subprocess.run([sys.executable, str(HERE / "scripts" / "rulecheck.py")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout
+
+
+def test_rulecheck_fails_on_row_with_missing_test(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "rulecheck.py").write_text((HERE / "scripts" / "rulecheck.py").read_text())
+    (tmp_path / "test_x.py").write_text("def test_real():\n    pass\n")
+    rows = "".join(f"| {n} | c | Physician | safety | test_real |\n" for n in range(1, 19))
+    (tmp_path / "RULES.md").write_text(rows + "| 19 | c | Physician | safety | test_not_there |\n")
+    r = subprocess.run([sys.executable, str(tmp_path / "scripts" / "rulecheck.py")], capture_output=True, text=True)
+    assert r.returncode == 1 and "rule 19" in r.stdout
