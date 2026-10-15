@@ -1860,10 +1860,6 @@ def reader_grants(card, reader_ids, grant_ids, now):
     for r in holders:
         mine = [g for g in gids if grants[g]["agent_id"] == r]
         if not mine:
-            held = [_cards().grant_state(card, g, now) for g, v in grants.items() if v.get("agent_id") == r]
-            if held and all(st in ("revoked", "expired") for st in held):
-                ended = True                             # every grant this reader held has ended: never the normal route
-                continue
             return "no grant id", ()
         for g in mine:
             st = _cards().grant_state(card, g, now)
