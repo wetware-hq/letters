@@ -6318,3 +6318,11 @@ def test_header_count_check_fails_on_a_wrong_header(tmp_path):
     s = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
     assert signed_header_count.problems(s) == []                              # register: 44 ids stated, 44 listed
     assert len(signed_header_count.problems(s.replace("Physician), 44 ids", "Physician), 45 ids", 1))) == 1
+
+
+# ---------------------------------------------------------------- every signing file states its true count (15 Oct 11:16)
+@pytest.mark.needs_signed
+def test_every_signing_file_states_its_true_line_count():
+    files = [f for d in paths.wording_dirs() for f in sorted(d.iterdir())
+             if signing.FILE.match(f.name) and "DRAFT" not in f.name and "RETIRED" not in f.name]
+    assert files and [p for f in files for p in signed_header_count.problems(f.read_text(), f.name)] == []
