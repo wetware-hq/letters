@@ -1,5 +1,6 @@
 """Without the answer-file setting, every run says RUN-TRACES-NOT-RUN; such a run never passes the safety bar."""
 import paths
+import pytest
 
 NEEDS_SIGNED = "needs_signed"
 
@@ -19,3 +20,11 @@ def pytest_terminal_summary(terminalreporter):
     if paths.truth() is None:
         import letters
         terminalreporter.write_line(letters.RUN_TRACES_NOT_RUN)
+
+
+@pytest.fixture(autouse=True)
+def _scenario_clock():
+    """Every letters test runs on an explicit clock (test mode); its own MonkeyPatch so monkeypatch.undo() keeps it."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("LETTERS_CLOCK", "test")
+        yield
