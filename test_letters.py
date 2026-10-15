@@ -6555,9 +6555,11 @@ def test_to_guardian_reader_id_takes_by_hand_route(tmp_path):
     _by_hand(*_to(tmp_path, "SYNTH-PERSON-G13"))
 
 
-def test_to_guardian_with_revoked_grant_reader_ended_never_normal(tmp_path):
+def test_to_guardian_all_grants_ended_no_grant_id_goes_by_hand(tmp_path):
+    """Physician ruling 15 Oct 14:43: no grant id -> PV-LETTER-BY-HAND, nothing written; never READER-ENDED."""
     r, out = _to(tmp_path, "SYNTH-PERSON-G13R")
-    assert r.returncode == 2 and not out.exists() and L.READER_ENDED_LINE in r.stderr
+    _by_hand(r, out)
+    assert L.READER_ENDED_LINE not in r.stderr
 
 
 def test_to_guardian_with_revoked_grant_id_given_reader_ended(tmp_path):
