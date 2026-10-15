@@ -313,3 +313,17 @@ text = "--final refused: {n} flag(s) still open. Confirm each meaning with --res
 check = 18
 status = "signed"
 source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
+
+[[code]]
+key = "SENSITIVE_DECLINED_REFUSED"
+text = "Refused: line {lid} comes from a sensitive question the patient chose not to answer. It can't go in this letter. Nothing was written."
+check = 5
+status = "signed"
+source = "letters_refusals_WORDING.md (15 Oct 2026); safety register pending"
+
+[[code]]
+key = "DECLINED_NO_ABSENCE_LINE"
+text = "Refused: line {lid} says something is absent, but the patient chose not to answer that question. Not answering is never a no. Nothing was written."
+check = 17
+status = "signed"
+source = "letters_refusals_WORDING.md id DECLINED-NO-ABSENCE-LINE (15 Oct 2026); safety register pending"

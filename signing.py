@@ -4,8 +4,8 @@ signed together by Physician and Educator) are one signing set."""
 import collections, re
 
 FILE = re.compile(r"^(.+)_(SIGNED|SAFETY|WORDING)\.md$")
-IDS = (re.compile(r"^\| ([A-Z]{2,4}(?:-[A-Z0-9]+)+) \|", re.M), re.compile(r"^- ([A-Z]{2,4}(?:-[A-Z0-9]+)+)\b", re.M),
-       re.compile(r'^([A-Z]{2,4}(?:-[A-Z0-9]+)+): "', re.M))
+IDS = (re.compile(r"^\| ([A-Z]{2,}(?:-[A-Z0-9]+)+) \|", re.M), re.compile(r"^- ([A-Z]{2,}(?:-[A-Z0-9]+)+)\b", re.M),
+       re.compile(r'^([A-Z]{2,}(?:-[A-Z0-9]+)+): "', re.M))
 
 
 def duplicates(dirs):

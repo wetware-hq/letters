@@ -49,4 +49,7 @@ functions = [
   { name = "printed_flags", rows = [18] },
   { name = "_main", rows = [18, 3, 14] },
   { name = "privacy_check", rows = [19] },
+  { name = "load_declined", rows = [17] },
+  { name = "declined_absence_lines", rows = [17] },
+  { name = "_decline_lines", rows = [17] },
 ]
