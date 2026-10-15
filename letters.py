@@ -858,9 +858,88 @@ EMPTY = {"pending": "No results pending at time of writing.", "allergies": f"All
          "meds": f"Current medicines {ND}."}
 
 
+# Signed letter status lines (letters_status_lines_SIGNED.md, Physician 15 Oct 2026), byte-exact.
+DECLINED_LINES = {
+    "LT-DECLINED-CLIN": "Not answered, the patient chose not to say: [question].",
+    "LT-DECLINED-CLIN-SAFETY": "Safety alert: not answered, the patient chose not to say: [question].",
+    "LT-DECLINED-PT": "You chose not to answer: [question plain wording].",
+    "LT-DECLINED-PT-SAFETY": "You chose not to answer: [question plain wording]. Your care team may ask you about this "
+                             "again.",
+}
+_DECLINED = {}          # section -> declined items in it (set per letter by build)
+DECLINED_KEYS = ("item", "section", "safety", "sensitive", "question", "question_plain", "lines")
+# Signed (letters_refusals_WORDING.md, 15 Oct 2026). Clinician only. Shows the line id only, never the question or topic.
+SENSITIVE_DECLINED_REFUSED = "Refused: line {lid} comes from a sensitive question the patient chose not to answer. It can't go in this letter. Nothing was written."
+# Signed (letters_refusals_WORDING.md id DECLINED-NO-ABSENCE-LINE, 15 Oct 2026). Clinician only.
+DECLINED_NO_ABSENCE_LINE = "Refused: line {lid} says something is absent, but the patient chose not to answer that question. Not answering is never a no. Nothing was written."
+ABSENCE = re.compile(r"\b(no|none|nil|not (?:documented|recorded|written|known)|nkda|nka|field empty)\b", re.I)
+SECTION_WORD = {"allergies": "allerg", "meds": "medicine", "problems": "problem", "results": "result",
+                "pending": "pending", "followup": "follow"}
+
+
+def load_declined(text):
+    """The declined questions forms hands over (TOML [[declined]]: item, section, safety, question, question_plain).
+    Fails closed: ValueError on anything missing, unknown or of the wrong type; nothing is guessed."""
+    try:
+        raw = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"declined file: {e}")
+    rows = raw.get("declined")
+    if set(raw) != {"declined"} or not isinstance(rows, list) or not rows:
+        raise ValueError("declined file: needs one or more [[declined]] tables and nothing else")
+    known = {x for v in SECTIONS.values() for x in v}
+    for d in rows:
+        if not isinstance(d, dict) or set(d) != set(DECLINED_KEYS) or not re.fullmatch(r"[a-z][a-z0-9_]*", str(d["item"])) \
+                or d["section"] not in known or not isinstance(d["safety"], bool) or not isinstance(d["sensitive"], bool) \
+                or not isinstance(d["lines"], list) or not all(isinstance(x, str) and re.fullmatch(r"L\d+", x) for x in d["lines"]) \
+                or not all(isinstance(d[k], str) and 0 < len(d[k]) <= 200 and re.fullmatch(r"[^\[\]\n{}]+", d[k])
+                           for k in ("question", "question_plain")):
+            raise ValueError("declined file: a [[declined]] table is missing a field or has a wrong value")
+    return rows
+
+
+def _decline_lines(name, audience):
+    out = []
+    for d in _DECLINED.get(name, []):
+        if audience == "patient":
+            k = "LT-DECLINED-PT-SAFETY" if d["safety"] else "LT-DECLINED-PT"
+            out.append("- " + DECLINED_LINES[k].replace("[question plain wording]", d["question_plain"]))
+        else:
+            k = "LT-DECLINED-CLIN-SAFETY" if d["safety"] else "LT-DECLINED-CLIN"
+            out.append("- " + DECLINED_LINES[k].replace("[question]", d["question"]))
+    return out
+
+
+def declined_absence_lines(md, declined):
+    """Lines that state a declined item's section is absent, none or not recorded: in its own section, or any line
+    naming that section. Empty means the letter is safe to write."""
+    secs = {d["section"] for d in declined or ()}
+    if not secs:
+        return []
+    heads = {HEADINGS[a][s]: s for a in HEADINGS for s in secs if s in HEADINGS[a]}
+    bad, cur = [], None
+    for line in md.splitlines():
+        if line.startswith("## "):
+            title = line[3:].split(" [flag:")[0].strip()
+            cur = heads.get(title)
+            if cur and "[flag: field empty]" in line:
+                bad.append(line)
+            continue
+        if line.startswith("---"):
+            cur = None
+        if any(line.startswith("- " + v.split("[")[0]) for v in DECLINED_LINES.values()):
+            continue
+        named = any(SECTION_WORD.get(s, s) in line.lower() for s in secs)
+        if (cur or named) and ABSENCE.search(line):
+            bad.append(line)
+    return bad
+
+
 def render_section(name, st, audience):
     head = HEADINGS[audience][name]
     items = section_items(name, st, audience)
+    if name in _DECLINED:                       # declined: never an absence line, only the signed decline line
+        items = [x for x in items if not (isinstance(x, str) and ABSENCE.search(x))]
     body = []
     if name == "results":
         plain = [x for x in items if x[0] is None]           # results with no value: word for word, cited
@@ -875,6 +954,8 @@ def render_section(name, st, audience):
         body = [f"{k}. {x}" for k, x in enumerate(items, 1)]
     else:
         body = [f"- {x}" for x in items]
+    if name in _DECLINED:
+        body = body + _decline_lines(name, audience)
     if not body:
         if name in _EMPTY_FIELDS:
             body = [f"- {EMPTY_PATIENT.get(name, NONE_RECORDED) if audience == 'patient' else NONE_RECORDED}"]
@@ -1329,6 +1410,8 @@ def check(md, sources, letter_type):
         if not cited:
             if text.strip() in EMPTY.values() or text.strip() == NONE_RECORDED or text.strip() in EMPTY_PATIENT.values():
                 continue
+            if text.strip() in {x[2:] for sec in _DECLINED for aud in ("patient", "gp") for x in _decline_lines(sec, aud)}:
+                continue                                 # a signed decline line: sourced from forms, not the notes
             problems.append(CHECK_UNSOURCED.format(at=at))
             continue
         if any(c not in sources for c in cited):
@@ -1574,7 +1657,7 @@ def refuse_copies(text, template=None, brief=None, patient=False, not_copy=()):
 
 
 def build(text, letter_type, to, recipient=None, audience=None, template=None, brand=None, resolve=None, flags=None,
-          include=None, not_copy=(), keep_out=(), privacy=None):
+          include=None, not_copy=(), keep_out=(), privacy=None, declined=None):
     """include: item names the brief asked to keep (see SENSITIVE); everything else sensitive is cut."""
     unknown = [i for i in (include or []) if i.lower() not in {c.lower() for c in SENSITIVE}]
     if unknown:
@@ -1583,11 +1666,25 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
     _NOT_COPY[:] = list(not_copy or ())
     _KEEP_OUT[:] = list(keep_out or ()); _SENS_CUTS.clear(); _KEPT_OUT.clear()
     own = [] if flags is None else flags                      # every flag is kept for finalise(), screen-only too
+    _DECLINED.clear()
+    for d in declined or ():
+        _DECLINED.setdefault(d["section"], []).append(d)
+    if not is_patient_letter(to, audience):                  # a clinician letter never carries a declined sensitive answer
+        n_lines = len(text.splitlines())
+        for d in declined or ():
+            for lid in d["lines"] if d["sensitive"] else ():
+                if 1 <= int(lid[1:]) <= n_lines:
+                    _DECLINED.clear()
+                    raise Refused(SENSITIVE_DECLINED_REFUSED.format(lid=lid))
     try:
         md, dropped = _build(text, letter_type, to, recipient, audience, template, brand, resolve, own)
+        bad = declined_absence_lines(md, declined)        # severity 5: never write an absence line after a decline
+        if bad:
+            lid = (re.findall(r"\bL\d+\b", bad[0]) or ["L?"])[0]
+            raise Refused(DECLINED_NO_ABSENCE_LINE.format(lid=lid))
         return BuildResult(md, dropped, own, privacy, is_patient_letter(to, audience))
     finally:
-        _INCLUDE.clear(); _PATIENT_LETTER.clear()
+        _INCLUDE.clear(); _PATIENT_LETTER.clear(); _DECLINED.clear()
 
 
 # Temporary (13 Oct 2026): combination medicines can't be fully listed yet, so any letter naming one is refused.
@@ -1835,7 +1932,7 @@ def _build(text, letter_type, to, recipient=None, audience=None, template=None, 
             flags.append(QUESTION_NOTICE if letter_type == "referral" else QUESTION_NOTICE_ANY)
     md = flag_long_sentences(md, flags)
     for sec in ("allergies", "meds"):                   # an empty allergies or medicines field blocks --final
-        if sec in _EMPTY_FIELDS and sec in SECTIONS[letter_type]:
+        if sec in _EMPTY_FIELDS and sec in SECTIONS[letter_type] and sec not in _DECLINED:
             head = f"**Letter:** {TITLES[letter_type]}"
             md = md.replace(head, f"{head} {EMPTY_FIELD_FLAG}", 1)
             if flags is not None:
@@ -1906,9 +2003,12 @@ def reverse_check(md, text, extra="", template=None):
     body = md.split("\n---\n")[0]
     tool |= {"dear", "who", "when", "action", "changed", "from", "now", "stopped", "started", "restarted", "reason",
              "change", "resolved", "ruled", "out", "sent", "undocumented", "date", "follows", "up"}
+    declined = {x for sec in _DECLINED for aud in ("patient", "gp") for x in _decline_lines(sec, aud)}
     started = False
     for n, line in enumerate(body.split("\n"), 1):
         started = started or line.startswith("**Date:**")       # the brand pack's own header is not note content
+        if line in declined:                                     # signed decline line; question wording from forms
+            continue
         if not started or not line.strip() or line.startswith(("## ", "<!--", "![")) or line.startswith("| Test"):
             continue
         ids = [i for i in _line_ids(line) if i.startswith("L")]
@@ -3080,6 +3180,8 @@ def _main(argv=None):
     ap.add_argument("--reader-id", action="append", default=[], metavar="SYNTH-REG-<n>",
                     help="the id of each reader and copy recipient (names are never matched)")
     ap.add_argument("--card", help="the patient's card (cards TOML), for who holds a grant to act for them")
+    ap.add_argument("--declined", help="questions the patient declined (TOML [[declined]] from forms): the letter "
+                    "carries the signed LT-DECLINED-* line and never states the item is absent")
     ap.add_argument("--grant-id", action="append", default=[], metavar="SYNTH-GR-<n>",
                     help="the grant each reader who acts for the patient is written to under")
     ap.add_argument("--now", help="the scenario date (YYYY-MM-DD) a grant is checked at; never the wall clock")
@@ -3108,6 +3210,11 @@ def _main(argv=None):
         ap.error("notes, --type and --to are required")
     text = sys.stdin.read() if a.notes == "-" else open(a.notes, encoding="utf-8").read()
     tpl = open(a.template, encoding="utf-8").read() if a.template else None
+    try:
+        declined = load_declined(open(a.declined, encoding="utf-8").read()) if a.declined else None
+    except (OSError, ValueError) as e:
+        print(f"--declined: {e}", file=sys.stderr)                  # fails closed: nothing written
+        return 2
     try:
         card = load_patient_card(a.card) if a.card else None
     except Exception:
@@ -3145,7 +3252,7 @@ def _main(argv=None):
         flags = []
         result = build(text, a.type, a.to, a.recipient, a.audience, tpl, load_brand(a.brand) if a.brand else None,
                        a.resolve, flags, include, not_copy, keep_out,
-                       privacy=None if a.privacy is None else a.privacy == "true")
+                       privacy=None if a.privacy is None else a.privacy == "true", declined=declined)
         md, dropped = result
     except ComboRefused as e:                                 # check 2: written by hand; the clinician entry stays open
         if patient_req:

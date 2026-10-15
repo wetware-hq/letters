@@ -1,6 +1,6 @@
 import json
 """Regression tests. Each rule has a test that plants its failure. Synthetic data only."""
-import os, pathlib, re, subprocess, sys, tomllib
+import os, string, pathlib, re, subprocess, sys, tomllib
 import pytest
 import letters as L
 from letters import make_letter, build, build_from_template, check, parse, cumsum, Refused, INCIDENT, ND
@@ -5565,7 +5565,7 @@ def _signed_in_both():
     out = {}
     for line in wording.splitlines():
         cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
-        if len(cells) >= 3 and re.match(r"^[A-Z][A-Z_]+( \(|$)", cells[0]):
+        if len(cells) >= 3 and re.match(r"^[A-Z][A-Z_-]+( \(|$)", cells[0]):
             out[cells[0].split(" (")[0]] = cells[1] if cells[2] == "unchanged" else cells[2]
     ends = re.findall(r'^- (?:Not a patient letter|Patient letter): "(.*)"$', wording, re.M)
     if len(ends) == 2:
@@ -5597,7 +5597,7 @@ def test_refusal_codes_signed_in_both_files():
     signed = _signed_in_both()
     unsigned = []
     for k, t in refusalcodes.codes().items():
-        key = "copy_refusal" if k.startswith("copy_refusal") else k
+        key = "copy_refusal" if k.startswith("copy_refusal") else REGISTER_ID.get(k, k)
         want, have = signed.get(key), _code_text(k, t)
         if want is None or want != have:                         # byte-exact: whitespace and newlines count
             unsigned.append(key)
@@ -5605,7 +5605,7 @@ def test_refusal_codes_signed_in_both_files():
 
 
 def test_refusal_signed_lines_used_word_for_word():
-    signed, code = _signed_in_both(), refusalcodes.codes()
+    signed, code = _signed_in_both(), {REGISTER_ID.get(k, k): v for k, v in refusalcodes.codes().items()}
     plain = {k: v for k, v in signed.items() if k != "copy_refusal"}
     assert len(plain) >= 42 and set(plain) <= set(code)   # 43 once Physician confirms SENSITIVE_REFUSED
     for k, t in plain.items():
@@ -6127,7 +6127,7 @@ def _wording_table(wording):
     out = []
     for line in wording.splitlines():
         cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
-        if len(cells) >= 3 and re.match(r"^[A-Z][A-Z_]+( \(|$)", cells[0]):
+        if len(cells) >= 3 and re.match(r"^[A-Z][A-Z_-]+( \(|$)", cells[0]):
             out.append(cells[0].split(" (")[0])
     return out
 
@@ -6156,15 +6156,19 @@ def _unpaired(safety, wording, keys):
     return bad
 
 
+REGISTER_ID = {"DECLINED_NO_ABSENCE_LINE": "DECLINED-NO-ABSENCE-LINE"}   # code constant -> signed id (ids may hold '-')
+
+
 def _refusal_keys():
-    return {"copy_refusal" if k.startswith("copy_refusal") else k for k in refusalcodes.codes()}
+    return {"copy_refusal" if k.startswith("copy_refusal") else REGISTER_ID.get(k, k) for k in refusalcodes.codes()}
 
 
 def test_every_refusal_line_signed_in_both_paired_files():
     safety = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
     wording = (SIGNED_DIR / "letters_refusals_WORDING.md").read_text()
     keys = _refusal_keys()
-    assert len(keys) == 44 and _unpaired(safety, wording, keys) == []
+    assert len(keys) == len(_register(wording, WORDING_REGISTER)) == len(_register(safety, SAFETY_REGISTER))  # counts off the files
+    assert _unpaired(safety, wording, keys) == []
 
 
 def test_line_in_only_one_register_fails(tmp_path):
@@ -6252,7 +6256,7 @@ def _signed_sources():
     signed = _signed_in_both()
     for k, t in refusalcodes.codes().items():
         if not k.startswith("copy_refusal"):
-            out[k] = (t, "letters_refusals_WORDING.md", signed.get(k))
+            out[REGISTER_ID.get(k, k)] = (t, "letters_refusals_WORDING.md", signed.get(REGISTER_ID.get(k, k)))
     return out
 
 
@@ -6316,8 +6320,10 @@ def test_header_count_check_fails_on_a_wrong_header(tmp_path):
                        capture_output=True, text=True)
     assert r.returncode == 1 and "header says 13 lines, 12 rows parsed" in r.stdout
     s = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
-    assert signed_header_count.problems(s) == []                              # register: 44 ids stated, 44 listed
-    assert len(signed_header_count.problems(s.replace("Physician), 44 ids", "Physician), 45 ids", 1))) == 1
+    assert signed_header_count.problems(s) == []                              # register: stated count == listed ids
+    n = int(re.search(r"Physician\), (\d+) ids", s).group(1))                # read off the file
+    assert n == len(_register(s, SAFETY_REGISTER))
+    assert len(signed_header_count.problems(s.replace(f"Physician), {n} ids", f"Physician), {n + 1} ids", 1))) == 1
 
 
 # ---------------------------------------------------------------- every signing file states its true count (15 Oct 11:16)
@@ -6326,3 +6332,171 @@ def test_every_signing_file_states_its_true_line_count():
     files = [f for d in paths.wording_dirs() for f in sorted(d.iterdir())
              if signing.FILE.match(f.name) and "DRAFT" not in f.name and "RETIRED" not in f.name]
     assert files and [p for f in files for p in signed_header_count.problems(f.read_text(), f.name)] == []
+
+
+# ---------------------------------------------------------------- declined items (severity 5, 15 Oct 12:05)
+# After a decline no letter may state the item is absent; it carries only the signed LT-DECLINED-* line.
+DECLINED_ALLERGY = ('[[declined]]\nitem = "allergy_any"\nsection = "allergies"\nsafety = true\nsensitive = false\nlines = []\n'
+                    'question = "Allergies to any medicine, food or other substance"\n'
+                    'question_plain = "do you have any allergies"\n')
+DECLINED_SMOKES = ('[[declined]]\nitem = "smokes"\nsection = "allergies"\nsafety = false\nsensitive = false\nlines = []\n'
+                   'question = "Smoking"\nquestion_plain = "do you smoke"\n')
+ABSENCE = ("No allergies were written", "none recorded", "not documented", "No known allergies", "[flag: field empty]",
+           "nil")
+
+
+def _about_allergies(md):
+    """The allergies section (either heading) plus any line naming allergies: where an absence line would sit."""
+    heads = {L.HEADINGS[a]["allergies"] for a in L.HEADINGS}
+    out, cur = [], False
+    for line in md.splitlines():
+        if line.startswith("## "):
+            cur = line[3:].split(" [flag:")[0].strip() in heads
+            out.append(line) if cur else None
+            continue
+        if cur or "allerg" in line.lower():
+            out.append(line)
+    return "\n".join(out).lower()
+
+
+def _status_row(k):
+    t = (SIGNED_DIR / "letters_status_lines_SIGNED.md").read_text()
+    return dict(re.findall(r"^\| (LT-[A-Z0-9-]+) \| [a-z]+ \| [^|]+ \| ([^|]*?) \|$", t, re.M))[k]
+
+
+def _declined_run(tmp_path, decl, audience, allergies=()):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    d = tmp_path / "declined.toml"
+    d.write_text(decl)
+    text = tpl(question="Please review.", problems=("cough",), meds=("paracetamol 1 g four times a day",),
+               allergies=allergies, actions=("review in 2 weeks, GP",))
+    args = ["--type", "discharge", "--declined", str(d)] + (
+        ["--to", "Patient", "--audience", "patient"] if audience == "patient" else ["--to", "GP"])
+    r, out = _run_t(tmp_path / "run", text, *args)
+    return r, out, (out / "letter.md").read_text() if (out / "letter.md").exists() else ""
+
+
+def test_declined_lines_copied_byte_exact_from_signed_status_file():
+    for k, v in L.DECLINED_LINES.items():
+        assert v == _status_row(k), k
+
+
+@pytest.mark.parametrize("allergies", [(), ("No known allergies",), ("nil",)])
+def test_patient_letter_after_safety_decline_carries_only_the_signed_line(tmp_path, allergies):
+    r, out, md = _declined_run(tmp_path, DECLINED_ALLERGY, "patient", allergies)
+    assert r.returncode == 0, r.stderr
+    want = _status_row("LT-DECLINED-PT-SAFETY").replace("[question plain wording]", "do you have any allergies")
+    assert want in md and not any(a.lower() in _about_allergies(md) for a in ABSENCE), md
+    assert md.count("You chose not to answer") == 1
+
+
+@pytest.mark.parametrize("allergies", [(), ("No known allergies",)])
+def test_gp_letter_after_safety_decline_has_no_absence_line(tmp_path, allergies):
+    r, out, md = _declined_run(tmp_path, DECLINED_ALLERGY, "gp", allergies)
+    assert r.returncode == 0, r.stderr
+    want = _status_row("LT-DECLINED-CLIN-SAFETY").replace("[question]", "Allergies to any medicine, food or other substance")
+    assert want in md and not any(a.lower() in _about_allergies(md) for a in ABSENCE), md
+
+
+def test_non_safety_decline_uses_the_plain_line(tmp_path):
+    r, out, md = _declined_run(tmp_path, DECLINED_SMOKES, "patient")
+    assert r.returncode == 0, r.stderr
+    assert _status_row("LT-DECLINED-PT").replace("[question plain wording]", "do you smoke") in md
+    assert "may ask you about this again" not in md
+
+
+@pytest.mark.parametrize("audience", ["patient", "gp"])
+@pytest.mark.parametrize("line", ["- No allergies were written in your notes. If you have any, tell your next doctor.",
+                                  "- none recorded.", "- Allergies not documented.", "- No known allergies",
+                                  "- Nil allergies.", "## Allergies [flag: field empty]"])
+def test_tamper_any_absence_line_for_a_declined_item_fails(tmp_path, audience, line):
+    r, out, md = _declined_run(tmp_path, DECLINED_ALLERGY, audience)
+    assert L.declined_absence_lines(md, L.load_declined(DECLINED_ALLERGY)) == []
+    i = md.index("chose not to") if "chose not to" in md else md.index("Safety alert")
+    j = md.index("\n", i)
+    bad = md[:j] + f"\n{line}" + md[j:] if not line.startswith("##") else md.replace("## Allergies", line, 1)
+    assert L.declined_absence_lines(bad, L.load_declined(DECLINED_ALLERGY)) != []
+
+
+def test_absence_line_from_the_builder_is_never_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(L, "_decline_lines", lambda name, audience: ["- none recorded."])
+    with pytest.raises(L.Refused, match="says something is absent"):
+        L.build(tpl(question="Please review.", problems=("cough",), allergies=(), actions=("review in 2 weeks, GP",)),
+                "discharge", "GP", declined=L.load_declined(DECLINED_ALLERGY))
+
+
+@pytest.mark.parametrize("bad", ['[[declined]]\nitem = "allergy_any"\n', DECLINED_ALLERGY.replace('"allergies"', '"spleen"'),
+                                 DECLINED_ALLERGY.replace("safety = true", 'safety = "yes"'), "not toml ["])
+def test_declined_file_broken_fails_closed(tmp_path, bad):
+    with pytest.raises(ValueError):
+        L.load_declined(bad)
+    r, out, md = _declined_run(tmp_path, bad, "gp")
+    assert r.returncode == 2 and not out.exists()
+
+
+# ---------------------------------------------------------------- severity 5 (2): declined sensitive question (15 Oct 12:05)
+DECLINED_MOOD = ('[[declined]]\nitem = "mh_q2"\nsection = "problems"\nsafety = false\nsensitive = true\nlines = ["L{n}"]\n'
+                 'question = "Low mood or loss of interest in the last two weeks"\n'
+                 'question_plain = "have you felt down or lost interest lately"\n')
+MOOD_TOPIC = ("mh_q2", "mood", "interest", "down", "mental", "depress", "two weeks", "lately")
+
+
+def _mood_run(tmp_path, audience, tamper=None, monkeypatch=None):
+    text = tpl(question="Please review.", problems=("cough", "low mood"), meds=("paracetamol 1 g four times a day",),
+               actions=("review in 2 weeks, GP",))
+    n = next(i for i, l in enumerate(text.splitlines(), 1) if "low mood" in l)
+    d = tmp_path / "declined.toml"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    d.write_text(DECLINED_MOOD.replace("{n}", str(n)))
+    args = ["--type", "discharge", "--declined", str(d)] + (
+        ["--to", "Patient", "--audience", "patient"] if audience == "patient" else ["--to", "GP"])
+    r, out = _run_t(tmp_path / "run", text, *args)
+    return r, out, n
+
+
+def shows_only_lid(template, refusal, question, plain):
+    """True when a template fills in {lid} and nothing else and the refusal names no part of the question."""
+    fields = {f for _, f, _, _ in string.Formatter().parse(template) if f is not None}
+    low = refusal.lower()
+    return fields == {"lid"} and question.lower() not in low and plain.lower() not in low \
+        and not any(w in low for w in MOOD_TOPIC)
+
+
+def test_sensitive_declined_refused_copied_byte_exact():
+    assert L.SENSITIVE_DECLINED_REFUSED == _signed_in_both()["SENSITIVE_DECLINED_REFUSED"]
+    assert L.DECLINED_NO_ABSENCE_LINE == _signed_in_both()["DECLINED-NO-ABSENCE-LINE"]
+
+
+def test_gp_letter_refuses_line_from_declined_sensitive_question(tmp_path):
+    r, out, n = _mood_run(tmp_path, "gp")
+    assert r.returncode != 0 and not (out / "letter.md").exists()
+    assert L.SENSITIVE_DECLINED_REFUSED.format(lid=f"L{n}") in r.stderr + r.stdout
+
+
+def test_sensitive_declined_refusal_shows_only_the_line_id(tmp_path):
+    r, out, n = _mood_run(tmp_path, "gp")
+    line = next(l for l in (r.stderr + r.stdout).splitlines() if "sensitive question" in l)
+    assert shows_only_lid(L.SENSITIVE_DECLINED_REFUSED, line, "Low mood or loss of interest in the last two weeks",
+                          "have you felt down or lost interest lately")
+
+
+@pytest.mark.parametrize("tampered", [
+    "Refused: line {lid} comes from a sensitive question ({question}) the patient chose not to answer. Nothing was written.",
+    "Refused: line {lid} ({item}) comes from a sensitive question. Nothing was written.",
+    "Refused: line {lid} about low mood comes from a sensitive question. Nothing was written.",
+])
+def test_tamper_sensitive_refusal_naming_question_or_topic_fails(tampered):
+    shown = tampered.format(lid="L5", question="Low mood or loss of interest in the last two weeks", item="mh_q2")
+    assert not shows_only_lid(tampered, shown, "Low mood or loss of interest in the last two weeks",
+                              "have you felt down or lost interest lately")
+
+
+def test_sensitive_declined_without_lines_present_still_writes_gp_letter(tmp_path):
+    d = DECLINED_MOOD.replace('lines = ["L{n}"]', "lines = []")
+    r, out, letter = _declined_run(tmp_path, d, "gp")
+    assert r.returncode == 0, r.stderr
+
+
+def test_bad_lines_field_in_declined_file_fails_closed(tmp_path):
+    r, out, letter = _declined_run(tmp_path, DECLINED_MOOD.replace('["L{n}"]', '["five"]'), "gp")
+    assert r.returncode == 2 and "--declined" in r.stderr and not letter
