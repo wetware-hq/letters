@@ -5359,7 +5359,8 @@ def test_combo_pack_line_signed_and_clinician_only():
     """COMBO_PACK_REFUSED was awaiting sign-off; Physician and Educator signed it on 14 Oct 2026 (also used when the
     list lacks source or sign-off). It stays clinician-only: no patient written-by-hand view of its own."""
     reg = _refusal_registry()
-    assert reg["COMBO_PACK_REFUSED"]["status"] == "signed" and reg["COMBO_PACK_REFUSED"]["text"] == L.COMBO_PACK_REFUSED
+    assert reg["COMBO_PACK_REFUSED"]["status"] == "signed" and reg["COMBO_PACK_REFUSED"]["text"] == L.COMBO_PACK_REFUSED \
+        == _signed_in_both()["COMBO_PACK_REFUSED"]                          # expected bytes from the signing files
     assert not [c for c in reg.values() if c["status"] not in ("signed", "held", "signed-earlier")]
     assert L.COMBO_PACK_REFUSED not in L.letter_by_hand(2)["patient"]
     assert not issubclass(type(Refused(L.COMBO_PACK_REFUSED)), L.ComboRefused)
@@ -6187,3 +6188,114 @@ def test_signing_file_row_counts_match_committed_numbers():
     want = tomllib.loads((HERE / "data" / "signed_counts.toml").read_text())
     got = len(_wording_table((SIGNED_DIR / "letters_refusals_WORDING.md").read_text()))
     assert got == want["letters_refusals_WORDING_table"], f"row count read off the file: {got}"
+
+
+# ---------------------------------------------------------------- signed sources (room ruling 15 Oct 10:18)
+import ast as _ast  # noqa: E402
+sys.path.insert(0, str(HERE))
+import signing  # noqa: E402
+import paths  # noqa: E402
+
+# Constants copied from a signing file, and where each one's single signed source is.
+SIGNED_LINE_NAMES = {"BY_HAND_LINES", "RUN_TRACES_NOT_RUN", "READER_ENDED_LINE", "COMBO_PACK_REFUSED", "DATE_REFUSED"}
+SOURCE_REFS = {"SIGNED_DIR", "reused_signed", "_signed_in_both", "_register", "_signed_sources"}
+CONTENT = re.compile(r"signed|exact|word_for_word|copied")
+
+
+def _reaches(fn):
+    return any((isinstance(n, _ast.Name) and n.id in SOURCE_REFS) or (isinstance(n, _ast.Attribute) and n.attr in SOURCE_REFS)
+               for n in _ast.walk(fn))
+
+
+def _compares_signed_constant(fn):
+    for n in _ast.walk(fn):
+        if isinstance(n, _ast.Compare) and any(isinstance(o, _ast.Eq) for o in n.ops):
+            names = {x.attr for x in _ast.walk(n) if isinstance(x, _ast.Attribute)} | \
+                    {x.id for x in _ast.walk(n) if isinstance(x, _ast.Name)}
+            if names & SIGNED_LINE_NAMES:
+                return True
+    return False
+
+
+# Behaviour checks that a refusal raised IS the constant (the constant's bytes are checked against the signing file by
+# test_every_resolved_line_comes_from_its_current_single_signed_source), not checks of the wording itself.
+BEHAVIOUR = {"test_c2_letters_refuses_to_run_without_a_signed_combination_list"}
+
+
+def guard_problems(fns):
+    """Signed-content tests (named as such, comparing a copied signed line) that never reach a signing file."""
+    return [n.name for n in fns if CONTENT.search(n.name) and n.name not in BEHAVIOUR and _compares_signed_constant(n)
+            and not _reaches(n)]
+
+
+def test_signed_content_tests_take_expected_from_signed_source():
+    fns = [n for n in _ast.parse((HERE / "test_letters.py").read_text()).body
+           if isinstance(n, _ast.FunctionDef) and n.name.startswith("test_")]
+    assert guard_problems(fns) == []
+
+
+def test_guard_catches_a_test_checking_a_file_against_itself():
+    bad = _ast.parse("def test_line_signed():\n    assert reg['DATE_REFUSED'] == L.DATE_REFUSED\n").body[0]
+    good = _ast.parse("def test_line_signed():\n    assert _signed_in_both()['DATE_REFUSED'] == L.DATE_REFUSED\n").body[0]
+    assert guard_problems([bad]) == ["test_line_signed"] and guard_problems([good]) == []
+
+
+def _signed_sources():
+    """{name: (code text, single signed source file name, signed bytes)} for every line letters resolves."""
+    fo = paths.reused_signed()
+    rows = signing.rows(fo.read_text())
+    w = (SIGNED_DIR / "letters_refusals_WORDING.md").read_text()
+    out = {k: (v, fo.name, rows.get(k)) for k, v in L.BY_HAND_LINES.items()}
+    out["RUN-TRACES-NOT-RUN"] = (L.RUN_TRACES_NOT_RUN, fo.name, rows.get("RUN-TRACES-NOT-RUN"))
+    out["CQ-LETTER-READER-ENDED"] = (L.READER_ENDED_LINE, "letters_refusals_WORDING.md",
+                                     re.findall(r'^CQ-LETTER-READER-ENDED: "(.*)"$', w, re.M)[-1])
+    signed = _signed_in_both()
+    for k, t in refusalcodes.codes().items():
+        if not k.startswith("copy_refusal"):
+            out[k] = (t, "letters_refusals_WORDING.md", signed.get(k))
+    return out
+
+
+@pytest.mark.needs_signed
+def test_every_resolved_line_comes_from_its_current_single_signed_source():
+    where = signing.sources(paths.wording_dirs())
+    stem = lambda name: signing.FILE.match(name).group(1)
+    for k, (code, src, signed) in _signed_sources().items():
+        assert code == signed, f"{k}: differs from {src}"                    # byte-exact
+        if "-" in k:                                                         # hyphenated ids: one signing set only
+            assert where.get(k) == [stem(src)], f"{k}: signed in {where.get(k)}"
+
+
+def _clean_runs(tmp_path):
+    c = _gcard(tmp_path / "card", ("SYNTH-GR-0003", "revoked", "1937-01-20"), regrant=True)
+    runs = [_rd(tmp_path / "a", "Copy to: Dr A. Synth\n", "--reader-id", "SYNTH-1001"),                   # by hand
+            _g(tmp_path / "b", c, "--grant-id", "SYNTH-GR-0003"),                                          # ended
+            _g(tmp_path / "c", c, "--grant-id", "SYNTH-GR-0004"),                                          # normal
+            _rd(tmp_path / "d", "Seen 1941-02-03.\n", "--reader-id", GP_ID),                               # refusal
+            _rd(tmp_path / "e", "Copy to: Dr A. Synth\n", "--reader-id", GP_ID)]
+    return [x for r, _ in runs for x in (r.stdout + r.stderr).splitlines() if x.strip()]
+
+
+OPENINGS = ("Refused:", "For a clinician", "Your care team", "Safety traces not run")
+
+
+@pytest.mark.needs_signed
+def test_clean_run_every_emitted_signed_line_matches_its_source(tmp_path):
+    pats = [signing.pattern(re.sub(r"\{[^}]*\}", "[x]", s)) for _, _, s in _signed_sources().values() if s]
+    lines = [x for x in _clean_runs(tmp_path) if x.startswith(OPENINGS)]
+    assert len(lines) >= 4
+    for x in lines:
+        assert any(p.match(x) for p in pats), f"emitted line not byte-exact to a signed line: {x!r}"
+    assert not any(p.match(lines[0] + " ") for p in pats)                   # one extra byte fails
+
+
+# ---------------------------------------------------------------- LT-PRIVACY-PT (room ruling 15 Oct 10:23)
+def test_patient_privacy_line_is_the_signed_status_row():
+    """PATIENT_PRIVACY is the signed LT-PRIVACY-PT row of letters_status_lines_SIGNED.md, byte-exact; the row count
+    read off the file matches the committed number. Fails, never skips, if the row is missing or differs."""
+    f = SIGNED_DIR / "letters_status_lines_SIGNED.md"
+    t = f.read_text()
+    rows = dict(re.findall(r"^\| (LT-[A-Z0-9-]+) \| [a-z]+ \| [^|]+ \| ([^|]*?) \|$", t, re.M))
+    want = tomllib.loads((HERE / "data" / "signed_counts.toml").read_text())["letters_status_lines_SIGNED"]
+    assert rows.get("LT-PRIVACY-PT") == L.PATIENT_PRIVACY                     # byte-exact
+    assert len(rows) == want, f"row count read off the file: {len(rows)}"

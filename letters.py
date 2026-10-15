@@ -1467,6 +1467,7 @@ def llm_guard():
 COPY_TAIL = ("This tool can't send copies. Write a separate letter for each reader, "
              "so nobody assumes someone was copied in when they weren't.")
 COPY_REFUSED = COPY_TAIL  # stable tail; the full message is "Refused: copy request <where>. " + COPY_TAIL
+# LT-PRIVACY-PT, letters_status_lines_SIGNED.md (Physician, 15 Oct 2026), byte-exact.
 PATIENT_PRIVACY = "This letter includes private details about your health. It's yours to share or keep private."
 COPY_WORDS = re.compile(r"(?<![\w])(?:cc|c\.c\.|copy|copies|copied)(?![\w])", re.I)
 COPY_LINE = re.compile(r"^\s*(?:\d{4}-\d{2}-\d{2}\s+)?(?:cc|c\.c\.|copy|copies|copied)(?:\s+to)?\s*:", re.I | re.M)
