@@ -1,3 +1,4 @@
 # Row counts read off the signing files, committed so a changed file is noticed (room ruling 15 Oct 09:51).
 # Change only together with a re-sign.
 letters_refusals_WORDING_table = 38   # Educator's id table; Physician's "Re-sign ... (letters_refusals_WORDING.md, 38 ids)"
+letters_status_lines_SIGNED = 12   # LT- rows; 12 with LT-PRIVACY-PT (was 11)

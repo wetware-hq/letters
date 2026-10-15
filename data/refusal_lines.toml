@@ -106,7 +106,7 @@ source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)
 
 [[code]]
 key = "DATE_REFUSED"
-text = "Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written.\nIf these are real notes, delete them and use synthetic data only."
+text = "Refused: line L{n} of the notes has a date outside 1 Jan 1930 to 31 Dec 1939. Nothing was written. If these are real notes, delete them and use synthetic data only."
 check = 1
 status = "signed"
 source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)"
