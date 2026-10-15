@@ -6299,3 +6299,22 @@ def test_patient_privacy_line_is_the_signed_status_row():
     want = tomllib.loads((HERE / "data" / "signed_counts.toml").read_text())["letters_status_lines_SIGNED"]
     assert rows.get("LT-PRIVACY-PT") == L.PATIENT_PRIVACY                     # byte-exact
     assert len(rows) == want, f"row count read off the file: {len(rows)}"
+
+
+# ---------------------------------------------------------------- stated line counts (room ruling 15 Oct 11:09)
+import signed_header_count  # noqa: E402  scripts/signed_header_count.py, standalone (copy as-is to other repos)
+
+
+def test_header_count_check_fails_on_a_wrong_header(tmp_path):
+    good = (SIGNED_DIR / "letters_status_lines_SIGNED.md").read_text()
+    assert signed_header_count.problems(good) == []                          # 12 lines stated, 12 rows
+    bad = tmp_path / "letters_status_lines_SIGNED.md"                         # a temp copy; the signed file is untouched
+    bad.write_text(good.replace("SIGNED by Physician, 12 lines", "SIGNED by Physician, 13 lines", 1))
+    assert signed_header_count.problems(bad.read_text(), bad.name) == \
+        ["letters_status_lines_SIGNED.md: header says 13 lines, 12 rows parsed"]
+    r = subprocess.run([sys.executable, str(HERE / "scripts" / "signed_header_count.py"), str(bad)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "header says 13 lines, 12 rows parsed" in r.stdout
+    s = (SIGNED_DIR / "letters_refusals_SAFETY.md").read_text()
+    assert signed_header_count.problems(s) == []                              # register: 44 ids stated, 44 listed
+    assert len(signed_header_count.problems(s.replace("Physician), 44 ids", "Physician), 45 ids", 1))) == 1
