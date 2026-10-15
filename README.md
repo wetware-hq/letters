@@ -153,3 +153,6 @@ that names someone to send the letter to. Don't edit clinical notes to get past 
 ## Checking notes against the template
 
 `python -m check_template <notes> [--brief brief.txt] [--not-copy L<n>]` (run from this folder) checks notes without writing a letter. It is not a second implementation: it runs the same copy, send and recipient checks and the same template parser (`from_template`) that every letter uses, in the same order. Exit 0 prints "Template check passed."; exit 2 prints the signed refusal with the line number. Nothing is written.
+
+- Not for use with real patients.
+- S05 and S07 were checked with a scripted stand-in, not a real AI model. The scripted runs show the checks catch the mistakes those two scenarios are for. They don't show how a real model behaves. Those tests are still to come.
