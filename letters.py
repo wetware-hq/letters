@@ -1737,6 +1737,27 @@ def refuse_combination_brands(text):
 
 
 # Signed lines (forms_orders_lines_SIGNED.md, round 12, Physician 14 Oct 2026), copied word for word.
+# Signed (forms_orders_lines_SIGNED.md). Shown in a view picked from the locale pack (LOCALE-AU-GUARDIAN-VIEW).
+VIEW_LINES = {
+    "PV-BEFORE-PROC": "Your care team will check this question with you before any treatment or procedure.",
+}
+VIEW_FILE = HERE / "locale" / LOCALE / "guardian_view.toml"
+
+
+def locale_view(rel, path=None):
+    """The signed lines a patient-side reader with this relationship sees, from the locale pack only. Fails closed
+    (ValueError) on a wrong key, an unknown line id or no view for the relationship; never a branch per role."""
+    v = tomllib.loads(pathlib.Path(path or VIEW_FILE).read_text(encoding="utf-8"))
+    if v.get("key") != f"LOCALE-{LOCALE.upper()}-GUARDIAN-VIEW" or not isinstance(v.get("shows"), list):
+        raise ValueError("locale view: key or shows missing")
+    if v.get("rel") != rel:
+        raise ValueError("locale view: no view for this relationship")
+    known = {**VIEW_LINES, **BY_HAND_LINES}
+    if not v["shows"] or any(k not in known or not k.startswith("PV-") for k in v["shows"]):
+        raise ValueError("locale view: unknown or non-patient line id")
+    return [(k, known[k]) for k in v["shows"]]
+
+
 BY_HAND_LINES = {
     "PV-LETTER-BY-HAND": "Your care team will write this letter for you themselves. You don't need to do anything.",
     "CQ-LETTER-BY-HAND": "For a clinician to write: this letter couldn't be made automatically (check [check_n]). "
@@ -1795,7 +1816,7 @@ def report_refusal(msg, patient, rc=2):
 
 
 READERS = tomllib.loads((HERE / "data" / "readers.toml").read_text(encoding="utf-8"))
-READER_ID = re.compile(r"SYNTH(?:-(?:REG|CARD|AG))?-\d{1,6}")
+READER_ID = re.compile(r"SYNTH(?:-(?:REG|CARD|AG))?-\d{1,6}|SYNTH-PERSON-[A-Z]\d{1,4}[A-Z]?")
 CARDS_DIR = pathlib.Path(os.environ.get("LETTERS_CARDS_DIR", HERE.parent / "cards"))
 
 
@@ -1839,6 +1860,10 @@ def reader_grants(card, reader_ids, grant_ids, now):
     for r in holders:
         mine = [g for g in gids if grants[g]["agent_id"] == r]
         if not mine:
+            held = [_cards().grant_state(card, g, now) for g, v in grants.items() if v.get("agent_id") == r]
+            if held and all(st in ("revoked", "expired") for st in held):
+                ended = True                             # every grant this reader held has ended: never the normal route
+                continue
             return "no grant id", ()
         for g in mine:
             st = _cards().grant_state(card, g, now)
@@ -3219,6 +3244,9 @@ def _main(argv=None):
         card = load_patient_card(a.card) if a.card else None
     except Exception:
         card = None                                              # a card that can't be read: grants unknown
+    to_id = (a.to or "").strip()
+    if READER_ID.fullmatch(to_id) and to_id not in [r.strip() for r in a.reader_id]:
+        a.reader_id = [to_id] + a.reader_id                     # --to by reader id: same grant-id rules, no names
     route, cleared = reader_grants(card, a.reader_id, a.grant_id, a.now)
     if route == "ended":                                         # CQ-LETTER-READER-ENDED: nothing written
         print(READER_ENDED_LINE, file=sys.stderr)
@@ -3227,6 +3255,9 @@ def _main(argv=None):
         return report_refusal(f"Grant: {route}.", True)
     patient_req = bool(needs_hand(a.to, a.audience, True, n_readers, a.reader_id, text, card, cleared)) \
         or bool(a.card and card is None)
+    why = needs_hand(a.to, a.audience, True, n_readers, a.reader_id, text, card, cleared)
+    if READER_ID.fullmatch(to_id) and why:                       # --to by id that doesn't resolve to a normal reader
+        return report_refusal(f"Reader: {why}.", True)
     try:
         not_copy = []
         for x in a.not_copy:

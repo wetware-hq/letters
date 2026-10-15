@@ -16,6 +16,7 @@ functions = [
   { name = "report_refusal", rows = [2, 18] },
   { name = "needs_hand", rows = [2, 18] },
   { name = "reader_grants", rows = [2, 18] },
+  { name = "locale_view", rows = [2, 18] },
   { name = "_cards", rows = [2, 18] },
   { name = "acts_for_patient", rows = [2, 18] },
   { name = "brief_readers", rows = [2, 18] },
