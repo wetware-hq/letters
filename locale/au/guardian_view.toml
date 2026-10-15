@@ -3,4 +3,4 @@
 key = "LOCALE-AU-GUARDIAN-VIEW"
 rel = "guardian"
 role_label = "REL-GUARDIAN-PT"
-shows = ["PV-BEFORE-PROC", "PV-LETTER-BY-HAND"]
+shows = ["PV-ANS-SDM", "PV-BEFORE-PROC", "PV-LETTER-BY-HAND"]

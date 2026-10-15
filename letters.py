@@ -6,6 +6,7 @@ Every body sentence carries the ids of the note lines it came from, and a checke
 refuses any letter that states something those lines do not support.
 """
 import argparse, os, pathlib, re, sys, tomllib
+import clock
 from collections import OrderedDict
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -959,6 +960,8 @@ def render_section(name, st, audience):
     if not body:
         if name in _EMPTY_FIELDS:
             body = [f"- {EMPTY_PATIENT.get(name, NONE_RECORDED) if audience == 'patient' else NONE_RECORDED}"]
+        elif name == "med_changes" and audience == "patient":
+            return None                                  # Physician 15 Oct: never 'No medicine changes documented.'
         elif name in EMPTY:
             body = [f"- {EMPTY[name]}"]
         else:
@@ -1740,6 +1743,7 @@ def refuse_combination_brands(text):
 # Signed (forms_orders_lines_SIGNED.md). Shown in a view picked from the locale pack (LOCALE-AU-GUARDIAN-VIEW).
 VIEW_LINES = {
     "PV-BEFORE-PROC": "Your care team will check this question with you before any treatment or procedure.",
+    "PV-ANS-SDM": "[relationship] answered for you, recorded by your care team on [date].",
 }
 VIEW_FILE = HERE / "locale" / LOCALE / "guardian_view.toml"
 
@@ -1851,6 +1855,7 @@ def reader_grants(card, reader_ids, grant_ids, now):
     holders = [r for r in ids if acts_for_patient(card, r)]
     if not holders and not gids:
         return None, ()
+    now = clock.today(now)                               # the approved clock; unset raises RF-CLOCK-UNSET
     if card is None or not SCENARIO_DATE.fullmatch(now or ""):
         return "grant data unreadable", ()
     grants, ended, cleared = card.get("grants", {}), False, []
@@ -3243,7 +3248,11 @@ def _main(argv=None):
     to_id = (a.to or "").strip()
     if READER_ID.fullmatch(to_id) and to_id not in [r.strip() for r in a.reader_id]:
         a.reader_id = [to_id] + a.reader_id                     # --to by reader id: same grant-id rules, no names
-    route, cleared = reader_grants(card, a.reader_id, a.grant_id, a.now)
+    try:
+        route, cleared = reader_grants(card, a.reader_id, a.grant_id, a.now)
+    except clock.ClockUnset as e:                                # staff-only line: stderr, nothing written
+        print(e.text, file=sys.stderr)
+        return 2
     if route == "ended":                                         # CQ-LETTER-READER-ENDED: nothing written
         print(READER_ENDED_LINE, file=sys.stderr)
         return 2

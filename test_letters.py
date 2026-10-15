@@ -6604,3 +6604,15 @@ def test_broken_guardian_view_fails_closed(tmp_path, edit):
 def test_no_guardian_branch_in_code():
     src = (HERE / "letters.py").read_text()
     assert not re.search(r"==\s*[\"']guardian[\"']", src)
+
+
+def test_patient_letters_never_say_no_medicine_changes_documented():
+    """Physician 15 Oct 16:00: patient letters only; the GP letter keeps the line."""
+    t = "SYNTH-9\n1937-01-01 Seen today."
+    assert "No medicine changes documented." not in make_letter(t, "discharge", "Patient", audience="patient")
+    assert "No medicine changes documented." in make_letter(t, "gp-update", "GP")
+
+
+def test_guardian_view_shows_pv_ans_sdm():
+    assert dict(L.locale_view("guardian"))["PV-ANS-SDM"] == \
+        "[relationship] answered for you, recorded by your care team on [date]."
