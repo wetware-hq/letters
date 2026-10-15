@@ -1,0 +1,6 @@
+# Guardian view, locale pack au (S13). Which signed lines a patient-side guardian sees, read from data only:
+# no specialty or guardian branch in code. Line text comes from the single signed source (forms_orders_lines_SIGNED.md).
+key = "LOCALE-AU-GUARDIAN-VIEW"
+rel = "guardian"
+role_label = "REL-GUARDIAN-PT"
+shows = ["PV-BEFORE-PROC", "PV-LETTER-BY-HAND"]

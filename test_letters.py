@@ -6500,3 +6500,105 @@ def test_sensitive_declined_without_lines_present_still_writes_gp_letter(tmp_pat
 def test_bad_lines_field_in_declined_file_fails_closed(tmp_path):
     r, out, letter = _declined_run(tmp_path, DECLINED_MOOD.replace('["L{n}"]', '["five"]'), "gp")
     assert r.returncode == 2 and "--declined" in r.stderr and not letter
+
+# ---------------------------------------------------------------- S13: --to by reader id; guardian view (15 Oct)
+S13_CARD = '''[header]
+card_id = "SYNTH-CARD-1300"
+kind = "patient"
+display_name = "C. Thirteen"
+person_name = "C. Thirteen"
+role = "patient"
+scope = ["read", "check", "draft"]
+issued = "1936-01-02"
+expires = "1936-12-31"
+episode_id = "SYNTH-EP-1300"
+''' + "".join(f'''
+[[grant]]
+grant_id = "{g}"
+agent_id = "{a}"
+agent_name = "Guardian"
+categories = ["general"]
+granted = "1936-01-02"
+rel = "guardian"
+person_name = "G. Thirteen"
+''' for g, a in (("SYNTH-GR-1301", "SYNTH-PERSON-G13"), ("SYNTH-GR-1304", "SYNTH-PERSON-G13R"))) + '''
+[[grant_event]]
+grant_id = "SYNTH-GR-1301"
+event = "granted"
+at = "1936-01-02"
+
+[[grant_event]]
+grant_id = "SYNTH-GR-1304"
+event = "granted"
+at = "1936-01-02"
+
+[[grant_event]]
+grant_id = "SYNTH-GR-1304"
+event = "revoked"
+at = "1936-03-01"
+'''
+
+
+def _to(tmp_path, to, *extra):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    c = tmp_path / "card.toml"
+    c.write_text(S13_CARD)
+    n = tmp_path / "n.txt"
+    n.write_text((TPL / "chest_pain.txt").read_text())
+    out = tmp_path / "o"
+    r = subprocess.run(CLI + [str(n), "--type", "discharge", "--to", to, "--card", str(c), "--now", "1936-03-09",
+                              *extra, "--out", str(out)], capture_output=True, text=True)
+    return r, out
+
+
+def test_to_guardian_reader_id_takes_by_hand_route(tmp_path):
+    _by_hand(*_to(tmp_path, "SYNTH-PERSON-G13"))
+
+
+def test_to_guardian_with_revoked_grant_reader_ended_never_normal(tmp_path):
+    r, out = _to(tmp_path, "SYNTH-PERSON-G13R")
+    assert r.returncode == 2 and not out.exists() and L.READER_ENDED_LINE in r.stderr
+
+
+def test_to_guardian_with_revoked_grant_id_given_reader_ended(tmp_path):
+    r, out = _to(tmp_path, "SYNTH-PERSON-G13R", "--grant-id", "SYNTH-GR-1304")
+    assert r.returncode == 2 and not out.exists() and L.READER_ENDED_LINE in r.stderr
+
+
+def test_to_unknown_person_id_by_hand_never_name_matched(tmp_path):
+    _by_hand(*_to(tmp_path, "SYNTH-PERSON-G13X"))
+
+
+def test_to_name_still_normal_route(tmp_path):
+    r, out = _to(tmp_path, "GP")
+    assert r.returncode == 0, r.stderr
+
+
+def test_guardian_view_key_shows_pv_before_proc_from_locale_pack():
+    v = dict(L.locale_view("guardian"))
+    assert v["PV-BEFORE-PROC"] == "Your care team will check this question with you before any treatment or procedure."
+    assert "PV-LETTER-BY-HAND" in v
+    assert tomllib.loads(L.VIEW_FILE.read_text())["key"] == "LOCALE-AU-GUARDIAN-VIEW"
+
+
+@pytest.mark.needs_signed
+def test_view_lines_byte_exact_from_single_signed_source():
+    rows = signing.rows(paths.reused_signed().read_text())
+    for k, v in L.VIEW_LINES.items():
+        assert rows[k] == v, k
+
+
+@pytest.mark.parametrize("edit", [('key = "LOCALE-AU-GUARDIAN-VIEW"', 'key = "LOCALE-AU-OTHER"'),
+                                  ('"PV-BEFORE-PROC", ', '"PV-NOT-SIGNED", '),
+                                  ('"PV-BEFORE-PROC", ', '"CQ-BEFORE-PROC", '),
+                                  ('rel = "guardian"', 'rel = "sdm"')])
+def test_broken_guardian_view_fails_closed(tmp_path, edit):
+    p = tmp_path / "v.toml"
+    p.write_text(L.VIEW_FILE.read_text().replace(*edit))
+    with pytest.raises(ValueError):
+        L.locale_view("guardian", p)
+
+
+def test_no_guardian_branch_in_code():
+    src = (HERE / "letters.py").read_text()
+    assert not re.search(r"==\s*[\"']guardian[\"']", src)
