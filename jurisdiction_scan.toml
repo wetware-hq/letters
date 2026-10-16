@@ -15,6 +15,15 @@ J-GP       = '\bGPs?\b'
 J-CURRENCY = 'A\$|\bAUD\b'
 J-JOBTITLE = '\b(VMO|CMO|CNC|CNE|JMO|Nurse Unit Manager|RMO|SRMO)\b(?! *=)'
 
+# Prompt leak (check id SCAN-PROMPT-LEAK, one sub-id per group). Signer role words such as 'Physician' are allowed.
+"SCAN-PROMPT-LEAK/names"     = '\bBI[O] (Engineer|Physician|Patient|Educator|Director|Scientist)\b|\bMasterchief\b|\bGrok Bot\b|\bthe room\b|\bCaptain ?Cook\b|(?i:captaincook)'
+"SCAN-PROMPT-LEAK/persona"   = '\bYou are\b|(?i:\byou are a\b)|(?i:\bsystem prompt\b)|\bsubagent\b|\bexecutor\b'
+"SCAN-PROMPT-LEAK/paths"     = '/hom[e]/box\b|/workspac[e]/tmp\b'
+"SCAN-PROMPT-LEAK/tokens"    = '\b(WARD_GH_TOKEN|WARD_MODEL_API_KEY|MODAL)\b'
+"SCAN-PROMPT-LEAK/people"    = '\b(Mathew|Chu)\b|(?i:mchu001)'
+"SCAN-PROMPT-LEAK/email"     = '(?<![\w.+-])(?!hellowetware@gmail\.com\b)[\w.+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]+'
+"SCAN-PROMPT-LEAK/directive" = 'SYSTEM DIRECTIVE|%PURGE'
+
 [planted]
 J-COUNTRY  = "Australia"
 J-STATE    = "NSW"
@@ -26,6 +35,14 @@ J-PROGRAM  = "REACH"
 J-GP       = "GP"
 J-CURRENCY = "A$5"
 J-JOBTITLE = "VMO"
+
+"SCAN-PROMPT-LEAK/names"     = "signed in the room"
+"SCAN-PROMPT-LEAK/persona"   = "system prompt"
+"SCAN-PROMPT-LEAK/paths"     = "\u002Fhome\u002Fbox\u002Fx"
+"SCAN-PROMPT-LEAK/tokens"    = "WARD_GH_TOKEN"
+"SCAN-PROMPT-LEAK/people"    = "mchu001"
+"SCAN-PROMPT-LEAK/email"     = "someone@example.org"
+"SCAN-PROMPT-LEAK/directive" = "%PURGE"
 
 [exceptions]
 # ids only: signed/pinned ids that keep a local word until the next version
@@ -85,3 +102,38 @@ reason = "tests of the example profile's signed GP shorthand/plain-word mapping,
 term = "Australian"
 path = "^wordlists/SCOWL\\-COPYRIGHT$"
 reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "Brian.Kelk@cl.cam.ac.uk"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "biljir@pobox.com"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "grady@netcom.com"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "grady@northcoast.com"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "ross@bryson.demon.co.uk"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "thegrendel@theriver.com"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "executor"
+path = "^wordlists/english\\.txt$"
+reason = "third-party English word list (SCOWL), not project wording (2 uses)"

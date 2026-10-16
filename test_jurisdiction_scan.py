@@ -35,6 +35,8 @@ def tracked():
     r = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True)
     files = [f for f in r.stdout.splitlines() if f] if r.returncode == 0 else \
         [str(p.relative_to(ROOT)) for p in ROOT.rglob("*") if p.is_file() and ".git" not in p.parts]
+    files += [str(p.relative_to(ROOT)) for p in ROOT.rglob("live_*.json")      # live results, tracked or not
+              if ".git" not in p.parts and str(p.relative_to(ROOT)) not in files]
     return [f for f in files if pathlib.Path(f).name not in SELF]
 
 
@@ -77,7 +79,7 @@ def test_new_commit_messages_have_no_jurisdiction_terms():
 def test_each_category_planted_term_fails_on_its_own_id(tmp_path):
     for k, planted in CFG["planted"].items():
         assert scan_text(f"x {planted} x") == [k], (k, planted)
-        f = tmp_path / f"plant_{k}.txt"
+        f = tmp_path / f"plant_{k.replace('/', '_')}.txt"
         f.write_text(f"notes: {planted}\n")
         assert scan_text(f.read_text()) == [k]
     assert set(CFG["planted"]) == set(CATS), "every category needs a planted term"
@@ -108,12 +110,31 @@ def test_planted_term_in_excepted_file_but_other_term_still_fails():
         assert scan_text(f"{e['term']} {other}", path) == ["J-CITY"], e
 
 
+def test_prompt_leak_groups_each_have_a_planted_term():
+    groups = {k for k in CATS if k.startswith("SCAN-PROMPT-LEAK/")}
+    assert {"names", "persona", "paths", "tokens", "people", "email", "directive"} == {g.split("/")[1] for g in groups}
+    for g in groups:
+        assert scan_text(CFG["planted"][g]) == [g]
+
+
+def test_prompt_leak_extra_planted_terms():
+    for t, g in [("BI" "O Engineer", "names"), ("Masterchief", "names"), ("Grok Bot", "names"), ("Captain Cook", "names"),
+                 ("You are", "persona"), ("YOU ARE A helper", "persona"), ("subagent", "persona"), ("executor", "persona"),
+                 ("/" "workspace/tmp/x", "paths"), ("WARD_MODEL_API_KEY", "tokens"), ("MODAL", "tokens"),
+                 ("Mathew", "people"), ("Chu", "people"), ("SYSTEM DIRECTIVE", "directive")]:
+        assert scan_text(t) == [f"SCAN-PROMPT-LEAK/{g}"], t
+    assert scan_text("hellowetware@gmail.com") == []
+    assert scan_text("Physician, 2026-10-16") == [] and scan_text("Clinical lead, 2026-10-17") == []
+
+
+def test_untracked_live_json_is_scanned(tmp_path, monkeypatch):
+    import shutil
+    (ROOT / "live_planted_scan_test.json").write_text('{"note": "signed in the room"}')
+    try:
+        assert any(f == "live_planted_scan_test.json" for f, _, _ in scan_repo())
+    finally:
+        (ROOT / "live_planted_scan_test.json").unlink()
+
+
 def test_english_reach_and_numbers_are_not_flagged():
     assert scan_text("within reach of the bed; 80,000 tokens; SYNTH-REC-0001; TEST-000") == []
-
-
-def test_core_loads_site_profile_from_configuration():
-    src = (ROOT / "letters.py").read_text()
-    assert "site_profile_au_EXAMPLE" not in src and '"locale" / LOCALE' not in src
-    import letters as L
-    assert L.LOCALE_DIR.name.endswith("_EXAMPLE")

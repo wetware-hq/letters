@@ -25,7 +25,7 @@ Until lifted, the 5 strict xfail tests that rely on these brands stay as they ar
 
 
 ## Refusal lines (room rulings, 14-15 Oct 2026)
-Sources (read-only, the room's signed files): letters_refusals_SAFETY.md (Physician) and letters_refusals_WORDING.md (Educator).
+Sources (read-only, the signed files): letters_refusals_SAFETY.md (Physician) and letters_refusals_WORDING.md (Educator).
 Registry: data/refusal_lines.toml (44 codes).
 
 - Signed in both files and used word for word: 38 ids (KEEP_OUT_ARG covers 2 sites) plus copy_refusal (both endings).
