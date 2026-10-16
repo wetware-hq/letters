@@ -121,3 +121,32 @@ def test_coversyl_renders_generic_first():
 def test_made_up_brand_in_unknown_test_is_on_no_list():
     import letters as L
     assert "velbrintax" not in L.drug_names() and not D.allowed("velbrintax")
+
+
+def test_penicillin_as_medicine_order_fails_allergy_only_even_though_listed():
+    import tomllib
+    d = tomllib.loads((HERE / "data" / "drug_allowlist.toml").read_text())
+    assert "penicillin" in d["names"] and "penicillin" in d["allergy_only"]      # on both: allergy-only wins
+    assert D.check_line("penicillin 500 mg four times daily", field="Medicines", is_order=True) == [D.CLASS_ALLERGY_ONLY]
+    assert D.check_line("penicillin (rash 1936)", field="Allergies") == []
+
+
+def test_core_treats_coversyl_as_unknown_alias_only_in_example_profile():
+    import letters as L
+    core = (HERE / "drugs.txt").read_text().lower() + (HERE / "data" / "drug_allowlist.toml").read_text().lower()
+    assert "coversyl" not in core and not D.allowed("coversyl")
+    hits = [p for p in HERE.rglob("*") if p.is_file() and ".git" not in p.parts and "__pycache__" not in p.parts
+            and p.suffix in (".txt", ".toml") and "coversyl" in p.read_text(errors="ignore").lower()]
+    assert hits == [L.LOCALE_DIR / "drug_aliases.txt"] and L.LOCALE_DIR.name.endswith("_EXAMPLE")
+
+
+def test_without_the_example_alias_coversyl_is_unknown(tmp_path):
+    import shutil, subprocess, sys, letters as L
+    prof = tmp_path / "profile"; shutil.copytree(L.LOCALE_DIR, prof)
+    a = prof / "drug_aliases.txt"
+    a.write_text("\n".join(l for l in a.read_text().splitlines() if not l.lower().startswith("coversyl")) + "\n")
+    code = "import letters as L; print('coversyl' in L.drug_names(), L.needs_flag('Coversyl'))"
+    r = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, text=True,
+                       env={**__import__("os").environ, "LETTERS_SITE_PROFILE": str(prof)})
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.split()[0] == "False"
