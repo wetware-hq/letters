@@ -1,7 +1,7 @@
 ---
 schema: wetware.agent.v1
 resource: letters
-version: 0.1.0
+version: 0.2.0
 capabilities: [draft]
 inputs:
   notes: {type: text, constraint: "synthetic only: SYNTH- ids, 1937 dates"}
@@ -11,6 +11,13 @@ inputs:
 outputs:
   letter: {type: markdown, constraint: "unsigned draft"}
   dropped: {type: screen, constraint: "never written to disk"}
+interface:
+  cli: letters.py
+  flags: ["--resolve ABBR=meaning", "--final"]
+  exit: {0: written, 2: refused, nothing written}
+settings: [LETTERS_TRUTH, TRUTH_DIR, WORDING_DIRS, REUSED_SIGNED, LETTERS_CARDS_DIR, LETTERS_CLOCK, LETTERS_SCENARIO_CLOCK, LETTERS_LOCAL]
+model_calls: none   # LETTERS_LLM_PROVIDER set -> exit
+used_by: {repo: wetware-hq/ward, layer: endware}
 ---
 
 # Agent contract
@@ -24,8 +31,11 @@ Normative rules for agents that operate or modify letters. Wording uses RFC 2119
 3. The dropped list **MUST NOT** be written to disk, bundled into the letter, or kept after the run.
 4. The output folder **MUST** hold only `letter.md`.
 5. Every message **MUST** give line numbers only, never note text or the brief.
+6. An agent **MUST NOT** set `LETTERS_LLM_PROVIDER`; letters makes no model calls in this version.
 
-## Pipeline
+## Operating the environment
+
+### Pipeline
 
 1. Read: number every note line (L1, L2…); refuse non-synthetic input.
 2. Record: keep the latest state per problem, medicine, result, allergy and plan, with source lines; handle negation and reversal; keep "?" and "possible" as uncertain.
@@ -34,11 +44,11 @@ Normative rules for agents that operate or modify letters. Wording uses RFC 2119
 5. Write from templates in plain style; add back any required section a template lacks.
 6. Check: every sentence **MUST** cite source lines; refuse any number, medicine, date or diagnosis not in them, and any added certainty.
 
-## Never cut
+### Never cut
 
 Allergies with reaction; full current medication list; reason for each change; pending results with owner; follow-up actions with owner and date. Missing items **MUST** read "not documented" (allergy reaction: "reaction not documented").
 
-## Writing
+### Writing
 
 - Abbreviations **MUST** stay as written and be flagged, unless listed in `single_meaning.toml` (each entry signed off by the clinical reviewer; patient letters use its signed plain-words version). Anything that may be an abbreviation **MUST** be flagged: any case variant of a listed entry, any word of two or more letters in capitals or with an inner capital, any entry in `shorthand.txt` (clinician-reviewed) that has no signed plain words (round 11: nocte, mane, prn and exact `single_meaning.toml` entries are not flagged), the single letter u/U, and any word not in the committed English or medical word lists (checksummed; drug names included). Inside a medicine reason, ordinary English (in the word lists) is kept as written with no flag and never gets the misspelling flag; every rule above still applies there, so shorthand with more than one meaning (MS, PE, CP, RA, IV, case variants) stays flagged. Only shorthand with exactly one signed meaning is exempt. The 'no signed plain words' reason flag fires only for shorthand with no signed plain words. A clinician closes a flag with `--resolve "ABBR=meaning"`, which becomes a cited source. `--final` **MUST** refuse while any flag is open, and **MUST** strip source tags only.
 - Trends **MUST** be values with dates, never a direction.
@@ -47,7 +57,7 @@ Allergies with reaction; full current medication list; reason for each change; p
 - Every letter **MUST** end with an unsigned clinician block and "Draft: check against the record before sending."
 - Branded drafts **MUST** show "DRAFT, unsigned" beside the logo.
 
-## Sensitive items
+### Sensitive items
 
 - Items (HIV status, psychiatric history, PrEP) and their linked terms **MUST** come from `linked_terms.toml` version 2, frozen and checked against `LINKED_TERMS.SHA256`. Changes **MUST** have fresh sign-off from the clinical reviewer.
 - A refuse-level term, linked medicine or linked brand anywhere in the notes **MUST** mark its item, even with no diagnosis written. Flag-only words **MUST NOT** mark an item.
@@ -60,7 +70,7 @@ Allergies with reaction; full current medication list; reason for each change; p
 - "reason not included" **MUST** mean a reason was in the notes and cut on purpose; "reason not documented" **MUST** mean the notes gave none. Never both. letters **MUST NOT** invent a reason.
 - A listed brand with no generic **MUST** be refused only when its item was cut. An unknown drug name **MUST** be flagged for spelling.
 
-## Checks
+### Checks
 
 - Allergy: "reaction not documented" only when nothing follows the drug name; otherwise flag the extra wording. A reaction or follow-up owner the letter would leave out **MUST** be refused.
 - Pending: a test is pending only if no later line gives a result; it **MUST** appear in the pending section with its owner. A letter saying none are pending while one is **MUST** be refused. Owner wording **MUST** be flagged.
@@ -78,6 +88,7 @@ Allergies with reaction; full current medication list; reason for each change; p
 
 ## Out of scope
 
+- Signing wording, word lists or linked terms
 - Real notes, signing, sending, or storing letters
 - Hosted services or vendor APIs
 - Clinical advice
