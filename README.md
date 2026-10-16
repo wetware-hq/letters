@@ -104,8 +104,8 @@ python letters.py fixtures/template/podiatry_referral.txt --brief "referral to p
   --template templates/minimal.md --brand brands/example-clinic --out out/
 python letters.py fixtures/template/pneumonia_admission.txt --brief "discharge to GP" \
   --resolve "SOB=shortness of breath" --resolve "GP=general practitioner" \
-  --final   # refused while any flag is open
-python letters.py --heldout ../heldout-notes   # folder outside this repo; prints counts only
+  --final   # every flag resolved, so --final runs (it refuses while any flag is open)
+python letters.py --heldout /path/outside/this/repo   # your own synthetic test notes; refused inside the repo; prints counts only
 ```
 
 `--final` removes source tags only. The draft mark stays until the signing clinician removes it.
@@ -124,7 +124,7 @@ Regression tests plant each failure: an unsourced fact, a stopped medicine, a ne
 
 MIT.
 
-## Notes template (round 10)
+## Notes template
 
 `letters` reads notes only in this fixed template. Fields start a line, in this order, and every heading must be there:
 
