@@ -32,11 +32,6 @@ J-JOBTITLE = "VMO"
 ids = ['\bLT-REACH-[A-Z]+-PT\b', '\bLT-OWNWORDS-ASK-GP-PT\b', '\bGP-LETTER-NO-SOURCE\b']
 
 [[exceptions.term]]
-term = "GP"
-path = "^data/check14_derived_cases\\.toml$"
-reason = "derived trace inputs use the example profile's reader word; changing it changes the pinned check-14 trace (1 uses)"
-
-[[exceptions.term]]
 term = "AHPRA"
 path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
 reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
@@ -84,7 +79,7 @@ reason = "HELD for Physician: signed list header cites its source agency (proven
 [[exceptions.term]]
 term = "GP"
 path = "^test_letters\\.py$"
-reason = "tests exercise the example profile's local reader, owner and plain words (389 uses)"
+reason = "tests of the example profile's signed GP shorthand/plain-word mapping, GP abbreviation resolve and single-word reader/owner parsing; other uses neutralised (37 uses)"
 
 [[exceptions.term]]
 term = "Australian"
