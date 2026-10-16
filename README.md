@@ -21,6 +21,12 @@ Some things are never cut:
 | pending results and who follows them up | "not documented" |
 | follow-up actions, with who and by when | "not documented" |
 
+---
+
+## Engineering specification
+
+Settings read: `LETTERS_TRUTH`/`TRUTH_DIR` (scenario answer files), `WORDING_DIRS`, `REUSED_SIGNED` (signed wording), `LETTERS_CARDS_DIR`, `LETTERS_CLOCK`, `LETTERS_SCENARIO_CLOCK`, `LETTERS_LOCAL`. If `LETTERS_LLM_PROVIDER` is set, letters exits: it makes no model calls. The ward runs letters as its CLI.
+
 ## Contract
 
 | Slot | Direction | Type |
