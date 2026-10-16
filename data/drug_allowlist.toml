@@ -1,0 +1,6 @@
+# Closed allowlist of drug names our synthetic scenarios may use in the core: each one hand-checked by Physician as
+# its generic name. Nothing imported from WHO, SNOMED or AMT. EMPTY until Physician signs it
+# (draft for review kept outside the repo). An empty or unsigned list allows nothing: unknown names fail by default.
+status = "unsigned"
+signed_by = ""
+names = []

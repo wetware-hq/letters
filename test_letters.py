@@ -1244,7 +1244,7 @@ def test_pending_without_owner_still_not_documented():
 
 # ---------- brief parser ----------
 BRIEF_MSG = ('Refused: brief not understood. Write it as "<kind> to <reader>", for example '
-             '"discharge to GP" or "update to patient".')
+             '"discharge to family doctor" or "update to patient".')
 
 
 @pytest.mark.parametrize("brief,kind,reader", [

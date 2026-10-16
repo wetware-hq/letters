@@ -5,7 +5,7 @@ version: 0.2.0
 capabilities: [draft]
 inputs:
   notes: {type: text, constraint: "synthetic only: SYNTH- ids, 1937 dates"}
-  brief: {type: text, form: "<kind> to <reader>", example: "discharge to GP"}
+  brief: {type: text, form: "<kind> to <reader>", example: "discharge to family doctor"}
   template: {type: file, optional: true}
   brand: {type: directory, optional: true, constraint: "example brand only in repo"}
 outputs:
@@ -61,7 +61,7 @@ Allergies with reaction; full current medication list; reason for each change; p
 
 - Items (HIV status, psychiatric history, PrEP) and their linked terms **MUST** come from `linked_terms.toml` version 2, frozen and checked against `LINKED_TERMS.SHA256`. Changes **MUST** have fresh sign-off from the clinical reviewer.
 - A refuse-level term, linked medicine or linked brand anywhere in the notes **MUST** mark its item, even with no diagnosis written. Flag-only words **MUST NOT** mark an item.
-- If the brief is silent, a marked item **MUST** be cut for every reader except the patient, including the GP. `include: <item>` keeps it, and letters **MUST** print "Included by the brief: <item>." on screen, naming the item only. letters cannot check consent; that stays with the signing clinician.
+- If the brief is silent, a marked item **MUST** be cut for every reader except the patient, including the family doctor. `include: <item>` keeps it, and letters **MUST** print "Included by the brief: <item>." on screen, naming the item only. letters cannot check consent; that stays with the signing clinician.
 - Non-medication lines: a sentence holding a linked term **MUST** be left out and flagged by line number.
 - Medication lines: drug, dose and frequency **MUST** stay; a brand **MUST** become its generic; only the part holding the term is left out, and flagged. If the drug would disappear, the letter **MUST** be refused.
 - A medicine linked to a cut item **MUST** be flagged. A multi-meaning word **MUST** be flagged only when its item was cut.

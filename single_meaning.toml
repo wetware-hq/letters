@@ -1,7 +1,7 @@
 # Reviewed single-meaning abbreviations: ones with exactly one meaning in every specialty.
 # Only these are spelled out automatically; every other abbreviation is kept as written and flagged.
 # Matching is case-sensitive: "bd" is on the list, "BD" and "Bd" are not and stay flagged.
-# clinical = wording in GP and specialist letters; patient = plain words in patient letters.
+# clinical = wording in family-doctor and specialist letters; patient = plain words in patient letters.
 # Each entry needs clinician sign-off before it is added.
 # These 10 entries: signed off by the clinician reviewer and the educator.
 # GTN: signed plain words "glyceryl trinitrate (GTN)" (round 11 follow-up, 13 Oct 2026).
