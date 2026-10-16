@@ -7,4 +7,4 @@ Med: lithium 400 mg nocte (for bipolar disorder)
 Med: metformin 500 mg bd
 Result: HbA1c 7.9 %
 Question: Please assess the left forefoot callus and advise on offloading.
-Follow-up: GP review in 4 weeks
+Follow-up: family doctor review in 4 weeks

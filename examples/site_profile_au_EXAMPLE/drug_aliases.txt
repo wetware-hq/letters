@@ -14,3 +14,4 @@ acetaminophen=paracetamol
 adrenaline=epinephrine
 thyroxine=levothyroxine
 frusemide=furosemide
+Coversyl=perindopril

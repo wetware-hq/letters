@@ -52,7 +52,7 @@ This letter explains your care and what happens next.
 
 ## What happens next
 
-1. Who: GP (your family doctor). When: in 1 week. Action: GP (your family doctor) review in 1 week; restart metformin if eating normally [L19]
+1. Who: family doctor. When: in 1 week. Action: family doctor review in 1 week; restart metformin if eating normally [L19]
 2. Who: not documented. When: in 6 weeks. Action: repeat chest X-ray in 6 weeks [L20]
 
 ---

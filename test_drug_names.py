@@ -20,7 +20,7 @@ def test_allowlist_signed_closed_and_pinned():
 
 def test_aliases_in_locale_pack_map_to_allowed_generics():
     al = D.local_aliases()
-    want = {"acetaminophen": "paracetamol", "lasix": "furosemide", "lipitor": "atorvastatin",
+    want = {"acetaminophen": "paracetamol", "coversyl": "perindopril", "lasix": "furosemide", "lipitor": "atorvastatin",
             "panadol": "paracetamol", "ventolin": "salbutamol", "adrenaline": "epinephrine",
             "thyroxine": "levothyroxine", "frusemide": "furosemide", "augmentin": "amoxicillin/clavulanate"}
     import letters as L
@@ -34,7 +34,7 @@ def test_fake_drugs_never_in_patient_lines_or_site_profiles():
     import glob
     _, names = D.fake()
     pat = __import__("re").compile(r"\b(" + "|".join(sorted(names)) + r")\b", __import__("re").I)
-    files = [p for p in (HERE / "locale").rglob("*") if p.is_file()]
+    files = [p for p in list((HERE / "locale").rglob("*")) + list((HERE / "examples").rglob("*")) if p.is_file()]
     files += [pathlib.Path(p) for p in glob.glob(str(HERE / "golden" / "*patient*.md"))]
     files += [HERE / "data" / "refusal_lines.toml", HERE / "drugs.txt"]
     hits = [str(p) for p in files if pat.search(p.read_text(encoding="utf-8", errors="ignore"))]
@@ -112,3 +112,12 @@ def test_brands_and_local_aliases_only_in_locale_pack():
     assert not [l for l in core if "=" in l], "brand=generic pairs belong in locale/<pack>/drug_aliases.txt"
     import letters as L
     assert L.drug_names()["panadol"] == "paracetamol" and L.drug_names()["frusemide"] == "furosemide"
+
+
+def test_coversyl_renders_generic_first():
+    assert D.discharge_name("perindopril") == "perindopril (Coversyl)"
+
+
+def test_made_up_brand_in_unknown_test_is_on_no_list():
+    import letters as L
+    assert "velbrintax" not in L.drug_names() and not D.allowed("velbrintax")

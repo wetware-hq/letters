@@ -191,7 +191,7 @@ def test_pending_cleared_by_result():
 def test_followup_numbered_with_who_and_when():
     md = make_letter(F("pneumonia_admission.txt"), "discharge", "GP")
     acts = section(md, "Actions")
-    assert acts.startswith("1. Who: GP. When: in 1 week.")   # round 12: GP allowed (au pack)
+    assert acts.startswith("1. Who: family doctor. When: in 1 week.")   # fixture neutralised to family doctor
     assert f"2. Who: {ND}. When: in 6 weeks." in acts
 
 
@@ -1845,7 +1845,7 @@ def test_reason_phrasings_never_with_not_documented(medline):
         assert "reason not documented" not in meds, meds
 
 
-@pytest.mark.parametrize("drug", ["Tritace", "Zentrolib", "Coversyl"])
+@pytest.mark.parametrize("drug", ["Tritace", "Zentrolib", "Velbrintax"])   # Velbrintax: made-up brand on no list
 def test_capitalised_unknown_drug_gets_drug_name_flag(drug):
     text = "Patient: SYNTH-6002\n1937-06-03 Clinic review.\nProblem: high blood pressure\nMed: " + drug + \
            " 5 mg daily\nFollow-up: review in 2 weeks\n"
@@ -3264,8 +3264,8 @@ def test_r11f_sixty_generics_recognised_once():
     lines = [l.strip().lower() for l in (pathlib.Path(L.__file__).parent / "drugs.txt").read_text().splitlines()
              if l.strip() and not l.startswith("#")]
     # Physician override of the R11 follow-up ruling (2026-10-16): frusemide is a local alias of furosemide,
-    # listed in locale/au/drug_aliases.txt, no longer in the core drugs.txt.
-    aliases = (pathlib.Path(L.__file__).parent / "locale" / "au" / "drug_aliases.txt").read_text().splitlines()
+    # listed in the example site profile's drug_aliases.txt, no longer in the core drugs.txt.
+    aliases = (L.LOCALE_DIR / "drug_aliases.txt").read_text().splitlines()
     assert "frusemide" not in lines and aliases.count("frusemide=furosemide") == 1
     for g in R11F_GENERICS:
         if g == "frusemide":
@@ -4434,7 +4434,7 @@ def test_r12_allowed_list_has_no_detection_word_or_ambiguous_shorthand():
     assert set(raw) == set(L.ALLOWED_SHORTHAND)                 # the loader dropped nothing: the files are clean
     assert not set(raw) & set(L.load_single_meaning())          # signed expansions stay in single_meaning.toml
     core = {w for w, c in raw.items() if c.startswith("core/")}
-    au = {w for w, c in raw.items() if c.startswith("au/")}
+    au = {w for w, c in raw.items() if c.startswith(L.LOCALE_DIR.name + "/")}   # the configured site profile
     assert not core & au and {"GP", "UEC", "EUC", "FBC"} <= au
 
 
@@ -4549,7 +4549,7 @@ def test_r12_unparseable_result_flagged(tmp_path, brief):
     assert r.returncode == 3 and not (out2 / "letter.md").exists()
 
 
-# ---------- round 12: signed patient-letter plain words (locale/core + locale/au plain_words.toml) ----------
+# ---------- round 12: signed patient-letter plain words (locale/core + site profile plain_words.toml) ----------
 R12_PW = dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
               results=("TSH 2.1 mU/L 1937-08-01", "CXR clear 1937-08-01", "CXR clear 1937-08-20",
                        "CT clear 1937-08-01", "FBC (full blood count) normal 1937-08-01"),
@@ -5242,7 +5242,7 @@ def test_vocabulary_is_data_not_code():
 # ---------- check 2: combination list in the locale pack; refusal and written-by-hand (Physician and Director) ----------
 def test_c2_all_current_combination_brands_in_locale_pack():
     assert L.load_combination() == ("biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy", "entresto")
-    assert L.COMBINATION_FILE == HERE / "locale" / L.LOCALE / "combination.toml"
+    assert L.COMBINATION_FILE == L.LOCALE_DIR / "combination.toml"
     assert set(L.COMBO_BRANDS) <= {t.lower() for t in domainscan.TERMS["drug"]}       # can't come back into code
 
 

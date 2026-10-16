@@ -10,7 +10,8 @@ while not (ROOT / "jurisdiction_scan.toml").is_file():
 CFG = tomllib.loads((ROOT / "jurisdiction_scan.toml").read_text(encoding="utf-8"))
 CATS = {k: re.compile(v) for k, v in CFG["categories"].items()}
 EXCEPT_IDS = [re.compile(x) for x in CFG["exceptions"]["ids"]]
-EXCEPT_PATHS = [re.compile(x) for x in CFG["exceptions"].get("paths", []) + CFG["exceptions"].get("held_paths", [])]
+TERM_EXC = [(re.compile(e["path"]), re.compile(r"(?<![\w-])" + re.escape(e["term"]) + r"(?![\w-])"), e)
+            for e in CFG["exceptions"].get("term", [])]     # one entry per term: term, path, reason
 SELF = {"jurisdiction_scan.toml", pathlib.Path(__file__).name}
 
 
@@ -20,9 +21,13 @@ def strip_ids(text):
     return text
 
 
-def scan_text(text):
-    """Check ids that fire on this text (exception ids removed first)."""
+def scan_text(text, path=None):
+    """Check ids that fire on this text (exception ids, then this file's per-term exceptions, removed first)."""
     t = strip_ids(text)
+    if path is not None:
+        for pr, tr, _ in TERM_EXC:
+            if pr.search(path):
+                t = tr.sub(" ", t)
     return sorted(k for k, p in CATS.items() if p.search(t))
 
 
@@ -30,7 +35,7 @@ def tracked():
     r = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True)
     files = [f for f in r.stdout.splitlines() if f] if r.returncode == 0 else \
         [str(p.relative_to(ROOT)) for p in ROOT.rglob("*") if p.is_file() and ".git" not in p.parts]
-    return [f for f in files if pathlib.Path(f).name not in SELF and not any(e.search(f) for e in EXCEPT_PATHS)]
+    return [f for f in files if pathlib.Path(f).name not in SELF]
 
 
 def scan_repo():
@@ -44,7 +49,7 @@ def scan_repo():
         except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
             continue
         for i, line in enumerate(lines, 1):
-            for k in scan_text(line):
+            for k in scan_text(line, f):
                 hits.append((f, i, k))
     return hits
 
@@ -88,5 +93,27 @@ def test_exception_list_is_ids_only_and_still_needed():
         assert re.fullmatch(r"[A-Z0-9\-\[\]\*\+\\b]+", e), f"exception must be an id pattern: {e}"
 
 
+def test_term_exceptions_are_one_term_each_with_a_reason():
+    assert "paths" not in CFG["exceptions"] and "held_paths" not in CFG["exceptions"], "no folder-level exceptions"
+    for _, _, e in TERM_EXC:
+        assert set(e) == {"term", "path", "reason"} and e["reason"].strip() and e["term"].strip(), e
+        assert re.fullmatch(r"\^[\w./\\-]+\$", e["path"]), f"exception must name one file exactly: {e}"
+        assert not e["path"].endswith("/"), f"exception must name files, not a folder: {e}"
+
+
+def test_planted_term_in_excepted_file_but_other_term_still_fails():
+    for pr, tr, e in TERM_EXC:
+        other = "Sydney" if e["term"] != "Sydney" else "Melbourne"
+        path = e["path"].strip("^$").replace("\\", "")
+        assert scan_text(f"{e['term']} {other}", path) == ["J-CITY"], e
+
+
 def test_english_reach_and_numbers_are_not_flagged():
     assert scan_text("within reach of the bed; 80,000 tokens; SYNTH-REC-0001; TEST-000") == []
+
+
+def test_core_loads_site_profile_from_configuration():
+    src = (ROOT / "letters.py").read_text()
+    assert "site_profile_au_EXAMPLE" not in src and '"locale" / LOCALE' not in src
+    import letters as L
+    assert L.LOCALE_DIR.name.endswith("_EXAMPLE")

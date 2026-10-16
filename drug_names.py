@@ -37,7 +37,7 @@ def patient_name(name):
 
 def local_aliases(path=None):
     """{generic: local alias} from the locale pack's drug_aliases.txt (brand=generic lines; first alias wins)."""
-    p = pathlib.Path(path) if path else HERE / "locale" / "au" / "drug_aliases.txt"
+    p = pathlib.Path(path) if path else __import__("letters").LOCALE_DIR / "drug_aliases.txt"
     out = {}
     for l in p.read_text(encoding="utf-8").splitlines():
         l = l.strip()

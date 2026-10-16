@@ -276,8 +276,8 @@ source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (14 Oct 2026)
 key = "BRIEF_REFUSED"
 text = "Refused: brief not understood. Write it as \"<kind> to <reader>\", for example \"discharge to family doctor\" or \"update to patient\"."
 check = 5
-status = "held"
-source = "re-sign pending: Physician (jurisdiction purge 16 Oct 2026, example reader changed to 'family doctor'); was signed in both files 14 Oct 2026"
+status = "signed"
+source = "letters_refusals_SAFETY.md + letters_refusals_WORDING.md (re-signed Physician 16 Oct 2026, example reader 'family doctor')"
 
 [[code]]
 key = "SENSITIVE_REFUSED"

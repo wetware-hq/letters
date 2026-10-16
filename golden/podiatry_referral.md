@@ -45,7 +45,7 @@ Please answer the question below.
 
 ## Actions
 
-1. Who: GP. When: in 4 weeks. Action: GP review in 4 weeks [L10]
+1. Who: family doctor. When: in 4 weeks. Action: family doctor review in 4 weeks [L10]
 
 ---
 

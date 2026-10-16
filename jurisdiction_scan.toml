@@ -30,9 +30,63 @@ J-JOBTITLE = "VMO"
 [exceptions]
 # ids only: signed/pinned ids that keep a local word until the next version
 ids = ['\bLT-REACH-[A-Z]+-PT\b', '\bLT-OWNWORDS-ASK-GP-PT\b', '\bGP-LETTER-NO-SOURCE\b']
-# locale pack (site profile); signed golden letters and the synthetic notes they are built from; third-party
-# word list; tests and derived inputs that exercise the au locale pack
-paths = ['^locale/au/', '^golden/', '^fixtures/', '^wordlists/', '^test_letters\.py$', '^data/check14_derived_cases\.toml$']
-# HELD for Physician: signed core lists whose header comment cites a national agency as the source (provenance;
-# not removed without sign-off)
-held_paths = ['^locale/core/allowed_shorthand\.toml$', '^locale/core/units\.toml$']
+
+[[exceptions.term]]
+term = "GP"
+path = "^data/check14_derived_cases\\.toml$"
+reason = "derived trace inputs use the example profile's reader word; changing it changes the pinned check-14 trace (1 uses)"
+
+[[exceptions.term]]
+term = "AHPRA"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
+
+[[exceptions.term]]
+term = "Australia"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
+
+[[exceptions.term]]
+term = "Australian"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (2 uses)"
+
+[[exceptions.term]]
+term = "GP"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (2 uses)"
+
+[[exceptions.term]]
+term = "RACGP"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
+
+[[exceptions.term]]
+term = "GP"
+path = "^examples/site_profile_au_EXAMPLE/letters_vocab\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (3 uses)"
+
+[[exceptions.term]]
+term = "GP"
+path = "^examples/site_profile_au_EXAMPLE/plain_words\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
+
+[[exceptions.term]]
+term = "ACSQHC"
+path = "^locale/core/allowed_shorthand\\.toml$"
+reason = "HELD for Physician: signed list header cites its source agency (provenance) (1 uses)"
+
+[[exceptions.term]]
+term = "ACSQHC"
+path = "^locale/core/units\\.toml$"
+reason = "HELD for Physician: signed list header cites its source agency (provenance) (1 uses)"
+
+[[exceptions.term]]
+term = "GP"
+path = "^test_letters\\.py$"
+reason = "tests exercise the example profile's local reader, owner and plain words (389 uses)"
+
+[[exceptions.term]]
+term = "Australian"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
