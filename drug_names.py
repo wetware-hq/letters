@@ -51,3 +51,37 @@ def discharge_name(generic, aliases=None):
     """Discharge medicine list entry: generic name first, local alias from the site profile in brackets."""
     a = (local_aliases() if aliases is None else aliases).get(generic.strip().lower())
     return patient_name(f"{generic} ({a})") if a else patient_name(generic)
+
+
+# ---- word rules (each its own check id) ----
+import re as _re
+CLASS_ALLERGY_ONLY = "DRUG-CLASS-ALLERGY-ONLY"   # penicillin / sulfa only in allergy fields
+SALT_REQUIRED = "DRUG-SALT-REQUIRED"             # iron / potassium / magnesium order must name the salt
+FOLIC_ACID_ONLY = "DRUG-FOLIC-ACID-ONLY"         # 'folic' only as 'folic acid'
+MINERALS = ("iron", "potassium", "magnesium")
+_SALT = _re.compile(r"\b(?:iron|potassium|magnesium)\s+(?:chloride|sulfate|sulphate|citrate|gluconate|fumarate|"
+                    r"bicarbonate|oxide|aspartate|polymaltose|sucrose|carboxymaltose|glycinate|orotate|phosphate|"
+                    r"dextran|lactate)\b", _re.I)
+
+
+def allergy_only(path=None):
+    return {w.lower() for w in _toml(path or ALLOW_FILE).get("allergy_only", [])}
+
+
+def check_line(text, field="", is_order=False):
+    """Check ids this line breaks. field: the notes field ('Allergies' allows class words);
+    is_order: a medicine order line (minerals must name the salt)."""
+    out = []
+    if not field.strip().lower().startswith("allerg"):
+        if any(_re.search(rf"\b{_re.escape(w)}\b", text, _re.I) for w in allergy_only()):
+            out.append(CLASS_ALLERGY_ONLY)
+    if is_order:
+        for w in MINERALS:
+            for m in _re.finditer(rf"\b{w}\b", text, _re.I):
+                if not _SALT.match(text, m.start()):
+                    out.append(SALT_REQUIRED); break
+            if SALT_REQUIRED in out:
+                break
+    if _re.search(r"\bfolic\b(?!\s+acid\b)", text, _re.I):
+        out.append(FOLIC_ACID_ONLY)
+    return out

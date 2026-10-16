@@ -1,11 +1,16 @@
 # Local (au) brand and local names for medicines, as brand=generic or a bare local name. Site-profile data:
 # brands and local aliases live here only, never in the core drugs.txt. Moved from drugs.txt (jurisdiction purge,
 # 16 Oct 2026), entries unchanged.
-# frusemide stays in core drugs.txt: Round 11 follow-up ruling + test_r11f; moving it is HELD for Physician.
+# frusemide: alias of furosemide (Physician override of the R11 follow-up ruling, 2026-10-16).
 Lasix=furosemide
 Panadol=paracetamol
 Lipitor=atorvastatin
 Nexium=esomeprazole
 Ventolin=salbutamol
 Zoloft=sertraline
+# Augmentin: amoxicillin with clavulanic acid
 Augmentin=amoxicillin/clavulanate
+acetaminophen=paracetamol
+adrenaline=epinephrine
+thyroxine=levothyroxine
+frusemide=furosemide

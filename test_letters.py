@@ -3263,7 +3263,13 @@ def test_r11f_sixty_generics_recognised_once():
     assert len(R11F_GENERICS) == 60
     lines = [l.strip().lower() for l in (pathlib.Path(L.__file__).parent / "drugs.txt").read_text().splitlines()
              if l.strip() and not l.startswith("#")]
+    # Physician override of the R11 follow-up ruling (2026-10-16): frusemide is a local alias of furosemide,
+    # listed in locale/au/drug_aliases.txt, no longer in the core drugs.txt.
+    aliases = (pathlib.Path(L.__file__).parent / "locale" / "au" / "drug_aliases.txt").read_text().splitlines()
+    assert "frusemide" not in lines and aliases.count("frusemide=furosemide") == 1
     for g in R11F_GENERICS:
+        if g == "frusemide":
+            assert L.drug_names()[g] == "furosemide"; continue
         assert lines.count(g) == 1, g                                     # present, never duplicated
         assert all(not L.needs_flag(w) for w in re.split(r"[\s/]+", g)), g
 
