@@ -165,3 +165,15 @@ that names someone to send the letter to. Don't edit clinical notes to get past 
 
 - Not for use with real patients.
 - S05 and S07 were checked with a scripted stand-in, not a real AI model. The scripted runs show the checks catch the mistakes those two scenarios are for. They don't show how a real model behaves. Those tests are still to come.
+
+## References
+
+letters makes no biological or clinical claim. It turns a notes dump into a draft letter and refuses any sentence it can't trace to a source line, so nothing it does rests on a measured result in the literature. Entries are tied to the one claim that rests on them; nothing merely adjacent is listed, and anything listed carries a DOI, PMID or arXiv id.
+
+### Peer-reviewed
+
+- None. letters rewrites and filters text and decides nothing clinical, so there is no measured finding it depends on. A paper here would be adjacent reading dressed up as evidence, left out on purpose rather than to hide a gap.
+
+### Unsupported claims (no peer-reviewed support)
+
+- Every claim letters makes — that an unsourced sentence is refused, that a negation is kept, that an uncertainty is never written as a diagnosis, and that a sensitive item is cut by default for every reader but the patient — is shown by its own rules and held-out regression cases on invented people, not by peer-reviewed research. The held-out safety traces don't even run on a plain checkout, so a green is narrower than it looks and says nothing about real care.
