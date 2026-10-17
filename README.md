@@ -109,6 +109,10 @@ python letters.py fixtures/template/pneumonia_admission.txt --brief "discharge t
 
 `--final` removes source tags only. The draft mark stays until the signing clinician removes it.
 
+## Bar
+
+`pytest` green with `scripts/rulecheck.py` is letters' bar, `scripts/mutate.py` the mutation gate. The held-out safety traces need the answer-file setting and do not run on a plain checkout, so that green is narrower than it looks. What a green covers and what it does not — so a green here is not read as the same assurance as a green elsewhere — is [BAR.md](BAR.md).
+
 ## Evaluation
 
 Regression tests plant each failure: an unsourced fact, a stopped medicine, a negation, "?PE", a missing allergy, a pending result, a label, a sensitive detail in an unrelated referral, and a referral with no question. Held-out cases use invented people, are written by someone who didn't write the rules, and are kept outside this repository. Results are reported as counts, such as "2 of 12 failed", never as rates. Held-out runs go through a version-checked runner outside the repo. It refuses a stale commit or uncommitted changes and logs the commit next to each output.
