@@ -14,7 +14,7 @@
 
 [owners]
 # words that mark a named owner of an action (regex alternatives, whole word, any case)
-roles = ["fellow", "registrar", "reg", "consultant", "team", "nurse", "GP", "clinic", "service", "SHO", "doctor", "dr",
+roles = ["fellow", "registrar", "reg", "consultant", "team", "nurse", "clinic", "service", "SHO", "doctor", "dr",
          "surgeon", "physician", "pharmacist", "ward", "practice", "cardiology", "nephrology", "renal", "oncology",
          "haematology", "respiratory", "neurology", "gastroenterology", "endocrinology", "dermatology",
          "rheumatology", "urology", "microbiology", "micro", "lab", "physio", "dietitian", "midwife", "patient"]
@@ -24,7 +24,7 @@ modifiers = ["renal", "cardiology", "ward", "practice", "medical", "surgical", "
 
 [actions]
 # 'Who' words in an action line (regex alternatives, whole word, any case)
-who = ["GP", "general practitioner", "patient", "you", "cardiology", "renal", "endocrinology", "podiatry", "clinic",
+who = ["general practitioner", "family doctor", "patient", "you", "cardiology", "renal", "endocrinology", "podiatry", "clinic",
        "ward", "nurse", "pharmacist", "physiotherapy", "team", "surgeon", "specialist", "outpatients"]
 
 [symptoms]

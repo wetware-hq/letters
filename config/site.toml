@@ -1,0 +1,4 @@
+# Which site profile letters loads (configuration, not code). Override with LETTERS_SITE_PROFILE (a folder).
+# The shipped value points at a labelled EXAMPLE profile; a real site points it at its own signed profile.
+profile = "examples/site_profile_au_EXAMPLE"
+locale = "au"

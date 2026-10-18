@@ -1,0 +1,8 @@
+# Local (au) reader and owner words, merged into data/letters_vocab.toml at load. Local names live in the locale
+# pack (site profile), never in the core vocabulary. Same entries as the core list held before the jurisdiction purge.
+[owners]
+roles = ["GP"]
+[actions]
+who = ["GP"]
+[owner_words]
+words = ["GP"]

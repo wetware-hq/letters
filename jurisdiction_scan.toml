@@ -1,0 +1,139 @@
+commit_base = "75e97611c0878a45f6b7262e5c3426c3f8b57fd6"
+
+# Jurisdiction term scan (tests: test_jurisdiction_scan.py). Hand-written denylist; no external list imported.
+# Each category is its own check id. Local names and values go in site-profile data, never in the core.
+
+[categories]
+J-COUNTRY  = '\b(Australia|Australian|Aussie|New Zealand|Aotearoa|United Kingdom|USA)\b'
+J-STATE    = '\b(NSW|New South Wales|Victoria|Victorian|Queensland|QLD|Tasmania|Northern Territory|Western Australia|South Australia)\b'
+J-CITY     = '\b(Sydney|Melbourne|Brisbane|Perth|Adelaide|Hobart|Canberra|Parramatta|Westmead)\b'
+J-AGENCY   = '\b(AHPRA|PBS|TGA|Medicare|RANZCP|RACGP|eMR|CERS|NSW Health|ACSQHC|NHS|NICE)\b'
+J-POLICY   = '\bPD ?\d{4}_\d+'
+J-EMERG    = '(?<![\d.,\w$-])(000|111|911|999|112)(?![\d,\w-]|\.\d)|\b13 ?11 ?14\b|\b1[38]00 ?\d{3} ?\d{3}\b|\(0\d\) ?\d{4} ?\d{4}|\+61'
+J-PROGRAM  = '\bREACH\b'
+J-GP       = '\bGPs?\b'
+J-CURRENCY = 'A\$|\bAUD\b'
+J-JOBTITLE = '\b(VMO|CMO|CNC|CNE|JMO|Nurse Unit Manager|RMO|SRMO)\b(?! *=)'
+
+# Prompt leak (check id SCAN-PROMPT-LEAK, one sub-id per group). Signer role words such as 'Physician' are allowed.
+"SCAN-PROMPT-LEAK/names"     = '\bBI[O] (Engineer|Physician|Patient|Educator|Director|Scientist)\b|\bMasterchief\b|\bGrok Bot\b|\bthe room\b|\bCaptain ?Cook\b|(?i:captaincook)'
+"SCAN-PROMPT-LEAK/persona"   = '\bYou are\b|(?i:\byou are a\b)|(?i:\bsystem prompt\b)|\bsubagent\b|\bexecutor\b'
+"SCAN-PROMPT-LEAK/paths"     = '/hom[e]/box\b|/workspac[e]/tmp\b'
+"SCAN-PROMPT-LEAK/tokens"    = '\b(WARD_GH_TOKEN|WARD_MODEL_API_KEY|MODAL)\b'
+"SCAN-PROMPT-LEAK/people"    = '\b(Mathew|Chu)\b|(?i:mchu001)'
+"SCAN-PROMPT-LEAK/email"     = '(?<![\w.+-])(?!hellowetware@gmail\.com\b)[\w.+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]+'
+"SCAN-PROMPT-LEAK/directive" = 'SYSTEM DIRECTIVE|%PURGE'
+
+[planted]
+J-COUNTRY  = "Australia"
+J-STATE    = "NSW"
+J-CITY     = "Sydney"
+J-AGENCY   = "AHPRA"
+J-POLICY   = "PD2020_018"
+J-EMERG    = "call 000"
+J-PROGRAM  = "REACH"
+J-GP       = "GP"
+J-CURRENCY = "A$5"
+J-JOBTITLE = "VMO"
+
+"SCAN-PROMPT-LEAK/names"     = "signed in the room"
+"SCAN-PROMPT-LEAK/persona"   = "system prompt"
+"SCAN-PROMPT-LEAK/paths"     = "\u002Fhome\u002Fbox\u002Fx"
+"SCAN-PROMPT-LEAK/tokens"    = "WARD_GH_TOKEN"
+"SCAN-PROMPT-LEAK/people"    = "mchu001"
+"SCAN-PROMPT-LEAK/email"     = "someone@example.org"
+"SCAN-PROMPT-LEAK/directive" = "%PURGE"
+
+[exceptions]
+# ids only: signed/pinned ids that keep a local word until the next version
+ids = ['\bLT-REACH-[A-Z]+-PT\b', '\bLT-OWNWORDS-ASK-GP-PT\b', '\bGP-LETTER-NO-SOURCE\b']
+
+[[exceptions.term]]
+term = "AHPRA"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
+
+[[exceptions.term]]
+term = "Australia"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
+
+[[exceptions.term]]
+term = "Australian"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (2 uses)"
+
+[[exceptions.term]]
+term = "GP"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (2 uses)"
+
+[[exceptions.term]]
+term = "RACGP"
+path = "^examples/site_profile_au_EXAMPLE/allowed_shorthand\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
+
+[[exceptions.term]]
+term = "GP"
+path = "^examples/site_profile_au_EXAMPLE/letters_vocab\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (3 uses)"
+
+[[exceptions.term]]
+term = "GP"
+path = "^examples/site_profile_au_EXAMPLE/plain_words\\.toml$"
+reason = "labelled EXAMPLE site profile: local names are its data (1 uses)"
+
+[[exceptions.term]]
+term = "ACSQHC"
+path = "^locale/core/allowed_shorthand\\.toml$"
+reason = "HELD for Physician: signed list header cites its source agency (provenance) (1 uses)"
+
+[[exceptions.term]]
+term = "ACSQHC"
+path = "^locale/core/units\\.toml$"
+reason = "HELD for Physician: signed list header cites its source agency (provenance) (1 uses)"
+
+[[exceptions.term]]
+term = "GP"
+path = "^test_letters\\.py$"
+reason = "tests of the example profile's signed GP shorthand/plain-word mapping, GP abbreviation resolve and single-word reader/owner parsing; other uses neutralised (37 uses)"
+
+[[exceptions.term]]
+term = "Australian"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "Brian.Kelk@cl.cam.ac.uk"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "biljir@pobox.com"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "grady@netcom.com"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "grady@northcoast.com"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "ross@bryson.demon.co.uk"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "thegrendel@theriver.com"
+path = "^wordlists/SCOWL\\-COPYRIGHT$"
+reason = "third-party English word list (SCOWL), not project wording (1 uses)"
+
+[[exceptions.term]]
+term = "executor"
+path = "^wordlists/english\\.txt$"
+reason = "third-party English word list (SCOWL), not project wording (2 uses)"

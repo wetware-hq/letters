@@ -17,5 +17,5 @@ Results:
 Pending:
 - sputum culture, sent 1937-06-04, ward team
 Actions:
-- review in 1 week, GP
-- repeat chest X-ray in 6 weeks, GP
+- review in 1 week, family doctor
+- repeat chest X-ray in 6 weeks, family doctor

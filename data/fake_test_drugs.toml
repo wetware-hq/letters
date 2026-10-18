@@ -1,0 +1,4 @@
+# Invented test medicines: synthetic tests only, never real dosing. Any patient-facing output naming one must carry
+# the label below beside it (test_drug_names.py fails if it is missing), and none may appear in a site profile.
+label = "(made-up test medicine)"
+names = ["alphazole", "quixomab", "synthopril", "zorbamycin", "zorvacillin", "zorvostatin"]
