@@ -32,7 +32,7 @@ Settings read: `LETTERS_TRUTH`/`TRUTH_DIR` (scenario answer files), `WORDING_DIR
 | Slot | Direction | Type |
 |---|---|---|
 | **notes** | input | raw text, synthetic only (`SYNTH-` ids, 1937 dates) |
-| **brief** | input | "<kind> to <reader>", e.g. "discharge to GP" or "update to patient"; optional `include: <item>` lines |
+| **brief** | input | "<kind> to <reader>", e.g. "discharge to family doctor" or "update to patient"; optional `include: <item>` lines |
 | **template** | input, optional | section layout; required sections are added back if missing |
 | **brand** | input, optional | name, address, logo, fonts and colours; drafts show "DRAFT, unsigned" |
 | **letter** | output | one Markdown file, ready to convert to PDF or HTML |
@@ -55,9 +55,9 @@ The output folder holds only `letter.md`. Identical input gives an identical let
 
 ## Brief
 
-Write the brief as "<kind> to <reader>", for example "discharge to GP" or "update to patient". Any other brief is refused, and the brief is never repeated back:
+Write the brief as "<kind> to <reader>", for example "discharge to family doctor" or "update to patient". Any other brief is refused, and the brief is never repeated back:
 
-> Refused: brief not understood. Write it as "<kind> to <reader>", for example "discharge to GP" or "update to patient".
+> Refused: brief not understood. Write it as "<kind> to <reader>", for example "discharge to family doctor" or "update to patient".
 
 "to patient" makes a patient letter, and every patient rule applies.
 
@@ -66,7 +66,7 @@ Write the brief as "<kind> to <reader>", for example "discharge to GP" or "updat
 The sensitive items are HIV status, psychiatric history and PrEP. Their linked words, medicines and brands are listed in `linked_terms.toml`, version 2. The file is frozen and checksummed in `LINKED_TERMS.SHA256`. Its header reads "Version 2 signed off by the clinical reviewer, 13 Oct 2026. Frozen." Any change needs fresh sign-off.
 
 - **What marks an item.** A refuse-level term, a linked medicine or a linked brand anywhere in the notes marks its item, even when no diagnosis is written. Words with more than one meaning are flag-only and mark nothing.
-- **Default.** If the brief says nothing about a marked item, it is cut for every reader except the patient. That includes the GP.
+- **Default.** If the brief says nothing about a marked item, it is cut for every reader except the patient. That includes the family doctor.
 - **Keeping an item.** `include: psychiatric history` keeps that item in a letter to someone other than the patient. Add it only once you've confirmed this reader needs it and, where required, the patient has agreed. letters shows that the line was there. It can't check consent; that stays with the signing clinician. On screen it prints "Included by the brief: psychiatric history." It names the item only.
 - **Other lines.** A sentence holding a linked term for a cut item is left out and listed by line number: "Flag: a sentence on line L9 was left out to keep something private. Check it doesn't hold a safety fact the reader needs."
 - **Medicine lines.** The drug, dose and frequency always stay. A brand becomes its generic. Only the part holding the term is left out: "Flag: part of the medicine entry on line L5 was left out to keep something private. The medicine and its dose are still listed. Check nothing the reader needs was lost." If the drug itself would disappear, the letter is refused.
@@ -102,12 +102,16 @@ pytest -q
 python letters.py fixtures/template/chest_pain.txt --brief "referral to cardiology"
 python letters.py fixtures/template/podiatry_referral.txt --brief "referral to podiatry" \
   --template templates/minimal.md --brand brands/example-clinic --out out/
-python letters.py fixtures/template/pneumonia_admission.txt --brief "discharge to GP" \
-  --resolve "SOB=shortness of breath" --resolve "GP=general practitioner" \
+python letters.py fixtures/template/pneumonia_admission.txt --brief "discharge to family doctor" \
+  --resolve "SOB=shortness of breath" \
   --final   # every flag resolved, so --final runs (it refuses while any flag is open)
 ```
 
 `--final` removes source tags only. The draft mark stays until the signing clinician removes it.
+
+## Bar
+
+`pytest` green with `scripts/rulecheck.py` is letters' bar, `scripts/mutate.py` the mutation gate. The held-out safety traces need the answer-file setting and do not run on a plain checkout, so that green is narrower than it looks. What a green covers and what it does not — so a green here is not read as the same assurance as a green elsewhere — is [BAR.md](BAR.md).
 
 ## Evaluation
 
@@ -161,3 +165,15 @@ that names someone to send the letter to. Don't edit clinical notes to get past 
 
 - Not for use with real patients.
 - S05 and S07 were checked with a scripted stand-in, not a real AI model. The scripted runs show the checks catch the mistakes those two scenarios are for. They don't show how a real model behaves. Those tests are still to come.
+
+## References
+
+letters makes no biological or clinical claim. It turns a notes dump into a draft letter and refuses any sentence it can't trace to a source line, so nothing it does rests on a measured result in the literature. Entries are tied to the one claim that rests on them; nothing merely adjacent is listed, and anything listed carries a DOI, PMID or arXiv id.
+
+### Peer-reviewed
+
+- None. letters rewrites and filters text and decides nothing clinical, so there is no measured finding it depends on. A paper here would be adjacent reading dressed up as evidence, left out on purpose rather than to hide a gap.
+
+### Unsupported claims (no peer-reviewed support)
+
+- Every claim letters makes — that an unsourced sentence is refused, that a negation is kept, that an uncertainty is never written as a diagnosis, and that a sensitive item is cut by default for every reader but the patient — is shown by its own rules and held-out regression cases on invented people, not by peer-reviewed research. The held-out safety traces don't even run on a plain checkout, so a green is narrower than it looks and says nothing about real care.

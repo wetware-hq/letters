@@ -13,6 +13,6 @@ Results:
 - eGFR 52 mL/min 1937-08-01
 - eGFR 48 mL/min 1937-09-01
 Pending:
-- urine albumin-creatinine ratio, sent 1937-09-01, GP
+- urine albumin-creatinine ratio, sent 1937-09-01, family doctor
 Actions:
-- recheck eGFR in 3 months, GP
+- recheck eGFR in 3 months, family doctor

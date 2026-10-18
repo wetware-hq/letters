@@ -176,6 +176,22 @@ SENSITIVE = {
                             r"\bself[- ]harm", r"\boverdose", r"\banxiety", r"\bsuicid"],
 }
 DOMAIN = tomllib.loads((HERE / "data" / "letters_vocab.toml").read_text(encoding="utf-8"))   # domain words are data
+def _site_config():
+    """The site profile from configuration: LETTERS_SITE_PROFILE (a folder), else config/site.toml. No profile is named
+    in code; a missing setting fails closed."""
+    c = tomllib.loads((HERE / "config" / "site.toml").read_text(encoding="utf-8")) if (HERE / "config" / "site.toml").is_file() else {}
+    d = os.environ.get("LETTERS_SITE_PROFILE") or c.get("profile", "")
+    if not d or not c.get("locale"):
+        raise SystemExit("site profile not configured: set LETTERS_SITE_PROFILE or config/site.toml")
+    d = pathlib.Path(d)
+    return c["locale"], (d if d.is_absolute() else HERE / d)
+
+
+LOCALE, LOCALE_DIR = _site_config()
+LOCAL_VOCAB = tomllib.loads((LOCALE_DIR / "letters_vocab.toml").read_text(encoding="utf-8"))   # local words: site profile
+for _sec, _key in (("owners", "roles"), ("actions", "who")):
+    DOMAIN[_sec][_key] = list(DOMAIN[_sec][_key]) + [w for w in LOCAL_VOCAB.get(_sec, {}).get(_key, []) if w not in DOMAIN[_sec][_key]]
+LOCAL_OWNER_WORDS = [re.escape(w) for w in LOCAL_VOCAB.get("owner_words", {}).get("words", []) if w.strip()]
 RELEVANT = dict(DOMAIN["relevant"])
 # H22 items (round 11 signed rulings): detection words come from linked_terms.toml only, whole word or phrase, any case.
 H22_ITEMS = ("Mental Health Act status", "sexual health", "pregnancy loss or termination", "genetic results")
@@ -209,7 +225,7 @@ _INCLUDE = set()     # items the brief asked to include ('include: <item name>')
 
 def relevant(cat, to):
     """An item is kept only when the brief includes it. The default is to cut it for every non-patient reader,
-    including the GP. ('to' is kept for the log wording only.)"""
+    including the family doctor. ('to' is kept for the log wording only.)"""
     return cat.lower() in _INCLUDE
 
 
@@ -278,12 +294,13 @@ RULEDOUT = re.compile(r"^(?P<what>.+?)\s+(?:ruled out|excluded)\b", re.I)
 # "penicillin - rash", "penicillin (rash)", "penicillin: rash", "penicillin -> rash", "penicillin causes rash"
 REACTION = re.compile(r"^\s*(?P<drug>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014]+>?\s*|\s*:\s*|\s*->\s*|\s*[=\u2192]\s*|\s+/\s+|"
                       r"\s+(?:causes|caused|gives|gave|reaction|reaction:)\s+)(?P<r>.*?)\s*$", re.I)
-# "echo - cardiology to arrange", "echo (cardiology to arrange)", "echo: renal team to chase", "echo, GP to follow up"
+# "echo - cardiology to arrange", "echo (cardiology to arrange)", "echo: renal team to chase", "echo, family doctor to follow up"
 OWNER_SEP = re.compile(r"^\s*(?P<test>.+?)\s*(?:\((?P<p>[^)]*)\)|\s[-\u2013\u2014]+\s*|\s*:\s*|,\s*(?=.*\b(?:to|will)\b))"
                        r"(?P<who>.*?)\s*$")
 
 
-OWNERISH = re.compile(r"\b(?:to|will|arrang\w*|chas\w*|follow\w*|f/u|team|clinic|GP|by|review\w*|booked|request\w*)\b", re.I)
+OWNERISH = re.compile(r"\b(?:" + "|".join([r"to", r"will", r"arrang\w*", r"chas\w*", r"follow\w*", r"f/u", r"team", r"clinic"]
+                      + LOCAL_OWNER_WORDS + [r"by", r"review\w*", r"booked", r"request\w*"]) + r")\b", re.I)
 
 
 NO_REACTION = re.compile(r"^\s*(?:(?:reaction|reactions)\s+)?(?:none|nil|no|not|unknown|unclear|undocumented|n/?k)\b"
@@ -353,6 +370,7 @@ def untagged_pending(body):
 
 
 DRUG_FILE = HERE / "drugs.txt"
+LOCAL_DRUG_FILE = LOCALE_DIR / "drug_aliases.txt"   # brands and local aliases: locale pack only
 DOSE_RX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?(mg|mcg|micrograms?|g|mL|ml|units?|IU)(?![A-Za-z/])", re.I)
 FREQ_RX = re.compile(r"(?<![A-Za-z])(daily|bd|tds|qid|nocte|mane|prn|weekly|od)(?![A-Za-z])", re.I)
 STOP_RX = re.compile(r"\b(?:stopped|ceased|withheld|stop)\b", re.I)
@@ -363,9 +381,9 @@ _DRUGS = {}
 
 
 def drug_names():
-    """{lowercase name: generic} for recognised medicines and brands (drugs.txt + linked_terms.toml)."""
+    """{lowercase name: generic} for recognised medicines and brands (drugs.txt + the locale pack's drug_aliases.txt + linked_terms.toml)."""
     if not _DRUGS:
-        for l in _lines(DRUG_FILE):
+        for l in _lines(DRUG_FILE) | _lines(LOCAL_DRUG_FILE):
             if l.startswith("#"):
                 continue
             if "=" in l:
@@ -1052,9 +1070,8 @@ def load_single_meaning(path=None):
 
 
 SHORTHAND = {w.lower() for w in _lines(SHORTHAND_FILE)}
-LOCALE = "au"
 ALLOWED_SHORTHAND_FILES = [HERE / "locale" / "core" / "allowed_shorthand.toml",
-                           HERE / "locale" / LOCALE / "allowed_shorthand.toml"]
+                           LOCALE_DIR / "allowed_shorthand.toml"]
 
 
 def _detection_words():
@@ -1095,7 +1112,7 @@ def load_test_names(path=None):
 
 
 TEST_NAMES = load_test_names()
-PLAIN_WORDS_FILES = [HERE / "locale" / "core" / "plain_words.toml", HERE / "locale" / LOCALE / "plain_words.toml"]
+PLAIN_WORDS_FILES = [HERE / "locale" / "core" / "plain_words.toml", LOCALE_DIR / "plain_words.toml"]
 
 
 def load_plain_words(paths=None):
@@ -1691,7 +1708,7 @@ def build(text, letter_type, to, recipient=None, audience=None, template=None, b
 
 
 # Temporary (13 Oct 2026): combination medicines can't be fully listed yet, so any letter naming one is refused.
-COMBINATION_FILE = HERE / "locale" / LOCALE / "combination.toml"
+COMBINATION_FILE = LOCALE_DIR / "combination.toml"
 # Clinician-only (screen of the person running letters; never a patient view). AWAITING sign-off: docs/RULINGS.md.
 COMBO_PACK_REFUSED = 'Refused: there is no signed list of combination medicines for this locale. The list needs brands, a source and sign-off. Nothing was written. Ask for the list to be completed and signed.'   # signed: Physician (safety) + Educator (wording), 14 Oct 2026
 
@@ -1745,7 +1762,7 @@ VIEW_LINES = {
     "PV-BEFORE-PROC": "Your care team will check this question with you before any treatment or procedure.",
     "PV-ANS-SDM": "[relationship] answered for you, recorded by your care team on [date].",
 }
-VIEW_FILE = HERE / "locale" / LOCALE / "guardian_view.toml"
+VIEW_FILE = LOCALE_DIR / "guardian_view.toml"
 
 
 def locale_view(rel, path=None):
@@ -3063,7 +3080,7 @@ def heldout(path):
 
 
 BRIEF_REFUSED = ('Refused: brief not understood. Write it as "<kind> to <reader>", for example '
-                 '"discharge to GP" or "update to patient".')
+                 '"discharge to family doctor" or "update to patient".')   # signed: Physician, 16 Oct 2026 (re-signed, family doctor)
 SENSITIVE_REFUSED = ("Refused: line L{n} of the brief includes an item that isn't on the sensitive-items list. "
                      "Nothing was written. Remove the item from the brief, or use one from the list.")   # round 3; never echoes the brief
 SENSITIVE_REFUSED_NO_LINE = "Refused: the brief includes an item that isn't on the sensitive-items list. Nothing was written. Remove the item from the brief, or use one from the list."   # signed: Physician (safety) + Educator (wording), 14 Oct 2026

@@ -1,7 +1,7 @@
 # Letter inputs for scripts/check14_derived.py, derived from each scenario's expected_outputs (synthetic, 1930s dates).
 fallback_medicine = "aspirin"          # medicine used when a linked-terms category lists none
 [to]
-gp = "GP"
+gp = "family doctor"
 specialist = "Cardiology"
 patient = "patient"
 

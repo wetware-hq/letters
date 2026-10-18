@@ -8,7 +8,7 @@ from letters import make_letter, build, build_from_template, check, parse, cumsu
 HERE = pathlib.Path(__file__).parent
 F = lambda n: (HERE / "fixtures" / n).read_text()
 CLI = [sys.executable, str(HERE / "letters.py")]
-READER = ["--reader-id", "SYNTH-REG-0007"]          # a GP reader, by id (names are never matched)
+READER = ["--reader-id", "SYNTH-REG-0007"]          # a family doctor reader, by id (names are never matched)
 READER2 = READER + ["--reader-id", "SYNTH-REG-0008"]  # and a second, for a copy recipient with an id
 GOLDEN = [
     ("chest_pain.txt", "referral", "Cardiology", "Dr A. Synth", None, "chest_pain_referral.md"),
@@ -64,7 +64,7 @@ def test_patient_id_appears_once():
 ])
 def test_refuses_non_synthetic(text):
     with pytest.raises(Refused) as e:
-        make_letter(text, "gp-update", "GP")
+        make_letter(text, "gp-update", "family doctor")
     if "SYNTH-1" in text and re.search(r"\d{4}-\d\d-\d\d|\d+/\d+/\d+", text):
         assert str(e.value) == L.DATE_REFUSED.format(n=2)     # ruled: dates get the date refusal, not the incident text
     else:
@@ -79,7 +79,7 @@ def test_two_patients_refused():
 def test_llm_provider_set_exits(monkeypatch):
     monkeypatch.setenv("LETTERS_LLM_PROVIDER", "anything")
     with pytest.raises(SystemExit):
-        make_letter(F("ckd_update.txt"), "gp-update", "GP")
+        make_letter(F("ckd_update.txt"), "gp-update", "family doctor")
 
 
 # ---------- sources and checker ----------
@@ -122,8 +122,8 @@ def test_planted_wrong_date_refused():
 
 
 def test_planted_added_certainty_refused():
-    text = "SYNTH-7\n1937-04-01\nProblem: ?PE\nFollow-up: GP review in 1 week"
-    md, _ = build(text, "gp-update", "GP")
+    text = "SYNTH-7\n1937-04-01\nProblem: ?PE\nFollow-up: family doctor review in 1 week"
+    md, _ = build(text, "gp-update", "family doctor")
     with pytest.raises(Refused):
         check(md.replace("possible PE", "confirmed PE"), parse(text)[1], "gp-update")
 
@@ -136,33 +136,33 @@ def test_stopped_med_leaves_current_list():
 
 def test_stopped_then_restarted():
     t = ("SYNTH-8\n1937-01-01\nAdmission: fall\nMed: warfarin 3 mg daily\n1937-01-02\nStop: warfarin (reason: bleeding)\n"
-         "1937-01-05\nMed: warfarin 2 mg daily (reason: bleeding settled)\nFollow-up: GP INR check in 3 days")
-    md = make_letter(t, "discharge", "GP")
+         "1937-01-05\nMed: warfarin 2 mg daily (reason: bleeding settled)\nFollow-up: family doctor INR check in 3 days")
+    md = make_letter(t, "discharge", "family doctor")
     assert "warfarin 2 mg daily" in section(md, "Current medicines")
     ch = section(md, "Medicine changes")
     assert "Stopped on 2 Jan 1937" in ch and "Restarted on 5 Jan 1937" in ch and "bleeding settled" in ch
 
 
 def test_negation_no_chest_pain_clears_problem():
-    t = "SYNTH-8\n1937-01-01\nProblem: chest pain\n1937-01-02\nNo chest pain since admission.\nFollow-up: GP review in 1 week"
-    md = make_letter(t, "gp-update", "GP")
+    t = "SYNTH-8\n1937-01-01\nProblem: chest pain\n1937-01-02\nNo chest pain since admission.\nFollow-up: family doctor review in 1 week"
+    md = make_letter(t, "gp-update", "family doctor")
     assert "chest pain: resolved on 2 Jan 1937" in section(md, "Problems")
 
 
 def test_ruled_out():
-    t = "SYNTH-8\n1937-01-01\nProblem: ?PE\n1937-01-02\nRuled out: PE\nFollow-up: GP review in 1 week"
-    md = make_letter(t, "gp-update", "GP")
+    t = "SYNTH-8\n1937-01-01\nProblem: ?PE\n1937-01-02\nRuled out: PE\nFollow-up: family doctor review in 1 week"
+    md = make_letter(t, "gp-update", "family doctor")
     assert "ruled out on 2 Jan 1937" in section(md, "Problems")
 
 
 def test_negation_across_sentence_kept_verbatim():
-    t = "SYNTH-8\n1937-01-01\nNo fever or rigors overnight.\nFollow-up: GP review in 1 week"
-    assert "No fever or rigors overnight." in make_letter(t, "gp-update", "GP")
+    t = "SYNTH-8\n1937-01-01\nNo fever or rigors overnight.\nFollow-up: family doctor review in 1 week"
+    assert "No fever or rigors overnight." in make_letter(t, "gp-update", "family doctor")
 
 
 # ---------- never cut ----------
 def test_never_cut_sections_present_even_when_empty():
-    md = make_letter("SYNTH-9\n1937-01-01 Seen today.", "gp-update", "GP")
+    md = make_letter("SYNTH-9\n1937-01-01 Seen today.", "gp-update", "family doctor")
     for s in ("Allergies not documented.", "Follow-up actions not documented.", "No results pending",
               "Current medicines not documented.", "No medicine changes documented."):
         assert s in md
@@ -170,7 +170,7 @@ def test_never_cut_sections_present_even_when_empty():
 
 def test_med_change_reason_kept_or_not_documented():
     t = "SYNTH-9\n1937-01-01\nMed: ramipril 2.5 mg daily\n1937-02-01\nMed: ramipril 5 mg daily (reason: BP above target)"
-    md = make_letter(t, "gp-update", "GP")
+    md = make_letter(t, "gp-update", "family doctor")
     assert f"Reason for change: BP {L.FLAG} above target" in md
     md2 = make_letter(F("chest_pain.txt"), "referral", "Cardiology")
     # round 11 matching-line rule (Physician, signed): a clinician letter prints no 'not documented' on a change line
@@ -178,27 +178,27 @@ def test_med_change_reason_kept_or_not_documented():
 
 
 def test_pending_shows_who_follows_up():
-    t = "SYNTH-9\n1937-01-01\nPending: TSH; follow-up: GP\nPending: ferritin"
-    md = make_letter(t, "gp-update", "GP")
-    assert "Who follows up: GP." in md and f"GP {L.FLAG}" not in md and f"ferritin, sent on an undocumented date. Who follows up: {ND}" in md   # no sent date on the line
+    t = "SYNTH-9\n1937-01-01\nPending: TSH; follow-up: family doctor\nPending: ferritin"
+    md = make_letter(t, "gp-update", "family doctor")
+    assert "Who follows up: family doctor." in md and f"family doctor {L.FLAG}" not in md and f"ferritin, sent on an undocumented date. Who follows up: {ND}" in md   # no sent date on the line
 
 
 def test_pending_cleared_by_result():
     t = "SYNTH-9\n1937-01-01\nPending: TSH\n1937-01-02\nResult: TSH 2.1 mU/L"
-    assert "No results pending" in make_letter(t, "gp-update", "GP")
+    assert "No results pending" in make_letter(t, "gp-update", "family doctor")
 
 
 def test_followup_numbered_with_who_and_when():
-    md = make_letter(F("pneumonia_admission.txt"), "discharge", "GP")
+    md = make_letter(F("pneumonia_admission.txt"), "discharge", "family doctor")
     acts = section(md, "Actions")
-    assert acts.startswith("1. Who: GP. When: in 1 week.")   # round 12: GP allowed (au pack)
+    assert acts.startswith("1. Who: family doctor. When: in 1 week.")   # fixture neutralised to family doctor
     assert f"2. Who: {ND}. When: in 6 weeks." in acts
 
 
 # ---------- uncertainty, question, footer ----------
 def test_uncertainty_preserved():
-    t = "SYNTH-7\n1937-04-01\nProblem: ?PE\nProblem: likely viral illness\nFollow-up: GP review in 1 week"
-    md = make_letter(t, "gp-update", "GP")
+    t = "SYNTH-7\n1937-04-01\nProblem: ?PE\nProblem: likely viral illness\nFollow-up: family doctor review in 1 week"
+    md = make_letter(t, "gp-update", "family doctor")
     assert f"possible PE {L.FLAG}" in md and "pulmonary embolism" not in md and "likely viral illness" in md and "?PE" not in md
 
 
@@ -218,15 +218,15 @@ def test_referral_opens_with_question():
 
 @pytest.mark.parametrize("fx,t", [("chest_pain.txt", "referral"), ("pneumonia_admission.txt", "discharge")])
 def test_footer_unsigned_draft(fx, t):
-    md = make_letter(F(fx), t, "GP")
+    md = make_letter(F(fx), t, "family doctor")
     assert "Signature: [unsigned]" in md and md.rstrip().endswith("Draft: check against the record before sending.")
 
 
 # ---------- labels and sensitive details ----------
 def test_stigmatising_labels_rewritten_and_logged():
     t = ("SYNTH-5\n1937-01-01\nNon-compliant with insulin.\nDrug-seeking behaviour noted, pain 8 out of 10.\n"
-         "Poor historian.\nFollow-up: GP review in 1 week")
-    md, dropped = build(t, "gp-update", "GP")
+         "Poor historian.\nFollow-up: family doctor review in 1 week")
+    md, dropped = build(t, "gp-update", "family doctor")
     low = md.lower()
     for bad in ("compliant", "drug-seeking", "historian"):
         assert bad not in low
@@ -237,13 +237,13 @@ def test_stigmatising_labels_rewritten_and_logged():
 @pytest.mark.parametrize("line,cat", [("PMHx: HIV on treatment", "HIV"), ("PMHx: childhood abuse", "abuse"),
                                       ("PMHx: depression, gout", "psychiatric")])
 def test_sensitive_cut_when_irrelevant_and_logged(line, cat):
-    t = f"SYNTH-6\n{line}\n1937-01-01\nQuestion: Please review ankle.\nFollow-up: GP review in 1 week"
+    t = f"SYNTH-6\n{line}\n1937-01-01\nQuestion: Please review ankle.\nFollow-up: family doctor review in 1 week"
     md, dropped = build(t, "referral", "Orthopaedics")
     assert not re.search(r"HIV|abuse|depression", md) and any(cat in d for d in dropped)
 
 
 def test_sensitive_kept_only_when_brief_includes_it():
-    t = "SYNTH-6\nPMHx: depression\n1937-01-01\nQuestion: Please review mood.\nFollow-up: GP review in 1 week"
+    t = "SYNTH-6\nPMHx: depression\n1937-01-01\nQuestion: Please review mood.\nFollow-up: family doctor review in 1 week"
     assert "depression" not in make_letter(t, "referral", "Psychiatry")          # default: cut, even for psychiatry
     md, _ = build(t, "referral", "Psychiatry", include=["psychiatric history"])
     assert "depression" in md
@@ -264,8 +264,8 @@ def test_a1_full_med_list_always():
 
 # ---------- Amendment 2: allergies ----------
 def test_a2_allergy_reaction_or_not_documented():
-    t = "SYNTH-3\nAllergy: penicillin (anaphylaxis), codeine\n1937-01-01\nFollow-up: GP review in 1 week"
-    al = section(make_letter(t, "gp-update", "GP"), "Allergies")
+    t = "SYNTH-3\nAllergy: penicillin (anaphylaxis), codeine\n1937-01-01\nFollow-up: family doctor review in 1 week"
+    al = section(make_letter(t, "gp-update", "family doctor"), "Allergies")
     assert "penicillin: anaphylaxis" in al and "codeine: reaction not documented" in al
 
 
@@ -330,7 +330,7 @@ def test_a5_brand_and_template_cli(tmp_path):
 
 # ---------- Amendment 6: trends ----------
 def test_a6_trends_are_values_with_dates():
-    res = section(make_letter(F("pneumonia_admission.txt"), "discharge", "GP"), "Results")
+    res = section(make_letter(F("pneumonia_admission.txt"), "discharge", "family doctor"), "Results")
     assert "180 mg/L on 1 Jun 1937, 90 mg/L on 3 Jun 1937, 40 mg/L on 4 Jun 1937" in res
     assert not L.DIRECTION.search(res)
 
@@ -338,7 +338,7 @@ def test_a6_trends_are_values_with_dates():
 @pytest.mark.parametrize("word", ["improving", "rising", "falling", "worsening", "stable", "trend down"])
 def test_a6_planted_direction_word_refused(word):
     text = F("pneumonia_admission.txt")
-    md, _ = build(text, "discharge", "GP")
+    md, _ = build(text, "discharge", "family doctor")
     bad = md.replace("40 mg/L on 4 Jun 1937", f"40 mg/L on 4 Jun 1937, {word}")
     with pytest.raises(Refused, match="direction word"):
         check(bad, parse(text)[1], "discharge")
@@ -346,7 +346,7 @@ def test_a6_planted_direction_word_refused(word):
 
 # ---------- Amendment 7: held-out harness ----------
 def test_a7_heldout_reports_failure_rate(tmp_path, capsys):
-    (tmp_path / "a.txt").write_text("# type=gp-update\n# to=GP\nSYNTH-1\n1937-01-01\nMed: aspirin 100 mg daily\n")
+    (tmp_path / "a.txt").write_text("# type=gp-update\n# to=family doctor\nSYNTH-1\n1937-01-01\nMed: aspirin 100 mg daily\n")
     (tmp_path / "a.expect").write_text("must: aspirin 100 mg daily\n")
     (tmp_path / "b.txt").write_text("# type=gp-update\nSYNTH-2\n1937-01-01\nMed: aspirin 100 mg daily\n")
     (tmp_path / "b.expect").write_text("must-not: aspirin\n")          # planted failure
@@ -367,26 +367,26 @@ def test_a7_no_heldout_notes_in_repo():
 
 # ---------- Educator style ----------
 def test_resolved_abbreviation_expanded_on_first_use_only():
-    md, _ = build(F("pneumonia_admission.txt"), "discharge", "GP", resolve=["tds=three times a day"])
+    md, _ = build(F("pneumonia_admission.txt"), "discharge", "family doctor", resolve=["tds=three times a day"])
     assert md.count("three times a day (tds)") == 1 and "tds for 4 more days" in md
 
 
 def test_no_banned_shorthand():
-    t = "SYNTH-4\n1937-01-01\nc/o SOB on exertion, ?AF\nFollow-up: GP review in 1 week"
-    md = make_letter(t, "gp-update", "GP")
+    t = "SYNTH-4\n1937-01-01\nc/o SOB on exertion, ?AF\nFollow-up: family doctor review in 1 week"
+    md = make_letter(t, "gp-update", "family doctor")
     assert "?AF" not in md and "atrial fibrillation" not in md and "shortness of breath" not in md
     assert f"c/o {L.FLAG} SOB {L.FLAG} on exertion, possible AF {L.FLAG}" in md
 
 
 def test_planted_shorthand_refused():
     text = F("ckd_update.txt")
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     with pytest.raises(Refused, match="the abbreviation at line L"):
         check(md.replace("Clinic. [L3]", "Clinic, c/o SOB. [L3]"), parse(text)[1], "gp-update")
 
 
 def test_point_first_opener():
-    md = make_letter(F("pneumonia_admission.txt"), "discharge", "GP")
+    md = make_letter(F("pneumonia_admission.txt"), "discharge", "family doctor")
     assert "Discharged on 4 Jun 1937. Actions are numbered at the end." in md
 
 
@@ -394,17 +394,17 @@ def test_table_only_for_three_or_more_results():
     two = make_letter(F("chest_pain.txt"), "referral", "Cardiology")
     assert "| Test |" not in two
     t = "SYNTH-2\n1937-01-01\nResult: Hb 120 g/L\nResult: Na 139 mmol/L\nResult: K 4.1 mmol/L"
-    assert "| Test | Results |" in make_letter(t, "gp-update", "GP")
+    assert "| Test | Results |" in make_letter(t, "gp-update", "family doctor")
 
 
 def test_result_without_unit_dropped_and_logged(tmp_path):
-    _, dropped = build("SYNTH-2\n1937-01-01\nResult: Hb 120", "gp-update", "GP")
+    _, dropped = build("SYNTH-2\n1937-01-01\nResult: Hb 120", "gp-update", "family doctor")
     assert any("without a unit" in d for d in dropped)
-    # signed addition (round 12): exact screen line, GP and patient letters; never in letter.md; --final not blocked
+    # signed addition (round 12): exact screen line, family doctor and patient letters; never in letter.md; --final not blocked
     text = tpl(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
-               results=("Hb 120",), actions=("review in 2 weeks, GP",))
+               results=("Hb 120",), actions=("review in 2 weeks, family doctor",))
     lid = line_of(text, "Hb 120")
-    for brief in ("discharge to GP", "letter to the patient"):
+    for brief in ("discharge to family doctor", "letter to the patient"):
         r, out = _run_t(tmp_path / brief.split()[-1], text, "--brief", brief, "--privacy",
                         "true" if "patient" in brief else "false", "--final")                    # check 19
         assert r.returncode == 0, r.stderr
@@ -414,16 +414,16 @@ def test_result_without_unit_dropped_and_logged(tmp_path):
 
 
 def test_planted_long_sentence_flagged_not_refused(tmp_path):
-    t = "SYNTH-2\n1937-01-01\n" + " ".join(["word"] * 30) + ".\nFollow-up: GP review in 1 week"
+    t = "SYNTH-2\n1937-01-01\n" + " ".join(["word"] * 30) + ".\nFollow-up: family doctor review in 1 week"
     flags = []
-    res = build(t, "gp-update", "GP", flags=flags); md, _ = res
+    res = build(t, "gp-update", "family doctor", flags=flags); md, _ = res
     assert "Flag: sentence at L3 is over 25 words. Split it, or keep it as written." in flags
     assert L.SENTENCE_FLAG in md
     with pytest.raises(Refused, match="--final refused"):
         L.finalise(res)
     n = tmp_path / "n.txt"
     n.write_text(tpl(question="Any concerns?", history=" ".join(["word"] * 30) + ".", actions=["review in 1 week, practice nurse"]))
-    r = subprocess.run(CLI + [str(n), "--type", "gp-update", "--to", "GP", "--final"], capture_output=True, text=True)
+    r = subprocess.run(CLI + [str(n), "--type", "gp-update", "--to", "family doctor", "--final"], capture_output=True, text=True)
     assert r.returncode == 3 and "Flag: sentence at L6 is over 25 words. Split it, or keep it as written." in r.stderr
 
 
@@ -432,8 +432,8 @@ def test_planted_overlong_letter_refused_but_discharge_exempt():
                            for m in range(1, 13) for d in range(1, 6))
     t += "Admission: fall\n"
     with pytest.raises(Refused, match="limit is about 400"):
-        make_letter(t, "gp-update", "GP")
-    assert make_letter(t, "discharge", "GP")
+        make_letter(t, "gp-update", "family doctor")
+    assert make_letter(t, "discharge", "family doctor")
 
 
 def test_patient_wording():
@@ -487,7 +487,7 @@ def test_planted_expanded_diagnosis_not_in_notes_refused():
 
 def test_expansion_whose_abbreviation_is_in_uncited_line_refused():
     text = ("Patient: SYNTH-2001\n1937-04-01 Clinic review.\nProblem: palpitations\nPMHx: AF\n"
-            "Follow-up: GP review in 2 weeks")
+            "Follow-up: family doctor review in 2 weeks")
     md, _ = build(text, "gp-update", "General practice")
     src = parse(text)[1]
     line = next(l for l in md.splitlines() if l.startswith("- palpitations"))
@@ -496,7 +496,7 @@ def test_expansion_whose_abbreviation_is_in_uncited_line_refused():
 
 
 def test_legit_expansion_still_passes_via_resolution():
-    text = ("Patient: SYNTH-2002\n1937-04-01 Clinic review.\nProblem: AF\nFollow-up: GP review in 2 weeks")
+    text = ("Patient: SYNTH-2002\n1937-04-01 Clinic review.\nProblem: AF\nFollow-up: family doctor review in 2 weeks")
     md, _ = build(text, "gp-update", "General practice", resolve=["AF=atrial fibrillation"])
     assert "atrial fibrillation (AF) [L3, R1]" in md
 
@@ -591,7 +591,7 @@ def test_ambiguous_abbreviation_flagged_not_expanded_and_final_refused(tmp_path,
     assert not any(g in md.lower() for g in guesses)
     with pytest.raises(Refused, match="flag"):
         L.finalise(res)
-    r = subprocess.run(CLI + [str(_notes(tmp_path, ab)), "--type", "gp-update", "--to", "GP", "--final", *READER],
+    r = subprocess.run(CLI + [str(_notes(tmp_path, ab)), "--type", "gp-update", "--to", "family doctor", "--final", *READER],
                        capture_output=True, text=True)
     assert r.returncode != 0 and "--final refused" in r.stderr and r.stdout == ""
     assert "Flag: an abbreviation on line L6 has no confirmed meaning." in r.stderr   # listed by line only
@@ -613,7 +613,7 @@ def test_resolve_closes_flag_cites_r1_and_final_runs(tmp_path):
     res = build(text, "gp-update", "General practice", resolve=["MS=multiple sclerosis"]); md, _ = res
     assert "- multiple sclerosis (MS) [L3, R1]" in md and L.FLAG not in md
     assert L.finalise(res).count("multiple sclerosis (MS)") == 1
-    r = subprocess.run(CLI + [str(_notes(tmp_path, "MS")), "--type", "gp-update", "--to", "GP",
+    r = subprocess.run(CLI + [str(_notes(tmp_path, "MS")), "--type", "gp-update", "--to", "family doctor",
                               "--resolve", "MS=multiple sclerosis", "--final"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert "multiple sclerosis (MS)" in r.stdout and "[R1]" not in r.stdout and "**DRAFT, unsigned**" in r.stdout
@@ -631,8 +631,8 @@ def test_checker_accepts_expansion_only_via_cited_resolution():
 
 def test_resolve_for_abbreviation_not_in_notes_rejected(tmp_path):
     with pytest.raises(ValueError, match="not in the notes"):
-        build(AMBIG.format(ab="MS"), "gp-update", "GP", resolve=["AF=atrial fibrillation"])
-    r = subprocess.run(CLI + [str(_notes(tmp_path, "MS")), "--type", "gp-update", "--to", "GP",
+        build(AMBIG.format(ab="MS"), "gp-update", "family doctor", resolve=["AF=atrial fibrillation"])
+    r = subprocess.run(CLI + [str(_notes(tmp_path, "MS")), "--type", "gp-update", "--to", "family doctor",
                               "--resolve", "AF=atrial fibrillation"], capture_output=True, text=True)
     assert r.returncode != 0 and "not in the notes" in r.stderr
 
@@ -862,7 +862,7 @@ def test_fixed_wording_never_flagged():
 # ---------- drug-name flag label ----------
 def test_non_wordlist_word_on_medicine_line_gets_drug_label():
     flags = []
-    md, _ = build("Patient: SYNTH-3701\n1937-05-01 Clinic review.\nMed: synthopril 5 mg daily\nQuestion: any concerns?", "gp-update", "GP",
+    md, _ = build("Patient: SYNTH-3701\n1937-05-01 Clinic review.\nMed: synthopril 5 mg daily\nQuestion: any concerns?", "gp-update", "family doctor",
                   flags=flags)
     assert f"synthopril {L.DRUG_FLAG} 5 mg" in md and L.FLAG not in md
     assert flags == ["synthopril (drug name, check spelling) [L3]"]
@@ -973,20 +973,20 @@ def _assert_copy_refused(r, out, where):
     assert _hand_ok(r) and r.stdout != "" and (not out.exists() or list(out.iterdir()) == [])
 
 
-@pytest.mark.parametrize("brief", ["update to patient, cc GP", "update to patient copy to podiatry",
-                                   "update to patient; copied to GP"])
+@pytest.mark.parametrize("brief", ["update to patient, cc family doctor", "update to patient copy to podiatry",
+                                   "update to patient; copied to family doctor"])
 def test_patient_letter_copy_via_brief_refused(tmp_path, brief):
     _assert_copy_refused(*_patient_cli(tmp_path, brief=brief), "in the brief")
 
 
 @pytest.mark.parametrize("tpl", ["{{header}}\n{{meds}}\ncc: {{cc}}\n{{footer}}", "{{header}}\n{{meds}}\n{{copy}}\n{{footer}}",
-                                 "{{header}}\n{{meds}}\nCopy to: GP\n{{footer}}"])
+                                 "{{header}}\n{{meds}}\nCopy to: family doctor\n{{footer}}"])
 def test_patient_letter_copy_via_template_refused(tmp_path, tpl):
     t = tmp_path / "tpl.md"; t.write_text(tpl)
     _assert_copy_refused(*_patient_cli(tmp_path, extra=("--template", str(t))), "in the template")
 
 
-@pytest.mark.parametrize("line", ["cc: GP", "Copy to: Dr A. Synth", "cc: podiatry on 1937-02-11"])
+@pytest.mark.parametrize("line", ["cc: family doctor", "Copy to: Dr A. Synth", "cc: podiatry on 1937-02-11"])
 def test_patient_letter_copy_via_notes_refused(tmp_path, line):
     n = tmp_path / "notes.txt"; n.write_text((TPL / "podiatry_referral.txt").read_text() + "- " + line + "\n")
     _assert_copy_refused(*_patient_cli(tmp_path, notes=n), _nline(n.read_text()))
@@ -1008,11 +1008,11 @@ def test_patient_letter_ends_with_privacy_line(tmp_path):
 
 def test_non_patient_letters_refuse_copies_and_have_no_privacy_line(tmp_path):
     with pytest.raises(Refused, match="This tool never sends copies"):
-        build(F("podiatry_referral.txt") + "cc: GP\n", "referral", "Podiatry")
+        build(F("podiatry_referral.txt") + "cc: family doctor\n", "referral", "Podiatry")
     md, _ = build(F("podiatry_referral.txt"), "referral", "Podiatry")
     assert L.PATIENT_PRIVACY not in md and md.rstrip().endswith("Draft: check against the record before sending.")
     o = tmp_path / "o"
-    r = subprocess.run(CLI + [POD, "--brief", "referral to podiatry, cc GP", "--out", str(o)],
+    r = subprocess.run(CLI + [POD, "--brief", "referral to podiatry, cc family doctor", "--out", str(o)],
                        capture_output=True, text=True)
     assert r.returncode == 2 and _clin(r) == "Refused: copy request in the brief. " + EXACT_TAIL
     assert not o.exists() or list(o.iterdir()) == []
@@ -1025,7 +1025,7 @@ EXACT_TAIL = ("This tool can't send copies. Write a separate letter for each rea
               "so nobody assumes someone was copied in when they weren't.")
 
 
-def _gp_cli(tmp_path, notes=CKD, brief="update to GP", extra=()):
+def _gp_cli(tmp_path, notes=CKD, brief="update to family doctor", extra=()):
     out = tmp_path / "out"
     ids = READER if "patient" in brief else READER2                       # the patient as copy recipient: no id
     r = subprocess.run(CLI + [str(notes), "--brief", brief, "--out", str(out), *ids, *extra],
@@ -1039,8 +1039,8 @@ def _assert_gp_refused(r, out, where, patient_named=False):
     assert r.stdout == (PV_LINE + "\n" if patient_named else "") and _hand_ok(r) and (not out.exists() or list(out.iterdir()) == [])
 
 
-@pytest.mark.parametrize("brief", ["update to GP, cc cardiology", "update to GP copy to renal",
-                                   "update to GP; copied to patient", "update to GP c.c. renal"])
+@pytest.mark.parametrize("brief", ["update to family doctor, cc cardiology", "update to family doctor copy to renal",
+                                   "update to family doctor; copied to patient", "update to family doctor c.c. renal"])
 def test_gp_letter_copy_via_brief_refused(tmp_path, brief):
     _assert_gp_refused(*_gp_cli(tmp_path, brief=brief), "in the brief", "patient" in brief)   # fails closed
 
@@ -1069,7 +1069,7 @@ def test_gp_letter_without_copy_still_written(tmp_path):
 def test_build_refuses_copy_for_gp():
     text = CKD_FREE.read_text(encoding="utf-8") + "\ncc: renal clinic\n"
     with pytest.raises(Refused, match="This tool never sends copies"):
-        build(text, "gp-update", "GP")
+        build(text, "gp-update", "family doctor")
 
 
 # ---------- cc: dose unit vs chief complaint vs copy request ----------
@@ -1080,7 +1080,7 @@ def test_dose_unit_cc_always_flagged_like_u(dose):
 
 
 def test_chief_complaint_heading_not_refused(tmp_path):
-    md, _ = build(CKD_FREE.read_text(encoding="utf-8").rstrip("\n") + "\nCC: chest pain\n", "gp-update", "GP")
+    md, _ = build(CKD_FREE.read_text(encoding="utf-8").rstrip("\n") + "\nCC: chest pain\n", "gp-update", "family doctor")
     assert md
 
 
@@ -1094,7 +1094,7 @@ def test_unclear_cc_heading_refused(tmp_path, line):
 def test_cc_dose_unit_not_refused_but_flagged(tmp_path):
     text = "Patient: SYNTH-3502\n1937-05-01 Clinic review.\nProblem: given 5 cc saline flush\nFollow-up: review in 2 weeks\nQuestion: any concerns?"
     flags = []
-    md, _ = build(text, "gp-update", "GP", flags=flags)
+    md, _ = build(text, "gp-update", "family doctor", flags=flags)
     assert f"5 cc {L.FLAG}" in md and len(flags) == 1 and md.count(L.FLAG) == 1
     with pytest.raises(Refused, match="the dose unit at line L"):
         check(md.replace(f"5 cc {L.FLAG}", "5 cc"), parse(text)[1], "gp-update")
@@ -1133,7 +1133,7 @@ MED_MSG = ("Flag: a medicine on line {} may tell the reader about something that
 
 
 @pytest.mark.parametrize("letter_type,to", [("gp-update", "Podiatry"), ("referral", "Dermatology"),
-                                            ("gp-update", "GP")])
+                                            ("gp-update", "family doctor")])
 def test_sensitive_cut_everywhere_medicine_stays_and_flagged(letter_type, to):
     text = HIV_NOTES + ("Question: please review\n" if letter_type == "referral" else "")
     flags = []
@@ -1183,7 +1183,7 @@ def test_linked_terms_file_signed_off():
                                        ("Pending: echo - cardiology to arrange", "cardiology to arrange")])
 def test_missing_required_detail_refused_names_line_only(line, lost):
     text = "Patient: SYNTH-4301\n1937-06-03 Clinic review.\n" + line + "\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     L.refuse_missing_required(md, text)                      # complete letter passes
     with pytest.raises(Refused) as e:
         L.refuse_missing_required(md.replace(lost, "not documented"), text)
@@ -1203,7 +1203,7 @@ def test_sensitive_kept_for_relevant_reader():
 # ---------- documented allergy reactions and pending owners are kept ----------
 def _two(lines):
     text = "Patient: SYNTH-4201\n1937-06-03 Clinic review.\n" + lines + "\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     return md, text
 
 
@@ -1244,7 +1244,7 @@ def test_pending_without_owner_still_not_documented():
 
 # ---------- brief parser ----------
 BRIEF_MSG = ('Refused: brief not understood. Write it as "<kind> to <reader>", for example '
-             '"discharge to GP" or "update to patient".')
+             '"discharge to family doctor" or "update to patient".')
 
 
 @pytest.mark.parametrize("brief,kind,reader", [
@@ -1258,7 +1258,7 @@ def test_brief_kinds(brief, kind, reader):
 
 
 @pytest.mark.parametrize("brief", ["please write something for Mrs Synthname", "Mrs Synthname", "summary of Mrs Synthname",
-                                   "poem to Mrs Synthname", "", "to GP"])
+                                   "poem to Mrs Synthname", "", "to family doctor"])
 def test_unknown_brief_refused_without_echo(tmp_path, brief):
     out = tmp_path / "o"
     r = subprocess.run(CLI + [str(CKD), "--brief", brief, "--out", str(out)], capture_output=True, text=True)
@@ -1272,13 +1272,13 @@ def test_update_to_patient_brief_is_patient_letter(tmp_path):
     r = subprocess.run(CLI + [POD, "--brief", "update to patient", "--out", str(out)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert (out / "letter.md").read_text().rstrip("\n").endswith(L.PATIENT_PRIVACY)
-    r = subprocess.run(CLI + [POD, "--brief", "update to patient, cc GP", "--out", str(tmp_path / "p")],
+    r = subprocess.run(CLI + [POD, "--brief", "update to patient, cc family doctor", "--out", str(tmp_path / "p")],
                        capture_output=True, text=True)
     assert r.returncode == 2 and _clin(r) == f"Refused: copy request in the brief. {PATIENT_TAIL}"
 
 
 def test_copy_refusal_in_any_brief_kind(tmp_path):
-    r, out = _gp_cli(tmp_path, brief="discharge summary to GP, cc renal")
+    r, out = _gp_cli(tmp_path, brief="discharge summary to family doctor, cc renal")
     _assert_gp_refused(r, out, "in the brief")
 
 
@@ -1331,7 +1331,7 @@ OWNER_MSG = "Flag: the pending test on line L3 has follow-up wording. Check who 
 def test_allergy_extra_wording_flagged_and_no_reaction_wording(line):   # round 10 item 8: both
     text = "Patient: SYNTH-4601\n1937-06-03 Clinic review.\nAllergy: " + line + "\nFollow-up: review in 2 weeks\n"
     flags = []
-    md, _ = build(text, "gp-update", "GP", flags=flags)
+    md, _ = build(text, "gp-update", "family doctor", flags=flags)
     al = section(md, "Allergies")
     assert f"{line}: reaction not documented {L.ALLERGY_FLAG}" in al and ALLERGY_MSG in flags
 
@@ -1340,7 +1340,7 @@ def test_allergy_extra_wording_flagged_and_no_reaction_wording(line):   # round 
 def test_pending_owner_wording_flagged_not_not_documented(line):
     text = "Patient: SYNTH-4602\n1937-06-03 Clinic review.\nPending: " + line + "\nFollow-up: review in 2 weeks\n"
     flags = []
-    md, _ = build(text, "gp-update", "GP", flags=flags)
+    md, _ = build(text, "gp-update", "family doctor", flags=flags)
     p = section(md, "Results still to come")
     assert "not documented" not in p and L.OWNER_FLAG in p and OWNER_MSG in flags
 
@@ -1353,7 +1353,7 @@ def test_pending_owner_wording_flagged_not_not_documented(line):
 ])
 def test_checker_messages_line_only_no_letter_text(mutate):
     text = "Patient: SYNTH-4701\n1937-06-03 Clinic review.\nProblem: knee pain\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     with pytest.raises(Refused) as e:
         check(mutate(md), parse(text)[1], "gp-update")
     for msg in str(e.value).splitlines():
@@ -1391,16 +1391,16 @@ Med: abacavir 600 mg daily (for HIV)
 Med: Zentrolib 5 mg daily
 Allergy: penicillin - rash
 Pending: MRI knee - ortho registrar to chase
-Follow-up: GP review in 2 weeks
+Follow-up: family doctor review in 2 weeks
 """
 
 
 SURNAME_T = tpl(pid="SYNTH-4801", question="Is the knee pain from the joint?", problems=["knee pain, seen by Dr Quorvex"],
                 history="HIV", meds=["abacavir 600 mg daily reason: HIV", "Zentrolib 5 mg daily"], allergies=["penicillin: rash"],
-                pending=["MRI knee, sent 1937-06-03, ortho registrar"], actions=["review in 2 weeks, GP"])
+                pending=["MRI knee, sent 1937-06-03, ortho registrar"], actions=["review in 2 weeks, family doctor"])
 
 
-@pytest.mark.parametrize("args", [("--type", "gp-update", "--to", "Podiatry"), ("--brief", "update to GP"),
+@pytest.mark.parametrize("args", [("--type", "gp-update", "--to", "Podiatry"), ("--brief", "update to family doctor"),
                                   ("--brief", "update to patient")])
 def test_written_letter_prints_no_note_tokens(tmp_path, args):
     r, out = _cli_out(tmp_path, SURNAME_T, *args)
@@ -1436,7 +1436,7 @@ def test_owner_recognition_generalised(line, test, owner):
                                   "Thyroid function still pending", "Biopsy result outstanding - ward team"])
 def test_untagged_pending_goes_to_pending_section(line):
     text = "Patient: SYNTH-4901\n1937-06-03 Clinic review.\nProblem: knee pain\n" + line + "\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     p = section(md, "Results still to come")
     assert "No results pending" not in md and "[L4]" in p
     assert "[L4]" not in section(md, "Background")
@@ -1449,7 +1449,7 @@ def test_untagged_pending_goes_to_pending_section(line):
 ])
 def test_medicine_reason_found_never_reason_not_documented(line, reason):
     text = "Patient: SYNTH-5001\n1937-06-03 Clinic review.\nProblem: gout\n" + line + "\nFollow-up: review in 2 weeks\n"
-    for aud, to in (("patient", "Patient"), (None, "GP")):
+    for aud, to in (("patient", "Patient"), (None, "family doctor")):
         md, _ = build(text, "gp-update", to, audience=aud)
         meds = section(md, "Your medicines now" if aud else "Current medicines")
         assert reason in meds and REASON_ND not in meds, (aud, meds)
@@ -1474,7 +1474,7 @@ def test_patient_hiv_reason_never_with_not_documented():
                                   "penicillin: unknown", "penicillin - nil known", "penicillin - reaction unknown"])
 def test_allergy_no_reaction_text_exact(line):
     text = "Patient: SYNTH-5201\n1937-06-03 Clinic review.\nAllergy: " + line + "\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     al = section(md, "Allergies")
     assert al.startswith("- penicillin: reaction not documented [L3]"), al
 
@@ -1494,14 +1494,14 @@ def test_referral_without_question_cli_flag_not_refusal(tmp_path):
 def test_pending_cleared_by_later_result(later):
     text = ("Patient: SYNTH-5301\n1937-06-03 Clinic review.\nPending: echo - cardiology to arrange\n"
             "1937-06-10 Review.\n" + later + "\nFollow-up: review in 2 weeks\n")
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert "cardiology to arrange" not in section(md, "Results still to come")
 
 
 def test_pending_stays_when_result_is_earlier():
     text = ("Patient: SYNTH-5302\n1937-06-03 Clinic review.\nResult: echo normal\n"
             "1937-06-10 Review.\nPending: echo - cardiology to arrange\nFollow-up: review in 2 weeks\n")
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert "cardiology to arrange" in section(md, "Results still to come")
 
 
@@ -1511,7 +1511,7 @@ def test_letter_saying_none_pending_while_pending_refused(monkeypatch):
     monkeypatch.setattr(L, "section_items", lambda n, st, a: [] if n == "pending" else real(n, st, a))
     monkeypatch.setattr(L, "refuse_missing_required", lambda md, text, ids=None: None)
     with pytest.raises(Refused) as e:
-        build(text, "gp-update", "GP")
+        build(text, "gp-update", "family doctor")
     assert str(e.value) == "Refused: line L3 has a test still pending, but this letter says none are. Nothing was written. Add the pending test to the letter, then run again."
 
 
@@ -1717,7 +1717,7 @@ def test_patient_letters_drop_nothing_for_linked_terms():
                                   "Medications: allopurinol 100 mg daily; colchicine 500 mcg twice daily"])
 def test_med_list_lines_split_never_list_not_documented(line):
     text = "Patient: SYNTH-5601\n1937-06-03 Clinic review.\nProblem: gout\n" + line + "\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     meds = section(md, "Current medicines")
     assert "allopurinol" in meds and "colchicine" in meds and "Current medicines not documented" not in md
     for l in meds.splitlines():
@@ -1729,7 +1729,7 @@ def test_med_list_lines_split_never_list_not_documented(line):
 def test_pending_cleared_by_any_later_result_line(later):
     text = ("Patient: SYNTH-5701\n1937-06-03 Clinic review.\nPending: echo - cardiology to arrange\n"
             "1937-06-10 Review.\n" + later + "\nFollow-up: review in 2 weeks\n")
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert "cardiology to arrange" not in md.split("## Results still to come")[1].split("##")[0]
 
 
@@ -1751,13 +1751,13 @@ def test_no_question_flag_blocks_final_cli(tmp_path):
     assert not out.exists() or list(out.iterdir()) == []
 
 
-# ---------- round 7: cut by default (GP included), include line, every cut flagged ----------
+# ---------- round 7: cut by default (family doctor included), include line, every cut flagged ----------
 CUT_MSG = "Flag: something on line {} was cut to keep it private. Check the reader doesn't need it."
 
 
 def test_default_cut_for_gp_and_flagged_blocks_final():
     flags = []
-    res = build(PSY, "gp-update", "GP", flags=flags); md, _ = res
+    res = build(PSY, "gp-update", "family doctor", flags=flags); md, _ = res
     assert "bipolar" not in md and CUT_MSG.format("L4") in flags and L.CUT_FLAG not in md   # round 11 freeze: screen only
     shown = L.printed_flags(flags, md)
     with pytest.raises(Refused, match="--final refused"):
@@ -1772,14 +1772,14 @@ PSY_T = tpl(pid="SYNTH-5401", question="Can you treat the toenail?", problems=["
 def test_include_line_keeps_item(tmp_path):
     n = tmp_path / "n.txt"; n.write_text(PSY_T)
     out = tmp_path / "o"
-    r = subprocess.run(CLI + [str(n), "--brief", "update to GP\ninclude: psychiatric history", "--out", str(out)],
+    r = subprocess.run(CLI + [str(n), "--brief", "update to family doctor\ninclude: psychiatric history", "--out", str(out)],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     assert "bipolar" in md and "Cut from this letter" not in r.stderr and L.CUT_FLAG not in md
 
 
-@pytest.mark.parametrize("brief", ["update to GP\nreferral to renal"])
+@pytest.mark.parametrize("brief", ["update to family doctor\nreferral to renal"])
 def test_bad_include_or_two_briefs_refused_without_echo(tmp_path, brief):
     n = tmp_path / "n.txt"; n.write_text(PSY)
     r = subprocess.run(CLI + [str(n), "--brief", brief, "--out", str(tmp_path / "o")], capture_output=True, text=True)
@@ -1789,7 +1789,7 @@ def test_bad_include_or_two_briefs_refused_without_echo(tmp_path, brief):
 def test_bad_include_names_item_per_ruling(tmp_path):
     # round 11 signed rulings: an off-list Include: item is refused as "an item", never echoing the brief
     n = tmp_path / "n.txt"; n.write_text(PSY)
-    r = subprocess.run(CLI + [str(n), "--brief", "update to GP\ninclude: Mrs Synthname", "--out", str(tmp_path / "o")],
+    r = subprocess.run(CLI + [str(n), "--brief", "update to family doctor\ninclude: Mrs Synthname", "--out", str(tmp_path / "o")],
                        capture_output=True, text=True)
     assert r.returncode == 2 and _clin(r) == L.SENSITIVE_REFUSED.format(n=2)
     assert "Synthname" not in r.stderr + r.stdout and "Mrs" not in r.stderr + r.stdout
@@ -1839,17 +1839,17 @@ def test_reason_not_included_only_when_a_reason_was_cut(medline, want):
                                      "Med: paracetamol 1 g as needed for pain", "Med: metformin 500 mg daily, taken for type 2 diabetes"])
 def test_reason_phrasings_never_with_not_documented(medline):
     text = "Patient: SYNTH-6001\n1937-06-03 Clinic review.\nProblem: type 2 diabetes\n" + medline + "\nFollow-up: review in 2 weeks\n"
-    for aud, to in ((None, "GP"), ("patient", "Patient")):
+    for aud, to in ((None, "family doctor"), ("patient", "Patient")):
         md, _ = build(text, "gp-update", to, audience=aud)
         meds = section(md, "Your medicines now" if aud else "Current medicines")
         assert "reason not documented" not in meds, meds
 
 
-@pytest.mark.parametrize("drug", ["Tritace", "Zentrolib", "Coversyl"])
+@pytest.mark.parametrize("drug", ["Tritace", "Zentrolib", "Velbrintax"])   # Velbrintax: made-up brand on no list
 def test_capitalised_unknown_drug_gets_drug_name_flag(drug):
     text = "Patient: SYNTH-6002\n1937-06-03 Clinic review.\nProblem: high blood pressure\nMed: " + drug + \
            " 5 mg daily\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert f"{drug} {L.DRUG_FLAG}" in md
 
 
@@ -1858,7 +1858,7 @@ def test_capitalised_unknown_drug_gets_drug_name_flag(drug):
                                   "Thyroid function has been sent", "Biopsy results to follow"])
 def test_more_pending_phrasings_reach_pending_section(line):
     text = "Patient: SYNTH-6101\n1937-06-03 Clinic review.\nProblem: knee pain\n" + line + "\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert "[L4]" in section(md, "Results still to come") and "No results pending" not in md
 
 
@@ -1882,7 +1882,7 @@ def test_no_question_opens_with_reason_for_referral():
                                         ("penicillin \u2192 swelling", "swelling")])
 def test_allergy_reaction_separators_kept(line, react):
     text = "Patient: SYNTH-6103\n1937-06-03 Clinic review.\nAllergy: " + line + "\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert f"penicillin: {react}" in section(md, "Allergies")
 
 
@@ -1896,22 +1896,22 @@ def test_allergy_line_with_linked_brand_never_dropped():
 # ---------- permanent regression tests from Physician-scored failures (descriptions only) ----------
 def test_reg_h3_brand_on_med_line_never_leaks():
     """heldout3: brand names leaked on the medication line when the item was cut."""
-    md, _ = build(PSY.replace("Med: lithium 250 mg twice daily", "Med: Lithicarb 250 mg twice daily"), "gp-update", "GP")
+    md, _ = build(PSY.replace("Med: lithium 250 mg twice daily", "Med: Lithicarb 250 mg twice daily"), "gp-update", "family doctor")
     assert "Lithicarb" not in md and "lithium 250 mg twice daily" in md
 
 
 def test_reg_h3_registry_and_prescriber_terms_never_leak():
     """heldout3: registry/prescriber terms leaked."""
-    md, _ = build(PSY + "Plan: clozapine registry updated\n", "gp-update", "GP")
+    md, _ = build(PSY + "Plan: clozapine registry updated\n", "gp-update", "family doctor")
     assert "registry" not in md
-    md, _ = build(HIV_NOTES + "Plan: see S100 prescriber\n", "gp-update", "GP")
+    md, _ = build(HIV_NOTES + "Plan: see S100 prescriber\n", "gp-update", "family doctor")
     assert "S100" not in md
 
 
 def test_reg_h3_cut_diagnosis_on_med_line_never_leaks():
     """heldout3: a cut diagnosis given as the reason on the medication line leaked."""
     md, _ = build(PSY.replace("Med: lithium 250 mg twice daily", "Med: lithium 250 mg twice daily (for bipolar disorder)"),
-                  "gp-update", "GP")
+                  "gp-update", "family doctor")
     assert "bipolar" not in md and "reason not included" not in md and "lithium 250 mg twice daily" in md   # H22
 
 
@@ -1928,7 +1928,7 @@ def test_reg_h4_brand_without_diagnosis_still_cut_and_swapped():
 def test_reg_h4_reason_and_not_documented_never_both():
     """Physician: a medicine showed its reason together with 'reason not documented'."""
     text = "Patient: SYNTH-6201\n1937-06-03 Clinic review.\nProblem: gout\nMed: allopurinol 100 mg daily, used for gout\nFollow-up: review\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     for l in section(md, "Current medicines").splitlines():
         assert not ("gout" in l and "reason not documented" in l)
 
@@ -1936,7 +1936,7 @@ def test_reg_h4_reason_and_not_documented_never_both():
 def test_reg_h4_pending_test_in_pending_section():
     """Physician: pending tests were missing from the pending section."""
     text = "Patient: SYNTH-6202\n1937-06-03 Clinic review.\nProblem: knee pain\nMRI knee requested, ortho registrar to chase\nFollow-up: review\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     p = FLAG_RX.sub("", section(md, "Results still to come"))
     assert "MRI knee" in p and "ortho registrar to chase" in p
 
@@ -1952,21 +1952,21 @@ def test_reg_h4_unusual_question_found():
 def test_reg_h4_tritace_like_brand_drug_flag_not_refused():
     """Physician: an unknown brand like Tritace got an abbreviation flag."""
     text = "Patient: SYNTH-6204\n1937-06-03 Clinic review.\nProblem: high blood pressure\nMed: Tritace 5 mg daily\nFollow-up: review\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert f"Tritace {L.DRUG_FLAG}" in md
 
 
 def test_reg_h4_medicine_flag_when_brand_swapped():
     """Physician: medicine flag missing when a brand was swapped or cut on the medication line."""
     flags = []
-    build(PSY.replace("Med: lithium 250 mg twice daily", "Med: Quilonum 250 mg daily"), "gp-update", "GP", flags=flags)
+    build(PSY.replace("Med: lithium 250 mg twice daily", "Med: Quilonum 250 mg daily"), "gp-update", "family doctor", flags=flags)
     assert MED_MSG.format("L5") in flags
 
 
 def test_reg_h4_allergy_reaction_kept():
     """Physician: an allergy reaction was lost."""
     text = "Patient: SYNTH-6205\n1937-06-03 Clinic review.\nAllergy: penicillin = anaphylaxis\nFollow-up: review\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert "penicillin: anaphylaxis" in section(md, "Allergies")
 
 
@@ -1979,7 +1979,7 @@ def test_reg_h4_p08_no_question_opener():
 def test_include_lines_recorded_on_stderr(tmp_path):
     n = tmp_path / "n.txt"; n.write_text(PSY_T.replace("History: bipolar disorder", "History: bipolar disorder, on PrEP"))
     out = tmp_path / "o"
-    r = subprocess.run(CLI + [str(n), "--brief", "update to GP\ninclude: Psychiatric History\ninclude: PrEP", "--out", str(out)],
+    r = subprocess.run(CLI + [str(n), "--brief", "update to family doctor\ninclude: Psychiatric History\ninclude: PrEP", "--out", str(out)],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     lines = r.stderr.splitlines()
@@ -1996,7 +1996,7 @@ Drug chart: atenolool 25 mg mane
 """
 
 
-def _r8(text=R8, t="gp-update", to="GP", aud=None):
+def _r8(text=R8, t="gp-update", to="family doctor", aud=None):
     flags = []
     md, _ = build(text, t, to, audience=aud, flags=flags)
     return md, flags
@@ -2171,7 +2171,7 @@ def test_untagged_result_kept_in_letter():
 
 
 def test_untagged_lithium_result_kept_for_patient():
-    md = make_letter(RES_NOTES.format(line="Serum lithium 0.9 mmol/L"), "gp-update", "GP", audience="patient")
+    md = make_letter(RES_NOTES.format(line="Serum lithium 0.9 mmol/L"), "gp-update", "family doctor", audience="patient")
     assert "0.9 mmol/L" in md
 
 
@@ -2196,7 +2196,7 @@ COMBO_MSG = "Refused: line L{n} has a combination medicine that this tool can't 
 @pytest.mark.parametrize("audience", [None, "patient"])
 def test_combination_brand_refused(brand, audience):
     with pytest.raises(Refused) as e:
-        make_letter(COMBO_NOTES.format(line=f"Med: {brand} 1 tablet daily"), "gp-update", "GP", audience=audience)
+        make_letter(COMBO_NOTES.format(line=f"Med: {brand} 1 tablet daily"), "gp-update", "family doctor", audience=audience)
     assert str(e.value) == COMBO_MSG.format(n=4)
     assert brand.lower() not in str(e.value).lower()
 
@@ -2354,7 +2354,7 @@ def test_r9_bulleted_medicines_stay_separate():
 
 def test_r9_brand_then_other_drug_not_a_change():
     notes = NM_NOTES.replace("* alphastatin 2 mg nocte - cholesterol", "* Nexium 20 mg daily - reflux")
-    md, _ = build(notes, "gp-update", "GP")
+    md, _ = build(notes, "gp-update", "family doctor")
     meds = FLAG_RX.sub("", section(md, "Current medicines"))
     assert "Nexium 20 mg daily (for reflux) [L5]" in meds and "betamibe 10 mg daily" in meds and "Changed" not in md
 
@@ -2362,7 +2362,7 @@ def test_r9_brand_then_other_drug_not_a_change():
 def test_r9_sentence_after_medicine_never_joined():
     notes = ("SYNTH-9912 :: M :: 52\nAllergy: penicillin - hives\n1937-06-02 discharged after hernia repair.\n"
              "Medication chart:\n  amlodipine 5 mg mane\nAmlodipine review due weekly per clinic.\n")
-    md, _ = build(notes, "discharge", "GP")
+    md, _ = build(notes, "discharge", "family doctor")
     meds = FLAG_RX.sub("", section(md, "Current medicines"))
     assert "amlodipine 5 mg mane" in meds and "review due" not in meds and "Changed" not in md
 
@@ -2431,21 +2431,21 @@ def test_r9_patient_sections_checked_too():
 @pytest.mark.parametrize("aud", [None, "patient"])
 def test_r9_allergy_under_unusual_heading_goes_to_allergies(line, want, aud):
     notes = f"SYNTH-9931 :: F :: 60\n{line}\n1937-02-01 review.\nMed: alphazole 20 mg daily\n"
-    md, _ = build(notes, "gp-update", "Patient" if aud else "GP", audience=aud)
+    md, _ = build(notes, "gp-update", "Patient" if aud else "family doctor", audience=aud)
     assert want in FLAG_RX.sub("", section(md, "Allergies"))
     assert "Allergies not documented" not in md
 
 
 @pytest.mark.parametrize("nil", ["none", "nil", "none known", "nil known"])
 def test_r9_nil_allergy_under_unusual_heading(nil):
-    md, _ = build(f"SYNTH-9932 :: F :: 60\nSensitivities: {nil}\n1937-02-01 review.\n", "gp-update", "GP")
+    md, _ = build(f"SYNTH-9932 :: F :: 60\nSensitivities: {nil}\n1937-02-01 review.\n", "gp-update", "family doctor")
     assert "No known drug allergies [L2]" in md and "Allergies not documented" not in md
 
 
 def test_r9_cut_reason_reads_reason_not_included():
     notes = ("SYNTH-9933 :: F :: 49\nSensitivities: none\n1937-03-30 discharged after surgery.\nTablets taken:\n"
              "  lithium carbonate 300 mg twice daily - steadies her\n")
-    md, _ = build(notes, "discharge", "GP")
+    md, _ = build(notes, "discharge", "family doctor")
     meds = FLAG_RX.sub("", section(md, "Current medicines"))
     assert "lithium carbonate 300 mg twice daily [" in meds and "reason not included" not in meds   # H22
     assert "steadies" not in md and "reason not documented" not in meds
@@ -2453,7 +2453,7 @@ def test_r9_cut_reason_reads_reason_not_included():
 
 def test_r9_sensitive_reason_reads_reason_not_included():
     notes = "SYNTH-9934 :: F :: 54\n1937-09-17 update.\nCurrent Rx\n* zerotraline 50 mg daily - anxiety\n"
-    md, _ = build(notes, "gp-update", "GP")
+    md, _ = build(notes, "gp-update", "family doctor")
     assert "zerotraline 50 mg daily [" in FLAG_RX.sub("", md) and "anxiety" not in md   # H22: no marker
     assert "reason not included" not in md and L.MED_FLAG not in md
 
@@ -2462,7 +2462,7 @@ def test_r9_sensitive_reason_reads_reason_not_included():
                                          ("Stopped: naproxen 1937-08 because of stomach upset", "because of stomach upset"),
                                          ("Stop: amlodipine - ankle swelling", "ankle swelling")])
 def test_r9_stated_stop_reason_kept(line, reason):
-    md, _ = build(f"SYNTH-9935 :: F :: 71\n1937-07-19 review.\n{line}\n", "gp-update", "GP")
+    md, _ = build(f"SYNTH-9935 :: F :: 71\n1937-07-19 review.\n{line}\n", "gp-update", "family doctor")
     ch = FLAG_RX.sub("", section(md, "Medicine changes"))
     assert f"Reason for change: {reason}." in ch and "Reason for change: not documented" not in ch
 
@@ -2471,20 +2471,20 @@ def test_r9_stated_stop_reason_kept(line, reason):
                                       ("Recheck in 4 weeks - you can book at the front desk", "you can book at the front desk"),
                                       ("Your next blood test is 1937-09-17 - practice nurse", "practice nurse")])
 def test_r9_followup_and_owner_go_to_actions(line, who):
-    md, _ = build(f"SYNTH-9936 :: F :: 58\n1937-09-03 review.\n{line}\n", "gp-update", "GP")
+    md, _ = build(f"SYNTH-9936 :: F :: 58\n1937-09-03 review.\n{line}\n", "gp-update", "family doctor")
     acts = FLAG_RX.sub("", section(md, "Actions"))
     assert f"Who: {who}." in acts and "Follow-up actions not documented" not in md
     assert line.split(" - ")[0].split()[0] not in FLAG_RX.sub("", section(md, "Background"))
 
 
 def test_r9_pending_awaiting_is_not_an_owner():
-    md, _ = build("SYNTH-9937 :: F :: 45\n1937-07-02 seen.\nVitamin B12 sent 1937-07-02 - awaiting lab\n", "gp-update", "GP")
+    md, _ = build("SYNTH-9937 :: F :: 45\n1937-07-02 seen.\nVitamin B12 sent 1937-07-02 - awaiting lab\n", "gp-update", "family doctor")
     p = FLAG_RX.sub("", section(md, "Results still to come"))
     assert "Who follows up: not documented." in p and "awaiting lab" not in p.split("Who follows up:")[1]
 
 
 def test_r9_pending_named_owner_still_kept():
-    md, _ = build("SYNTH-9938 :: F :: 45\n1937-07-02 seen.\nEcho sent 1937-07-02 - renal fellow to chase\n", "gp-update", "GP")
+    md, _ = build("SYNTH-9938 :: F :: 45\n1937-07-02 seen.\nEcho sent 1937-07-02 - renal fellow to chase\n", "gp-update", "family doctor")
     assert "Who follows up: renal fellow to chase." in FLAG_RX.sub("", md)
 
 
@@ -2514,7 +2514,7 @@ COPY_BASE = "SYNTH-9951 :: F :: 81\nAllergy: zorvadol - hallucinations\n1937-05-
 
 
 @pytest.mark.parametrize("sentence", COPY_SENTENCES)
-@pytest.mark.parametrize("brief,tail", [("letter to the patient", L.PATIENT_COPY_TAIL), ("update to GP", L.COPY_TAIL)])
+@pytest.mark.parametrize("brief,tail", [("letter to the patient", L.PATIENT_COPY_TAIL), ("update to family doctor", L.COPY_TAIL)])
 @pytest.mark.parametrize("final", [False, True])
 def test_r9_copy_request_in_a_sentence_refused_exit_2_nothing_written(tmp_path, sentence, brief, tail, final):
     n = tmp_path / "notes.txt"; out = tmp_path / "out"
@@ -2543,7 +2543,7 @@ def test_r9_copies_as_a_lab_unit_is_not_a_copy_request():
 @pytest.mark.parametrize("line,allergen", [("Allergy: penicillin", "penicillin"), ("Allergy: Zorvacillin - unknown", "Zorvacillin"),
                                            ("Sensitivities: zorbamycin (reaction not known)", "zorbamycin")])
 def test_r9_allergy_without_reaction_clinician_wording(line, allergen):
-    md, _ = build(f"SYNTH-9961 :: F :: 60\n{line}\n1937-02-01 review.\n", "gp-update", "GP")
+    md, _ = build(f"SYNTH-9961 :: F :: 60\n{line}\n1937-02-01 review.\n", "gp-update", "family doctor")
     assert f"{allergen}: reaction not documented" in FLAG_RX.sub("", section(md, "Allergies"))
 
 
@@ -2571,7 +2571,7 @@ def test_r9_new_hiv_names_stay_flag_only_for_cutting():
 
 
 def test_r9_augmentin_recognised_not_flagged():
-    md, _ = build("SYNTH-9964 :: M :: 40\n1937-02-01 review.\nMed: Augmentin 875 mg bd\n", "gp-update", "GP")
+    md, _ = build("SYNTH-9964 :: M :: 40\n1937-02-01 review.\nMed: Augmentin 875 mg bd\n", "gp-update", "family doctor")
     assert f"Augmentin {L.DRUG_FLAG}" not in md and "Augmentin 875 mg" in md
 
 
@@ -2580,7 +2580,7 @@ def test_r9_combination_refusal_and_linked_terms_unchanged():
     digest = (HERE / "LINKED_TERMS.SHA256").read_text().split()[0]
     assert hashlib.sha256((HERE / "linked_terms.toml").read_bytes()).hexdigest() == digest
     with pytest.raises(Refused, match="combination medicine"):
-        build("SYNTH-9965 :: M :: 40\n1937-02-01 review.\nMed: Biktarvy 1 tablet daily\n", "gp-update", "GP")
+        build("SYNTH-9965 :: M :: 40\n1937-02-01 review.\nMed: Biktarvy 1 tablet daily\n", "gp-update", "family doctor")
 
 
 # ---------- round 10: fixed notes template ----------
@@ -2602,8 +2602,8 @@ T_MSG = "Refused: line L{n} of the notes doesn't follow the template. Nothing wa
     (lambda t: t.replace("Allergies:\n", ""), 0),                                # missing heading of a list field
 ])
 def test_r10_template_refusals_name_first_line(tmp_path, mutate, n):
-    text = mutate(tpl(problems=["knee pain"], actions=["review in 2 weeks, GP"]))
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    text = mutate(tpl(problems=["knee pain"], actions=["review in 2 weeks, family doctor"]))
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     exp = n or next(k for k, l in enumerate(text.splitlines(), 1)
                     if not L.FIELD_RX.match(l) or l.split(":")[0] in ("History", "Medicines", "Results", "Pending", "Actions")
                     and n == 0 and l.startswith(("History: later", "Medicines:")))
@@ -2620,10 +2620,10 @@ def test_r10_template_free_text_notes_refused(tmp_path):
 
 def test_r10_recipients_line_never_in_letter_and_only_one(tmp_path):
     text = tpl(problems=["knee pain"], recipient="Dr Quillfeather", question="Is it the joint?")
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     assert "Quillfeather" not in (out / "letter.md").read_text() + r.stderr
-    r, out = _run_t(tmp_path / "two", tpl(recipient="Dr Quillfeather, Dr Ashgrove"), "--brief", "update to GP")
+    r, out = _run_t(tmp_path / "two", tpl(recipient="Dr Quillfeather, Dr Ashgrove"), "--brief", "update to family doctor")
     assert r.returncode == 2 and not out.exists() and _clin(r) == (
         "Refused: line L3 lists more than one recipient. Nothing was written. Write a separate letter for each reader.")
 
@@ -2632,7 +2632,7 @@ def test_r10_recipients_line_never_in_letter_and_only_one(tmp_path):
                                   "zorbaline 5 mg daily for 5 days max 2 in 24 hours"])
 def test_r10_medicine_line_out_of_order_refused(tmp_path, item):
     text = tpl(meds=[item])
-    r, _ = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, _ = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 2 and _clin(r) == T_MSG.format(n=int(line_of(text, "zorbaline")[1:]))
 
 
@@ -2646,7 +2646,7 @@ def test_r10_medicine_line_grammar_parts():
 
 def test_r10_empty_list_fields_print_none_recorded(tmp_path):
     text = tpl(question="Is it the joint?", problems=["knee pain"], allergies=())
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     for head in ("Current medicines", "Allergies", "Results still to come", "Actions"):
@@ -2655,7 +2655,7 @@ def test_r10_empty_list_fields_print_none_recorded(tmp_path):
 
 
 def test_r10_explicit_no_known_allergies_line(tmp_path):
-    r, out = _run_t(tmp_path, tpl(question="Is it the joint?", problems=["knee pain"]), "--brief", "update to GP")
+    r, out = _run_t(tmp_path, tpl(question="Is it the joint?", problems=["knee pain"]), "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     assert section((out / "letter.md").read_text(), "Allergies").startswith("- No known drug allergies")
 
@@ -2665,7 +2665,7 @@ def test_r10_explicit_no_known_allergies_line(tmp_path):
                                   "Give a copy of the notes to her carer.", "Send this to the practice nurse.",
                                   "I'd like a copy given to Mr Hale next door too."])
 @pytest.mark.parametrize("final", [False, True])
-@pytest.mark.parametrize("brief", ["letter to the patient", "update to GP"])
+@pytest.mark.parametrize("brief", ["letter to the patient", "update to family doctor"])
 def test_r10_copy_words_refused_exit_2_both_modes(tmp_path, line, final, brief):
     text = tpl(question="Is she safe at home?", history=line)
     r, out = _run_t(tmp_path, text, "--brief", brief, *(["--final"] if final else []))
@@ -2683,9 +2683,9 @@ def test_r10_copies_per_ml_is_not_a_copy_request(tmp_path):
 def test_r10_not_copy_covers_one_line_and_prints_beside_cut_list(tmp_path):
     text = tpl(question="Is it the joint?", problems=["knee pain"], history="Reviewed copy of old notes.")
     n = int(line_of(text, "History")[1:])
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 2 and _clin(r) == L.NOTE_COPY_REFUSED.format(n=n)
-    r, out = _run_t(tmp_path / "b", text, "--brief", "update to GP", "--not-copy", f"L{n}")
+    r, out = _run_t(tmp_path / "b", text, "--brief", "update to family doctor", "--not-copy", f"L{n}")
     assert r.returncode == 0, r.stderr
     assert f"Line L{n} marked as not a copy request" in r.stderr.splitlines()
     assert [p.name for p in out.iterdir()] == ["letter.md"]
@@ -2694,13 +2694,13 @@ def test_r10_not_copy_covers_one_line_and_prints_beside_cut_list(tmp_path):
 def test_r10_not_copy_is_one_line_per_flag(tmp_path):
     text = tpl(question="Is it the joint?", problems=["knee pain", "old copy of scan reviewed"], history="Reviewed copy of old notes.")
     a, b = int(line_of(text, "old copy")[1:]), int(line_of(text, "History")[1:])
-    r, _ = _run_t(tmp_path, text, "--brief", "update to GP", "--not-copy", f"L{a}")
+    r, _ = _run_t(tmp_path, text, "--brief", "update to family doctor", "--not-copy", f"L{a}")
     assert r.returncode == 2 and _clin(r) == L.NOTE_COPY_REFUSED.format(n=b)
-    r, _ = _run_t(tmp_path / "b", text, "--brief", "update to GP", "--not-copy", f"L{a}", "--not-copy", f"L{b}")
+    r, _ = _run_t(tmp_path / "b", text, "--brief", "update to family doctor", "--not-copy", f"L{a}", "--not-copy", f"L{b}")
     assert r.returncode == 0, r.stderr
 
 
-@pytest.mark.parametrize("brief", ["update to GP", "letter to the patient", "referral to cardiology"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "letter to the patient", "referral to cardiology"])
 @pytest.mark.parametrize("line", ["Please send a copy to her son.", "Post this to my daughter."])
 def test_r10_not_copy_never_covers_a_line_naming_someone(tmp_path, brief, line):
     text = tpl(question="Is it the joint?", problems=["knee pain"], history=line)
@@ -2713,14 +2713,14 @@ def test_r10_not_copy_never_covers_a_line_naming_someone(tmp_path, brief, line):
 def test_r10_gp_letter_not_copy_send_a_copy_to_her_son_still_refuses(tmp_path):
     text = tpl(question="Is it the joint?", problems=["knee pain"], history="send a copy to her son")
     n = int(line_of(text, "History")[1:])
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP", "--not-copy", f"L{n}")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor", "--not-copy", f"L{n}")
     assert r.returncode == 2 and _clin(r) == L.NOT_COPY_REFUSED.format(n=n)
     assert not out.exists()
 
 
 def test_r10_sent_specimen_is_not_a_copy_request(tmp_path):
-    r, _ = _run_t(tmp_path, tpl(question="Is it infected?", pending=["urine culture, sent 1937-06-02, GP"],
-                                history="Urine culture sent to the lab."), "--brief", "update to GP")
+    r, _ = _run_t(tmp_path, tpl(question="Is it infected?", pending=["urine culture, sent 1937-06-02, family doctor"],
+                                history="Urine culture sent to the lab."), "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
 
 
@@ -2736,7 +2736,7 @@ def _rev_md():
 
 
 def build_from_template_md(t, **k):
-    return L.build_from_template(t, "gp-update", "GP", **k)[0]
+    return L.build_from_template(t, "gp-update", "family doctor", **k)[0]
 
 
 def test_r10_reverse_dates_come_from_the_line_never_the_letter_date():
@@ -2754,7 +2754,7 @@ def test_r10_reverse_check_refuses_with_letter_line(old, new):
     bad = md.replace(old, new, 1)
     n = next(k for k, l in enumerate(md.split("\n"), 1) if old in l)
     with pytest.raises(Refused) as e:
-        L.reverse_check(bad, L.from_template(REV_T), "GP", template=True)
+        L.reverse_check(bad, L.from_template(REV_T), "family doctor", template=True)
     assert str(e.value) == f"Refused: line L{n} of this letter has a date, number or name that isn't in the notes. Nothing was written. Correct it to match the notes, then run again."
 
 
@@ -2768,9 +2768,9 @@ def test_r10_reverse_check_allows_signed_rewording_and_reformatted_dates():
 
 def test_r10_reverse_check_names_from_brief_allowed_but_not_invented():
     md = _rev_md()
-    L.reverse_check(md, L.from_template(REV_T), "GP")
+    L.reverse_check(md, L.from_template(REV_T), "family doctor")
     with pytest.raises(Refused, match="line L\\d+ of this letter"):
-        L.reverse_check(md.replace("Dear colleague,", "Dear Dr Quell,"), L.from_template(REV_T), "GP")
+        L.reverse_check(md.replace("Dear colleague,", "Dear Dr Quell,"), L.from_template(REV_T), "family doctor")
 
 
 # ---------- round 10 item 3: placement by content (template field) and the per-section check ----------
@@ -2806,20 +2806,20 @@ def test_r10_per_section_check_catches_each_misplacement(frag, what):
 @pytest.mark.parametrize("aud", [None, "patient"])
 def test_r10_no_allergy_statements_are_not_an_allergy(item, aud):
     t = tpl(question="Is it the joint?", problems=["knee pain"], allergies=[item])
-    md, _ = L.build_from_template(t, "gp-update", "Patient" if aud else "GP", audience=aud)
+    md, _ = L.build_from_template(t, "gp-update", "Patient" if aud else "family doctor", audience=aud)
     al = section(md, "Allergies")
     assert al.startswith("- No known drug allergies") and "reaction" not in al and L.ALLERGY_FLAG not in al
 
 
 def test_r10_no_allergy_statement_inline_on_the_heading(tmp_path):
     t = tpl(question="Is it the joint?", problems=["knee pain"], allergies=()).replace("Allergies:\n", "Allergies: NKDA\n")
-    r, out = _run_t(tmp_path, t, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, t, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     assert section((out / "letter.md").read_text(), "Allergies").startswith("- No known drug allergies")
 
 
 # ---------- round 10 item 5: the question line is always kept; none gives the no-question flag ----------
-@pytest.mark.parametrize("brief,head", [("discharge to GP", "What we are asking"), ("update to GP", "What we are asking"),
+@pytest.mark.parametrize("brief,head", [("discharge to family doctor", "What we are asking"), ("update to family doctor", "What we are asking"),
                                         ("letter to the patient", "What we want to find out"),
                                         ("referral to cardiology", "Question")])
 def test_r10_question_kept_in_every_letter(tmp_path, brief, head):
@@ -2829,7 +2829,7 @@ def test_r10_question_kept_in_every_letter(tmp_path, brief, head):
     assert "Can I swim again?" in section(md, head) and L.QUESTION_FLAG not in md
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "update to GP", "letter to the patient", "referral to cardiology"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "update to family doctor", "letter to the patient", "referral to cardiology"])
 def test_r10_no_question_flag_fires_in_every_letter(tmp_path, brief):
     r, out = _run_t(tmp_path, tpl(question="none", problems=["asthma"]), "--brief", brief)
     assert r.returncode == 0, r.stderr
@@ -2847,7 +2847,7 @@ def test_r10_no_question_flag_fires_in_every_letter(tmp_path, brief):
 def test_r10_cut_stop_reason_each_trigger_word_non_patient(line):
     flags = []
     t = f"SYNTH-9301\n1937-06-01 review.\n{line}\nQuestion: is she well?\n"
-    md, _ = build(t, "gp-update", "GP", flags=flags)
+    md, _ = build(t, "gp-update", "family doctor", flags=flags)
     ch = section(md, "Medicine changes")
     assert "Reason for change" not in ch and "zorbaline" in ch and L.MED_FLAG not in md     # H22/H29: no marker
     assert any(f.startswith("Flag: a medicine on line") for f in flags)
@@ -2859,7 +2859,7 @@ def test_r10_cut_stop_reason_each_trigger_word_non_patient(line):
 def test_r10_cut_stop_reason_in_template_line():
     t = tpl(question="Is she well?", meds=["zorbaline 5 mg daily; ceased 1937-06-01 - schizophrenia relapse"])
     flags = []
-    md, _ = L.build_from_template(t, "gp-update", "GP", flags=flags)
+    md, _ = L.build_from_template(t, "gp-update", "family doctor", flags=flags)
     ch = section(md, "Medicine changes")
     assert "Reason for change" not in ch and "zorbaline" in ch and L.MED_FLAG not in md and "schizophrenia" not in md.lower()
     assert any(f.startswith("Flag: a medicine on line") for f in flags)                 # H22: on screen only
@@ -2868,13 +2868,13 @@ def test_r10_cut_stop_reason_in_template_line():
 @pytest.mark.parametrize("word", ["after", "following"])
 def test_r10_after_and_following_kept_as_written_never_a_reason(word):
     md, _ = build(f"SYNTH-9302\n1937-06-01 review.\nCeased: zorbaline 5 mg daily {word} 2 weeks\nQuestion: ok?\n",
-                  "gp-update", "GP")
+                  "gp-update", "family doctor")
     ch = L.FLAG_ANY.sub("", section(md, "Medicine changes"))
     assert f"zorbaline 5 mg daily {word} 2 weeks" in ch and f"Reason for change: {word}" not in ch
 
 
 def test_r10_text_after_dash_is_a_reason():
-    md, _ = build("SYNTH-9303\n1937-06-01 review.\nCeased: zorbaline 5 mg daily - rash\nQuestion: ok?\n", "gp-update", "GP")
+    md, _ = build("SYNTH-9303\n1937-06-01 review.\nCeased: zorbaline 5 mg daily - rash\nQuestion: ok?\n", "gp-update", "family doctor")
     assert "Reason for change: rash." in section(md, "Medicine changes")
 
 
@@ -2899,7 +2899,7 @@ def test_r10_include_record_always_printed_and_to_is_the_reader(tmp_path, brief)
 
 
 def test_r10_brief_text_never_goes_into_to(tmp_path):
-    r, out = _run_t(tmp_path, PSY_T, "--brief", "update to GP. Please be kind")
+    r, out = _run_t(tmp_path, PSY_T, "--brief", "update to family doctor. Please be kind")
     assert r.returncode == 2 and _clin(r) == BRIEF_MSG and not out.exists()
 
 
@@ -2908,19 +2908,19 @@ def test_r10_brief_text_never_goes_into_to(tmp_path):
 def test_r10_multiword_allergen_no_reaction_gets_flag_and_wording(aud, wording):
     t = tpl(question="Is it the joint?", allergies=["sulfa drugs"])
     flags = []
-    md, _ = L.build_from_template(t, "gp-update", "Patient" if aud else "GP", audience=aud, flags=flags)
+    md, _ = L.build_from_template(t, "gp-update", "Patient" if aud else "family doctor", audience=aud, flags=flags)
     al = section(md, "Allergies")
     assert al.startswith(f"- sulfa drugs: {wording} {L.ALLERGY_FLAG}")
     assert any("extra wording" in f for f in flags)
 
 
 def test_r10_single_word_allergen_no_reaction_wording_only():
-    md, _ = L.build_from_template(tpl(question="ok?", allergies=["codeine"]), "gp-update", "GP")
+    md, _ = L.build_from_template(tpl(question="ok?", allergies=["codeine"]), "gp-update", "family doctor")
     assert section(md, "Allergies").startswith("- codeine: reaction not documented [L") and L.ALLERGY_FLAG not in md
 
 
 # ---------- round 10 item 9: under --final the refusal count equals the flags printed ----------
-@pytest.mark.parametrize("brief", ["update to GP", "letter to the patient", "referral to cardiology"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "letter to the patient", "referral to cardiology"])
 def test_r10_final_count_equals_flags_printed(tmp_path, brief):
     t = tpl(question="none", problems=["ACS query", "MS"], history="HIV", allergies=["sulfa drugs"],
             meds=["zorbaline 5 mg prn reason: knee pain", "abacavir 600 mg daily reason: HIV", "ramipril 5 mg od"])
@@ -2939,14 +2939,14 @@ COURSE_T = tpl(question="Is it clearing?", meds=["amoxicillin 500 mg tds for 5 d
 
 @pytest.mark.parametrize("aud", [None, "patient"])
 def test_r10_course_length_kept_exactly(aud):
-    md, _ = L.build_from_template(COURSE_T, "gp-update", "Patient" if aud else "GP", audience=aud)
+    md, _ = L.build_from_template(COURSE_T, "gp-update", "Patient" if aud else "family doctor", audience=aud)
     meds = L.FLAG_ANY.sub("", section(md, "Your medicines now" if aud else "Current medicines"))
     assert "for 5 days" in meds and "then stop" not in md
 
 
 @pytest.mark.parametrize("change", ["", "for 7 days"])
 def test_r10_dropped_or_changed_course_length_refused(change):
-    md, _ = L.build_from_template(COURSE_T, "gp-update", "GP")
+    md, _ = L.build_from_template(COURSE_T, "gp-update", "family doctor")
     bad = md.replace(" for 5 days", f" {change}" if change else "", 1)
     lid = line_of(COURSE_T, "amoxicillin")
     with pytest.raises(Refused) as e:
@@ -2955,21 +2955,21 @@ def test_r10_dropped_or_changed_course_length_refused(change):
 
 
 def test_r10_no_course_length_in_notes_none_required():
-    md, _ = L.build_from_template(COURSE_T, "gp-update", "GP")
+    md, _ = L.build_from_template(COURSE_T, "gp-update", "family doctor")
     assert L.verify_letter(md, L.from_template(COURSE_T), "gp")
 
 
 def test_r10_dropped_course_length_build_refuses(monkeypatch):
     monkeypatch.setattr(L, "render", (lambda f: lambda *a, **k: f(*a, **k).replace(" for 5 days", ""))(L.render))
     with pytest.raises(Refused, match="course length"):
-        L.build_from_template(COURSE_T, "gp-update", "GP")
+        L.build_from_template(COURSE_T, "gp-update", "family doctor")
 
 
 # ---------- round 10 E: empty Allergies or Medicines field ----------
 EMPTY_T = tpl(question="Is it the joint?", problems=["knee pain"], meds=(), allergies=())
 
 
-@pytest.mark.parametrize("brief", ["update to GP", "referral to cardiology", "discharge to GP"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "referral to cardiology", "discharge to family doctor"])
 def test_r10_empty_allergies_and_medicines_non_patient(tmp_path, brief):
     r, out = _run_t(tmp_path, EMPTY_T, "--brief", brief)
     assert r.returncode == 0, r.stderr
@@ -3003,8 +3003,8 @@ def test_r10_empty_allergies_and_medicines_patient_wording(tmp_path):
 @pytest.mark.parametrize("nka", ["No known allergies", "NKDA", "nil known", "Nil known allergies."])
 def test_r11_no_dash_no_known_allergies_line_accepted(tmp_path, nka):
     text = tpl(question="Please review.", problems=("cough",), meds=("amlodipine 5 mg daily",), allergies=(),
-               actions=("review in 2 weeks, GP",)).replace("Allergies:\n", f"Allergies:\n{nka}\n")
-    r, out = _run_t(tmp_path / nka.replace(" ", "_"), text, "--brief", "update to GP")
+               actions=("review in 2 weeks, family doctor",)).replace("Allergies:\n", f"Allergies:\n{nka}\n")
+    r, out = _run_t(tmp_path / nka.replace(" ", "_"), text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     assert "No known drug allergies" in md
@@ -3012,10 +3012,10 @@ def test_r11_no_dash_no_known_allergies_line_accepted(tmp_path, nka):
 
 
 @pytest.mark.parametrize("freq", ["every 2 weeks", "weekly", "fortnightly", "once a month", "every other day"])
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11_off_list_frequency_kept_as_written_no_flag(tmp_path, freq, brief):
     text = tpl(question="Please review.", problems=("rheumatoid arthritis",),
-               meds=(f"methotrexate 10 mg {freq}",), actions=("review in 2 weeks, GP",))
+               meds=(f"methotrexate 10 mg {freq}",), actions=("review in 2 weeks, family doctor",))
     r, out = _run_t(tmp_path / freq.replace(" ", "_"), text, "--brief", brief)
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
@@ -3025,10 +3025,10 @@ def test_r11_off_list_frequency_kept_as_written_no_flag(tmp_path, freq, brief):
 
 
 @pytest.mark.parametrize("mx", ["max 4 g per day", "max 30 mg per week", "max 8 puffs per week", "max 2 doses in 7 days"])
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11_dose_limit_other_period_kept_as_written(tmp_path, mx, brief):
     text = tpl(question="Please review.", problems=("pain",), meds=(f"paracetamol 1 g daily {mx}",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     r, out = _run_t(tmp_path / mx.replace(" ", "_"), text, "--brief", brief)
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
@@ -3062,7 +3062,7 @@ def test_r11_brief_include_unknown_item_still_refused(tmp_path):
 @pytest.mark.parametrize("reason", ["high blood pressure", "type 2 diabetes", "heart failure", "chest infection"])
 def test_r11_ordinary_english_reason_kept_no_flag(tmp_path, reason):
     text = tpl(question="none", problems=("review",), meds=(f"amlodipine 5 mg daily reason: {reason}",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     r, out = _run_t(tmp_path / reason.replace(" ", "_"), text, "--brief", "update to patient")
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
@@ -3089,19 +3089,19 @@ GENERICS = ["amlodipine", "atorvastatin", "omeprazole", "ramipril", "apixaban", 
 @pytest.mark.parametrize("drug", GENERICS)
 def test_r11_common_generics_do_not_flag(tmp_path, drug):
     assert drug in L.drug_names(), f"{drug} missing from drugs.txt"
-    text = tpl(question="none", problems=("review",), meds=(f"{drug} 5 mg daily",), actions=("review in 2 weeks, GP",))
-    r, out = _run_t(tmp_path / drug, text, "--brief", "update to GP")
+    text = tpl(question="none", problems=("review",), meds=(f"{drug} 5 mg daily",), actions=("review in 2 weeks, family doctor",))
+    r, out = _run_t(tmp_path / drug, text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     assert "misspelled" not in r.stderr and L.DRUG_FLAG not in (out / "letter.md").read_text()
 
 
 def test_r11_copy_refusal_wins_over_template_error(tmp_path):
     text = tpl(question="Please review.", problems=("cough",), meds=("amlodipine 5 mg daily",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     text = text.replace("History:", "History: please send a copy of this letter to her son")
     text = text.replace("Medicines:\n- amlodipine 5 mg daily", "Medicines:\namlodipine 5 mg daily")   # template error
     assert "Refused: line" in str(pytest.raises(L.Refused, L.from_template, text).value)
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 2 and not out.exists()
     n = int(line_of(text, "History:")[1:])
     assert _clin(r) == L.NOTE_COPY_REFUSED.format(n=n) or _clin(r) == L.NOT_COPY_REFUSED.format(n=n)
@@ -3109,15 +3109,15 @@ def test_r11_copy_refusal_wins_over_template_error(tmp_path):
 
 
 def test_r11_recipient_refusal_wins_over_template_error(tmp_path):
-    text = tpl(question="Please review.", problems=("cough",), recipient="GP and cardiology",
-               actions=("review in 2 weeks, GP",)).replace("Problems:\n- cough", "Problems:\ncough")
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    text = tpl(question="Please review.", problems=("cough",), recipient="family doctor and cardiology",
+               actions=("review in 2 weeks, family doctor",)).replace("Problems:\n- cough", "Problems:\ncough")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 2 and _clin(r) == L.RECIPIENTS_REFUSED.format(n=3)
 
 
 def test_r11_brief_copy_wins_over_template_error(tmp_path):
     text = tpl(question="Please review.", problems=("cough",)).replace("Problems:\n- cough", "Problems:\ncough")
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP, cc cardiology")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor, cc cardiology")
     assert r.returncode == 2 and r.stderr.startswith("Refused: copy request in the brief.")
 
 
@@ -3145,7 +3145,7 @@ def test_r11_check_template_fail_exit_2_signed_wording_and_line(tmp_path):
 
 def test_r11_check_template_brief_file_and_copy_first(tmp_path):
     text = tpl(question="Please review.", problems=("cough",)).replace("Problems:\n- cough", "Problems:\ncough")
-    b = tmp_path / "b.txt"; tmp_path.mkdir(parents=True, exist_ok=True); b.write_text("update to GP, cc cardiology\n")
+    b = tmp_path / "b.txt"; tmp_path.mkdir(parents=True, exist_ok=True); b.write_text("update to family doctor, cc cardiology\n")
     r = _check(tmp_path, text, "--brief", str(b))
     assert r.returncode == 2 and r.stderr.startswith("Refused: copy request in the brief.")
     b.write_text("nonsense\n")
@@ -3154,12 +3154,12 @@ def test_r11_check_template_brief_file_and_copy_first(tmp_path):
 
 
 @pytest.mark.parametrize("mutate", [lambda t: t, lambda t: t.replace("Problems:\n- cough", "Problems:\ncough"),
-                                    lambda t: t.replace("Recipients: General practice", "Recipients: GP, cardiology"),
+                                    lambda t: t.replace("Recipients: General practice", "Recipients: family doctor, cardiology"),
                                     lambda t: t.replace("History:", "History: please send a copy of this letter to her son")])
 def test_r11_check_template_agrees_with_letter_command(tmp_path, mutate):
-    text = mutate(tpl(question="Please review.", problems=("cough",), actions=("review in 2 weeks, GP",)))
+    text = mutate(tpl(question="Please review.", problems=("cough",), actions=("review in 2 weeks, family doctor",)))
     c = _check(tmp_path / "c", text)
-    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to GP")
+    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to family doctor")
     if c.returncode == 2:
         assert r.returncode == 2 and _clin(r) == _clin(c)
     else:
@@ -3178,7 +3178,7 @@ def test_r11_check_template_shares_the_letters_parser(monkeypatch, capsys, tmp_p
     assert calls == ["pre", "from_template"]
     calls.clear()
     out = tmp_path / "o"
-    assert L.main([str(n), "--brief", "update to GP", "--out", str(out)]) == 0
+    assert L.main([str(n), "--brief", "update to family doctor", "--out", str(out)]) == 0
     assert calls[:2] == ["pre", "from_template"]          # the letter command runs the very same functions, in order
 
 
@@ -3220,17 +3220,17 @@ def test_r11f_brief_one_line_or_two_with_include(tmp_path, brief, inc):
 
 
 def test_r11f_brief_include_on_first_line_or_three_lines_refused():
-    for brief in ("Include: psychiatric history\nreferral to podiatry\nupdate to GP", "referral to podiatry\nupdate to GP"):
+    for brief in ("Include: psychiatric history\nreferral to podiatry\nupdate to family doctor", "referral to podiatry\nupdate to family doctor"):
         with pytest.raises(L.Refused):
             L.read_brief(brief)
 
 
 
 @pytest.mark.parametrize("ab", ["MS", "PE", "CP", "RA", "BD", "IV"])
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11f_multi_meaning_shorthand_flagged_inside_medicine_reason(tmp_path, ab, brief):
     text = tpl(question="Please review.", problems=("review",), meds=(f"amlodipine 5 mg daily reason: {ab}",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     r, out = _run_t(tmp_path / ab, text, "--brief", brief)
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
@@ -3241,8 +3241,8 @@ def test_r11f_multi_meaning_shorthand_flagged_inside_medicine_reason(tmp_path, a
 def test_r11f_unknown_word_in_reason_flagged_single_meaning_exempt(tmp_path):
     text = tpl(question="Please review.", problems=("review",),
                meds=("amlodipine 5 mg daily reason: cx", "metformin 500 mg bd reason: CKD"),
-               actions=("review in 2 weeks, GP",))
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+               actions=("review in 2 weeks, family doctor",))
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     md = (out / "letter.md").read_text()
     assert f"cx {L.FLAG}" in md and L.DRUG_FLAG not in md            # cx is on shorthand.txt (ruling 14 Oct): flagged
     assert "chronic kidney disease (CKD)" in md and f"CKD {L.FLAG}" not in md
@@ -3263,17 +3263,23 @@ def test_r11f_sixty_generics_recognised_once():
     assert len(R11F_GENERICS) == 60
     lines = [l.strip().lower() for l in (pathlib.Path(L.__file__).parent / "drugs.txt").read_text().splitlines()
              if l.strip() and not l.startswith("#")]
+    # Physician override of the R11 follow-up ruling (2026-10-16): frusemide is a local alias of furosemide,
+    # listed in the example site profile's drug_aliases.txt, no longer in the core drugs.txt.
+    aliases = (L.LOCALE_DIR / "drug_aliases.txt").read_text().splitlines()
+    assert "frusemide" not in lines and aliases.count("frusemide=furosemide") == 1
     for g in R11F_GENERICS:
+        if g == "frusemide":
+            assert L.drug_names()[g] == "furosemide"; continue
         assert lines.count(g) == 1, g                                     # present, never duplicated
         assert all(not L.needs_flag(w) for w in re.split(r"[\s/]+", g)), g
 
 
 @pytest.mark.parametrize("drug", ["frusemide", "glyceryl trinitrate", "insulin glargine", "sacubitril/valsartan",
                                   "tapentadol", "ezetimibe", "furosemide"])
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11f_generics_kept_as_written_no_flag(tmp_path, drug, brief):
     text = tpl(question="Please review.", problems=("review",), meds=(f"{drug} 10 mg daily",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     r, out = _run_t(tmp_path / re.sub(r"\W", "_", drug), text, "--brief", brief)
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
@@ -3286,7 +3292,7 @@ def test_r11f_generics_kept_as_written_no_flag(tmp_path, drug, brief):
 @pytest.mark.parametrize("part", ["sacubitril", "valsartan"])
 def test_r11f_combination_needs_both_parts(part):
     notes = "Patient: SYNTH-7301\n1937-04-05 Clinic.\nMed: sacubitril/valsartan 49/51 mg bd\nPlan: review in 4 weeks\n"
-    md = make_letter(notes, "gp-update", "GP")
+    md = make_letter(notes, "gp-update", "family doctor")
     assert "sacubitril/valsartan 49/51 mg" in md
     L.verify_letter(md, notes)
     with pytest.raises(L.Refused):
@@ -3296,15 +3302,15 @@ def test_r11f_combination_needs_both_parts(part):
 @pytest.mark.parametrize("audience", [None, "patient"])
 def test_r11f_entresto_combination_brand_refused(audience):
     with pytest.raises(L.Refused) as e:
-        make_letter(COMBO_NOTES.format(line="Med: Entresto 49/51 mg bd"), "gp-update", "GP", audience=audience)
+        make_letter(COMBO_NOTES.format(line="Med: Entresto 49/51 mg bd"), "gp-update", "family doctor", audience=audience)
     assert str(e.value) == COMBO_MSG.format(n=4)
 
 
 
-@pytest.mark.parametrize("brief", ["update to patient", "update to GP"])
+@pytest.mark.parametrize("brief", ["update to patient", "update to family doctor"])
 def test_r11f_gtn_signed_plain_words_no_flag(tmp_path, brief):
     text = tpl(question="Please review.", problems=("angina",), meds=("GTN 400 mcg prn",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     r, out = _run_t(tmp_path, text, "--brief", brief)
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
@@ -3326,9 +3332,9 @@ def test_r11g_safeguard_accepts_1930s_real_dates_only(d, ok):
 
 @pytest.mark.parametrize("d", ["1930-01-01", "1939-12-31", "1929-12-31", "1940-01-01"])
 def test_r11g_checker_and_letter_command_agree_on_dates(tmp_path, d):
-    text = tpl(question="Please review.", problems=("cough",), date=d, actions=("review in 2 weeks, GP",))
+    text = tpl(question="Please review.", problems=("cough",), date=d, actions=("review in 2 weeks, family doctor",))
     c = _check(tmp_path / "c", text)
-    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to GP")
+    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to family doctor")
     ok = d.startswith("193")
     assert (c.returncode == 0) == ok and (r.returncode == 0) == ok, (c.stderr, r.stderr)
     if not ok:
@@ -3344,19 +3350,19 @@ def test_r11g_checker_calls_the_same_safeguard(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("ab", ["ms", "pe", "MS", "Pe"])
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11g_shorthand_flagged_in_reason_whatever_case(tmp_path, ab, brief):
     text = tpl(question="Please review.", problems=("review",), meds=(f"amlodipine 5 mg daily reason: {ab}",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     r, out = _run_t(tmp_path / ab, text, "--brief", brief)
     assert r.returncode == 0, r.stderr
     assert f"{ab} {L.FLAG}" in (out / "letter.md").read_text()
 
 
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11g_reflux_in_reason_not_flagged(tmp_path, brief):
     text = tpl(question="Please review.", problems=("review",), meds=("omeprazole 20 mg daily reason: reflux",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     r, out = _run_t(tmp_path, text, "--brief", brief)
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
@@ -3398,7 +3404,7 @@ LOCKED_FREQ_MEDS = [
 
 
 @pytest.mark.parametrize("med", LOCKED_FREQ_MEDS)
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11h_locked_off_list_frequency_letter_and_checker(tmp_path, med, brief):
     text = LOCKED_NOTES.format(med=med)
     c = _check(tmp_path / "chk", text)
@@ -3458,7 +3464,7 @@ CTX = {"recipients": dict(recipient="Ms Brown"),
 
 
 @pytest.mark.parametrize("where", list(CTX))
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11i_title_and_milliseconds_not_flagged(tmp_path, where, brief):
     text = _ctx_notes(**CTX[where])
     c = _check(tmp_path / "chk", text)
@@ -3474,7 +3480,7 @@ def test_r11i_title_and_milliseconds_not_flagged(tmp_path, where, brief):
                                       ("reason", dict(reason="ms")), ("reason", dict(reason="pe")),
                                       ("reason", dict(reason="Ms")), ("reason", dict(reason="cx"))])
 def test_r11i_shorthand_without_context_still_flagged(tmp_path, where, kw):
-    r, out = _run_t(tmp_path, _ctx_notes(**kw), "--brief", "update to GP")
+    r, out = _run_t(tmp_path, _ctx_notes(**kw), "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     assert L.FLAG in (out / "letter.md").read_text()
 
@@ -3511,7 +3517,7 @@ def test_r11j_signed_route_list_matches_ruling():
 
 
 @pytest.mark.parametrize("route,plain", SIGNED_ROUTES)
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11j_signed_route_checker_and_letters(tmp_path, route, plain, brief):
     text = _route_notes(f"methotrexate 15 mg every 2 weeks {route} reason: arthritis")
     c = _check(tmp_path / "chk", text)
@@ -3531,7 +3537,7 @@ def test_r11j_signed_route_checker_and_letters(tmp_path, route, plain, brief):
     assert not any(lid in l for l in r.stderr.splitlines()), r.stderr
 
 
-@pytest.mark.parametrize("brief,want", [("update to GP", "every 2 weeks SC (for arthritis)"),
+@pytest.mark.parametrize("brief,want", [("update to family doctor", "every 2 weeks SC (for arthritis)"),
                                         ("update to patient", "every 2 weeks SC (under the skin), for arthritis")])
 def test_r11j_every_2_weeks_sc_ruled_example(tmp_path, brief, want):
     text = _route_notes("methotrexate 15 mg every 2 weeks SC reason: arthritis")
@@ -3542,7 +3548,7 @@ def test_r11j_every_2_weeks_sc_ruled_example(tmp_path, brief, want):
 
 
 @pytest.mark.parametrize("route", ["intrathecal", "rectal", "intravitreal"])
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11j_unknown_route_flagged_not_refused(tmp_path, route, brief):
     text = _route_notes(f"methotrexate 15 mg every 2 weeks {route} reason: arthritis")
     c = _check(tmp_path / "chk", text)
@@ -3562,7 +3568,7 @@ def test_r11j_unknown_route_flagged_not_refused(tmp_path, route, brief):
                                       ("history", dict(history="Given IV fluids. PR exam normal.")),
                                       ("reason", dict(med="methotrexate 15 mg every 2 weeks SC reason: PR bleed")),
                                       ("reason", dict(med="methotrexate 15 mg every 2 weeks SC reason: IV line"))])
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 def test_r11j_route_words_outside_route_slot_still_flagged(tmp_path, where, kw, brief):
     kw.setdefault("med", "methotrexate 15 mg every 2 weeks oral reason: arthritis")
     text = _route_notes(**kw)
@@ -3657,12 +3663,12 @@ def test_r11k_off_list_item_refused_as_an_item_no_echo(tmp_path, brief, n, item)
 
 def test_r11k_library_call_unknown_item_gives_no_line():
     with pytest.raises(Refused) as e:
-        build(H22_NOTES.format(hist="No other history"), "gp-update", "GP", include=["Mrs Synthname"])
+        build(H22_NOTES.format(hist="No other history"), "gp-update", "family doctor", include=["Mrs Synthname"])
     assert str(e.value) == "Refused: the brief includes an item that isn't on the sensitive-items list. Nothing was written. Remove the item from the brief, or use one from the list."
     assert not re.search(r"\bL\d", str(e.value)) and "Synthname" not in str(e.value)
 
 
-@pytest.mark.parametrize("brief", ["gibberish", "referral to podiatry\nupdate to GP", "Include: HIV status"])
+@pytest.mark.parametrize("brief", ["gibberish", "referral to podiatry\nupdate to family doctor", "Include: HIV status"])
 def test_r11k_unparseable_brief_still_not_understood(tmp_path, brief):
     with pytest.raises(Refused) as e:
         L.read_brief(brief)
@@ -3686,9 +3692,9 @@ def test_r11h_boundary_dates(d, ok):
 
 @pytest.mark.parametrize("d", ["1929-12-31", "1940-01-01"])
 def test_r11h_check_template_and_letter_give_the_two_ruled_lines(tmp_path, d):
-    text = tpl(question="Please review.", problems=("cough",), date=d, actions=("review in 2 weeks, GP",))
+    text = tpl(question="Please review.", problems=("cough",), date=d, actions=("review in 2 weeks, family doctor",))
     c = _check(tmp_path / "c", text)
-    r, out = _run_t(tmp_path / "r", text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path / "r", text, "--brief", "update to family doctor")
     want = [DATE_LINES[0].format(n=2)]
     assert c.returncode == 2 and c.stderr.strip().splitlines() == want, c.stderr
     assert r.returncode == 2 and want[0] in r.stderr, r.stderr
@@ -3719,11 +3725,11 @@ def test_r11i_safeguard_dates_with_time_joined_on(ts, ok):
 
 @pytest.mark.parametrize("ts,ok", TIMED)
 def test_r11i_checker_and_letter_command_dates_with_time(tmp_path, ts, ok):
-    text = tpl(question="Please review.", problems=("cough",), actions=("review in 2 weeks, GP",))
+    text = tpl(question="Please review.", problems=("cough",), actions=("review in 2 weeks, family doctor",))
     text = text.replace("Question: Please review.", f"Question: Please review. Seen {ts}.")
     n = line_of(text, "Seen ")[1:]
     c = _check(tmp_path / "c", text)
-    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to GP")
+    r, _ = _run_t(tmp_path / "r", text, "--brief", "update to family doctor")
     if ok:
         assert c.returncode == 0 and r.returncode == 0, (c.stderr, r.stderr)
         assert "If these are real notes" not in c.stderr + r.stderr
@@ -3769,18 +3775,18 @@ def test_r11l_scheduled_review_kept_in_gp_letter(tmp_path):
 
 
 def test_r11m_sensitive_result_cut_record_and_flag_on_screen(tmp_path):
-    r, out = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     err = r.stderr.splitlines()
     assert f"Cut as sensitive: line {SENS_LID}." in err
     assert SENS_FLAG.format(lid=SENS_LID) in err
-    f = subprocess.run(CLI + [str(tmp_path / "n.txt"), "--brief", "update to GP", "--final"], capture_output=True, text=True)
+    f = subprocess.run(CLI + [str(tmp_path / "n.txt"), "--brief", "update to family doctor", "--final"], capture_output=True, text=True)
     assert f.returncode == 3 and "--final refused: 1 flag(s)" in f.stderr          # the flag blocks --final
 
 
 @pytest.mark.parametrize("args", [(), ("--keep-out", SENS_LID), ("--not-copy", SENS_LID)])
 def test_r11m_letter_md_has_no_trace_of_sensitive_cut(tmp_path, args):
-    r, out = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to GP", *args)
+    r, out = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to family doctor", *args)
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     for trace in ("chlamydia", "Chlamydia", "PCR", "index", SENS_LID, "left out as sensitive", "Cut as sensitive",
@@ -3790,15 +3796,15 @@ def test_r11m_letter_md_has_no_trace_of_sensitive_cut(tmp_path, args):
 
 
 def test_r11n_keep_out_clears_only_that_flag_and_adds_nothing(tmp_path):
-    base, _ = _run_t(tmp_path / "a", SENS_RES_NOTES, "--brief", "update to GP")
-    r, out = _run_t(tmp_path / "b", SENS_RES_NOTES, "--brief", "update to GP", "--keep-out", SENS_LID)
+    base, _ = _run_t(tmp_path / "a", SENS_RES_NOTES, "--brief", "update to family doctor")
+    r, out = _run_t(tmp_path / "b", SENS_RES_NOTES, "--brief", "update to family doctor", "--keep-out", SENS_LID)
     assert r.returncode == 0, r.stderr
     assert f"Kept out by the clinician: line {SENS_LID}." in r.stderr.splitlines()
     assert SENS_FLAG.format(lid=SENS_LID) not in r.stderr
     assert (out / "letter.md").read_text() == (tmp_path / "a" / "o" / "letter.md").read_text()   # adds nothing
     assert [l for l in base.stderr.splitlines() if l != SENS_FLAG.format(lid=SENS_LID)] == \
            [l for l in r.stderr.splitlines() if not l.startswith("Kept out by the clinician")]   # other flags unchanged
-    f = subprocess.run(CLI + [str(tmp_path / "b" / "n.txt"), "--brief", "update to GP", "--keep-out", SENS_LID, "--final"],
+    f = subprocess.run(CLI + [str(tmp_path / "b" / "n.txt"), "--brief", "update to family doctor", "--keep-out", SENS_LID, "--final"],
                        capture_output=True, text=True)
     assert f.returncode == 0, f.stderr
 
@@ -3807,7 +3813,7 @@ def test_r11n_keep_out_clears_only_that_flag_and_adds_nothing(tmp_path):
 def test_r11n_keep_out_on_line_without_sensitive_cut_refused(tmp_path, which):
     lid = line_of(SENS_RES_NOTES, which)
     msg = f"Refused: line {lid} has nothing marked as sensitive, so `--keep-out` can't be used on it. Nothing was written. Check the line number, then run again."
-    r, out = _run_t(tmp_path / "r", SENS_RES_NOTES, "--brief", "update to GP", "--keep-out", lid)
+    r, out = _run_t(tmp_path / "r", SENS_RES_NOTES, "--brief", "update to family doctor", "--keep-out", lid)
     assert r.returncode == 2 and _clin(r) == msg and not out.exists() and _hand_ok(r)
     c = _check(tmp_path / "c", SENS_RES_NOTES, "--keep-out", lid)
     assert c.returncode == 2 and _clin(c) == msg
@@ -3815,7 +3821,7 @@ def test_r11n_keep_out_on_line_without_sensitive_cut_refused(tmp_path, which):
 
 def test_r11n_keep_out_refused_when_brief_includes_or_patient(tmp_path):
     msg = f"Refused: line {SENS_LID} has nothing marked as sensitive, so `--keep-out` can't be used on it. Nothing was written. Check the line number, then run again."
-    for brief in ("update to GP\nInclude: sexual health", "update to patient"):
+    for brief in ("update to family doctor\nInclude: sexual health", "update to patient"):
         r, out = _run_t(tmp_path / brief[-3:], SENS_RES_NOTES, "--brief", brief, "--keep-out", SENS_LID)
         assert r.returncode == 2 and _clin(r) == msg and not out.exists()
         b = tmp_path / f"{brief[-3:]}.txt"; b.write_text(brief)
@@ -3829,20 +3835,20 @@ def test_r11n_checker_accepts_keep_out_on_sensitive_cut(tmp_path):
 
 
 def test_r11n_not_copy_never_clears_sensitive_flag(tmp_path):
-    r, _ = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to GP", "--not-copy", SENS_LID)
+    r, _ = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to family doctor", "--not-copy", SENS_LID)
     assert SENS_FLAG.format(lid=SENS_LID) in r.stderr and "Kept out by the clinician" not in r.stderr
 
 
 def test_r11n_keep_out_format_checked_in_letters_and_checker(tmp_path):
     msg = "Refused: --keep-out takes one line, like L3. Nothing was written."
-    r, out = _run_t(tmp_path / "r", SENS_RES_NOTES, "--brief", "update to GP", "--keep-out", "13")
+    r, out = _run_t(tmp_path / "r", SENS_RES_NOTES, "--brief", "update to family doctor", "--keep-out", "13")
     c = _check(tmp_path / "c", SENS_RES_NOTES, "--keep-out", "13")
     assert r.returncode == 2 and _clin(r) == msg and not out.exists()
     assert c.returncode == 2 and _clin(c) == msg
 
 
 def test_r11n_sensitive_result_included_by_brief_has_no_cut(tmp_path):
-    r, out = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to GP\nInclude: sexual health")
+    r, out = _run_t(tmp_path, SENS_RES_NOTES, "--brief", "update to family doctor\nInclude: sexual health")
     assert r.returncode == 0, r.stderr
     assert "chlamydia" in (out / "letter.md").read_text().lower() and "Cut as sensitive" not in r.stderr
 
@@ -3856,7 +3862,7 @@ def test_r11n_result_missing_without_cut_record_still_refused_h03():
 
 def test_r11n_template_result_missing_without_cut_record_refused_h03():
     text = L.from_template(SENS_RES_NOTES)
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert "140 mmol/L" in md
     with pytest.raises(Refused, match="a result on line"):
         L.verify_letter(md.replace("140 mmol/L", "mmol/L"), text, "gp", set())
@@ -3867,7 +3873,7 @@ def test_r11o_include_item_names_exact_for_new_groups():
     new = ["Mental Health Act status", "sexual health", "pregnancy loss or termination", "genetic results"]
     assert list(L.SENSITIVE)[-4:] == new and list(L.H22_ITEMS) == new
     for item in new:
-        assert L.read_brief(f"update to GP\nInclude: {item}")[2] == [item]
+        assert L.read_brief(f"update to family doctor\nInclude: {item}")[2] == [item]
 
 
 def test_r11o_patient_letter_cuts_nothing_no_cut_record(tmp_path):
@@ -3880,7 +3886,7 @@ def test_r11o_patient_letter_cuts_nothing_no_cut_record(tmp_path):
 def test_r11o_sensitive_word_in_medicine_reason_keeps_medicine_rule(tmp_path):
     text = tpl(question="Please review.", problems=("cough",),
                meds=("doxycycline 100 mg twice daily oral reason: chlamydia",), actions=("review in 2 weeks",))
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     assert "doxycycline 100 mg" in md and "chlamydia" not in md.lower()          # medicine stays, reason cut
@@ -3889,7 +3895,7 @@ def test_r11o_sensitive_word_in_medicine_reason_keeps_medicine_rule(tmp_path):
 
 
 # ---- H22 (signed 14 Oct 2026): a medicine reason naming a cut item is dropped with no marker; the medicine flag is
-# on screen only. Each of the four new groups and the existing lithium case, GP letter, no Include: line.
+# on screen only. Each of the four new groups and the existing lithium case, family doctor letter, no Include: line.
 MED_REASON_CASES = [
     ("olanzapine", "olanzapine 10 mg nocte oral reason: community treatment order", ["community treatment order"]),
     ("doxycycline", "doxycycline 100 mg twice daily oral reason: chlamydia", ["chlamydia"]),
@@ -3902,7 +3908,7 @@ MED_REASON_CASES = [
 @pytest.mark.parametrize("drug,med,words", MED_REASON_CASES)
 def test_h22_cut_medicine_reason_dropped_flag_on_screen_only(tmp_path, drug, med, words):
     text = tpl(question="Please review.", problems=("cough",), meds=(med,), actions=("review in 2 weeks",))
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     assert drug in md
@@ -3910,7 +3916,7 @@ def test_h22_cut_medicine_reason_dropped_flag_on_screen_only(tmp_path, drug, med
     for gone in [reason, *words, "reason not included", L.MED_FLAG, "may point to something cut"]:
         assert gone.lower() not in md.lower(), gone
     assert L.MED_NOTICE.format(lid=line_of(text, drug)) in r.stderr.splitlines()
-    f = subprocess.run(CLI + [str(tmp_path / "n.txt"), "--brief", "update to GP", "--final"], capture_output=True, text=True)
+    f = subprocess.run(CLI + [str(tmp_path / "n.txt"), "--brief", "update to family doctor", "--final"], capture_output=True, text=True)
     assert f.returncode == 3                                     # the screen-only flag still blocks --final
 
 
@@ -3928,7 +3934,7 @@ STOP_CASES = [
 def test_h29_cut_stop_reason_dropped_stop_printed_flag_on_screen(tmp_path, drug, reason, words):
     text = tpl(question="Please review.", problems=("cough",), meds=(f"{drug} 10 mg daily; ceased 1937-06-01 - {reason}",),
                actions=("review in 2 weeks",))
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     lid = line_of(text, drug)
@@ -3995,7 +4001,7 @@ def test_h29_cut_change_reason_dropped_change_printed_flag_on_screen(drug, reaso
     text = (f"SYNTH-9400\n1937-06-01 review.\nMed: {drug} 100 mg daily\n1937-06-10 review.\n"
             f"Med: {drug} 200 mg daily reason: {reason}\nQuestion: is she well?\n")
     flags = []
-    res = build(text, "gp-update", "GP", flags=flags); md, _ = res
+    res = build(text, "gp-update", "family doctor", flags=flags); md, _ = res
     ch = FLAG_RX.sub("", next(l for l in md.splitlines() if l.startswith("- Changed")))
     assert ch == f"- Changed on 10 Jun 1937: from {drug} 100 mg daily. Now: {drug} 200 mg daily. [L3, L5]"   # H29
     assert_no_empty_reason_label(ch)
@@ -4007,7 +4013,7 @@ def test_h29_cut_change_reason_dropped_change_printed_flag_on_screen(drug, reaso
         L.finalise(res)
 
 
-@pytest.mark.parametrize("brief", ["update to GP", "update to patient"])
+@pytest.mark.parametrize("brief", ["update to family doctor", "update to patient"])
 @pytest.mark.parametrize("reason", ["bipolar relapse", "chlamydia not cleared", "dose review"])
 def test_r11q_template_changed_tail_refused_never_partly_parsed(tmp_path, brief, reason):
     text = tpl(question="Please review.", problems=("cough",),
@@ -4023,7 +4029,7 @@ def test_r11q_template_changed_tail_refused_never_partly_parsed(tmp_path, brief,
 
 
 # ---- signed ruling (round 11): matching lines. A stop or change with no reason written prints exactly the same line
-# as one whose reason was cut as sensitive (GP and other clinician letters). On screen only: a missing reason gets the
+# as one whose reason was cut as sensitive (family doctor and other clinician letters). On screen only: a missing reason gets the
 # non-blocking notice "No reason was written for line Ln."; a cut reason keeps the sensitive flag, which blocks --final.
 def _change_notes(drug, reason=None):
     tail = f" reason: {reason}" if reason else ""
@@ -4031,7 +4037,7 @@ def _change_notes(drug, reason=None):
             f"Med: {drug} 200 mg daily{tail}\nQuestion: is she well?\n")
 
 
-def _change_build(monkeypatch, drug, reason=None, to="GP", audience=None):
+def _change_build(monkeypatch, drug, reason=None, to="family doctor", audience=None):
     monkeypatch.setattr(L, "_TEMPLATE", [])
     monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
     flags = []
@@ -4056,7 +4062,7 @@ def _kind_build(monkeypatch, kind, drug, reason=None):
     monkeypatch.setattr(L, "_TEMPLATE", [])
     monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
     flags = []
-    _LAST["res"] = build(_kind_notes(kind, drug, reason), "gp-update", "GP", flags=flags); md, _ = _LAST["res"]
+    _LAST["res"] = build(_kind_notes(kind, drug, reason), "gp-update", "family doctor", flags=flags); md, _ = _LAST["res"]
     lines = [l for l in md.splitlines() if l.startswith("- " + kind.capitalize() + " on")]
     assert len(lines) == 1, md
     return md, flags, lines[0]
@@ -4111,7 +4117,7 @@ def test_r11r_stop_line_missing_reason_identical_to_cut_reason(tmp_path, drug, r
     """Template notes through the letter command: the whole draft letter.md is byte-identical, nothing stripped."""
     files, lines = [], []
     for name, why in (("cut", reason), ("missing", None)):
-        r, out = _run_t(tmp_path / name, _stop_text(drug, why), "--brief", "update to GP")
+        r, out = _run_t(tmp_path / name, _stop_text(drug, why), "--brief", "update to family doctor")
         assert r.returncode == 0, r.stderr
         raw = (out / "letter.md").read_bytes()
         files.append(raw)
@@ -4119,7 +4125,7 @@ def test_r11r_stop_line_missing_reason_identical_to_cut_reason(tmp_path, drug, r
         assert "not documented" not in line and "Reason for change" not in raw.decode()
         lines.append(line.encode())
     assert lines[0] == lines[1] and files[0] == files[1]                         # draft, byte for byte
-    f, out = _run_t(tmp_path / "final", _stop_text(drug), "--brief", "update to GP", "--final")
+    f, out = _run_t(tmp_path / "final", _stop_text(drug), "--brief", "update to family doctor", "--final")
     if f.returncode == 0:                                                     # final: the missing-reason letter
         fin = (out / "letter.md").read_text().splitlines()
         assert _final_form(lines[0].decode()) in fin
@@ -4131,11 +4137,11 @@ def test_r11r_stop_line_missing_reason_identical_to_cut_reason(tmp_path, drug, r
 def test_r11r_missing_reason_notice_on_screen_does_not_block_final(tmp_path, drug):
     text = _stop_text(drug)
     lid = line_of(text, drug)
-    r, out = _run_t(tmp_path / "d", text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path / "d", text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     assert L.NO_REASON_NOTICE.format(lid=lid) in r.stderr.splitlines()
     assert "No reason was written" not in (out / "letter.md").read_text()      # screen only
-    f, out2 = _run_t(tmp_path / "f", text, "--brief", "update to GP", "--final")
+    f, out2 = _run_t(tmp_path / "f", text, "--brief", "update to family doctor", "--final")
     assert f.returncode == 0, f.stderr                                        # notice does not block --final
     assert "--final refused" not in f.stderr and "[L" not in (out2 / "letter.md").read_text()
 
@@ -4152,7 +4158,7 @@ def test_r11r_missing_change_reason_notice_does_not_block_final_library(monkeypa
 @pytest.mark.parametrize("drug,reason,words", STOP_CASES)
 def test_r11r_cut_reason_flag_still_blocks_final(tmp_path, drug, reason, words):
     text = _stop_text(drug, reason)
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP", "--final")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor", "--final")
     assert r.returncode == 3 and "--final refused" in r.stderr
     assert L.MED_NOTICE.format(lid=line_of(text, drug)) in r.stderr.splitlines()
     assert "No reason was written" not in r.stderr
@@ -4167,7 +4173,7 @@ def test_r11r_patient_letter_unchanged_missing_reason(monkeypatch):
 def test_r11r_allergy_reaction_not_documented_untouched(tmp_path):
     text = tpl(question="Please review.", problems=("cough",), meds=("ramipril 5 mg daily; ceased 1937-06-01",),
                allergies=("penicillin",), actions=("review in 2 weeks",))
-    r, out = _run_t(tmp_path, text, "--brief", "update to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "update to family doctor")
     assert r.returncode == 0, r.stderr
     assert "penicillin: reaction not documented" in section((out / "letter.md").read_text(), "Allergies")
 
@@ -4196,7 +4202,7 @@ def _all_letters(tmp_path):
         yield (HERE / "golden" / g[-1]).read_text()
     for i, text in enumerate([PSY_T, H22_NOTES.format(hist="BRCA1 carrier")] +
                              [_stop_text(d, r) for d, r, _ in STOP_CASES]):
-        r, out = _run_t(tmp_path / f"t{i}", text, "--brief", "update to GP")
+        r, out = _run_t(tmp_path / f"t{i}", text, "--brief", "update to family doctor")
         assert r.returncode == 0, r.stderr
         yield (out / "letter.md").read_text()
 
@@ -4213,13 +4219,13 @@ def test_r11s_no_letter_md_ever_contains_cut_marker(tmp_path, monkeypatch):
             seen += 1
     monkeypatch.setattr(L, "_TEMPLATE", [])
     flags = []
-    md, _ = build(PSY, "gp-update", "GP", flags=flags)                         # a history cut
+    md, _ = build(PSY, "gp-update", "family doctor", flags=flags)                         # a history cut
     assert L.CUT_FLAG not in md and CUT_MSG.format("L4") in flags
     assert seen > 20
 
 
 def test_r11s_cut_flag_on_screen_still_blocks_final(tmp_path):
-    r, out = _run_t(tmp_path, PSY_T, "--brief", "update to GP", "--final")
+    r, out = _run_t(tmp_path, PSY_T, "--brief", "update to family doctor", "--final")
     assert r.returncode == 3 and "--final refused" in r.stderr and not (out / "letter.md").exists()
     assert any(l.startswith("Flag: something on line ") for l in r.stderr.splitlines())
 
@@ -4236,7 +4242,7 @@ def test_r11s_unbracketed_stop_reason_refused_nothing_written(stop, monkeypatch)
             f"Med: ramipril 5 mg daily\n1937-06-10 review.\n{stop}\nQuestion: is she well?\n")
     flags = []
     with pytest.raises(Refused) as e:
-        build(text, "gp-update", "GP", flags=flags)
+        build(text, "gp-update", "family doctor", flags=flags)
     assert str(e.value) == "Refused: line L7 of the notes has a stop reason that isn't in brackets. Nothing was written. Put the stop reason in brackets, then run again."
     assert "cough" not in str(e.value) and "chlamydia" not in str(e.value) and not flags
 
@@ -4246,13 +4252,13 @@ def test_r11s_bracketed_stop_reason_still_works(monkeypatch):
     monkeypatch.setattr(L, "_EMPTY_FIELDS", set())
     text = ("Patient: SYNTH-9404\nAllergy: nil known\n1937-06-01 review.\nMed: metformin 500 mg daily\n"
             "Med: ramipril 5 mg daily\n1937-06-10 review.\nStop: ramipril 5 mg daily (reason: dry cough)\nQuestion: is she well?\n")
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     assert "Stopped on 10 Jun 1937: ramipril 5 mg daily. Reason for change: dry cough." in md
 
 
 # ---- round 11 freeze, severity 5: finalise() takes only a build result, so screen-only flags travel with the letter ----
 def test_r11s_finalise_refuses_raw_md_string(tmp_path):
-    res = build(PSY, "gp-update", "GP", flags=[])
+    res = build(PSY, "gp-update", "family doctor", flags=[])
     md, _ = res
     for raw in (md, "", "# Letter\nNo flags here.\n"):
         with pytest.raises(Refused) as e:
@@ -4275,18 +4281,18 @@ def test_r11s_cut_blocks_finalise_until_cleared_by_include():
 
 
 def test_r11s_sensitive_cut_blocks_finalise_until_cleared_by_keep_out():
-    res = build_from_template(SENS_RES_NOTES, "gp-update", "GP", flags=[])
+    res = build_from_template(SENS_RES_NOTES, "gp-update", "family doctor", flags=[])
     assert SENS_FLAG.format(lid=SENS_LID) in res.flags
     with pytest.raises(Refused, match="--final refused"):
         L.finalise(res)
-    ok = build_from_template(SENS_RES_NOTES, "gp-update", "GP", flags=[], keep_out=[SENS_LID])
+    ok = build_from_template(SENS_RES_NOTES, "gp-update", "family doctor", flags=[], keep_out=[SENS_LID])
     assert SENS_FLAG.format(lid=SENS_LID) not in ok.flags
     assert "[L" not in L.finalise(ok) and "chlamydia" not in L.finalise(ok).lower()
 
 
 @pytest.mark.parametrize("notes,lid_of", [(PSY_T, "bipolar"), (SENS_RES_NOTES, "chlamydia")])
 def test_r11s_not_copy_does_not_clear_cut_through_library(notes, lid_of):
-    res = build_from_template(notes, "gp-update", "GP", flags=[], not_copy=[line_of(notes, lid_of)])
+    res = build_from_template(notes, "gp-update", "family doctor", flags=[], not_copy=[line_of(notes, lid_of)])
     with pytest.raises(Refused, match="--final refused"):
         L.finalise(res)
 
@@ -4342,18 +4348,18 @@ def test_r11s_h29_patient_no_reason_still_names_stop_and_change_never_dropped(mo
 
 
 # ---------- round 12: inline brief and file brief give identical results (test only; no logic change) ----------
-R12_BRIEFS = ["discharge to GP", "letter to the patient", "referral to respiratory",
-              "discharge to GP. Include: HIV status", "discharge to GP. Include: astrology",
-              "discharge to GP, cc physio", "letter to the patient, copy to her son", "please write something"]
+R12_BRIEFS = ["discharge to family doctor", "letter to the patient", "referral to respiratory",
+              "discharge to family doctor. Include: HIV status", "discharge to family doctor. Include: astrology",
+              "discharge to family doctor, cc physio", "letter to the patient, copy to her son", "please write something"]
 R12_NOTES = {
     "plain": dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
-                  actions=("review in 2 weeks, GP",)),
+                  actions=("review in 2 weeks, family doctor",)),
     "combination": dict(question="Please review.", problems=("review",), meds=("Entresto 49/51 mg bd",),
-                        actions=("review in 2 weeks, GP",)),
+                        actions=("review in 2 weeks, family doctor",)),
     "hiv": dict(question="Please review.", problems=("HIV", "review"), meds=("dolutegravir 50 mg daily",),
-                actions=("review in 2 weeks, GP",)),
+                actions=("review in 2 weeks, family doctor",)),
     "note-copy": dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
-                      actions=("review in 2 weeks, GP",), recipient="General practice; cc physiotherapy"),
+                      actions=("review in 2 weeks, family doctor",), recipient="General practice; cc physiotherapy"),
 }
 
 
@@ -4428,7 +4434,7 @@ def test_r12_allowed_list_has_no_detection_word_or_ambiguous_shorthand():
     assert set(raw) == set(L.ALLOWED_SHORTHAND)                 # the loader dropped nothing: the files are clean
     assert not set(raw) & set(L.load_single_meaning())          # signed expansions stay in single_meaning.toml
     core = {w for w, c in raw.items() if c.startswith("core/")}
-    au = {w for w, c in raw.items() if c.startswith("au/")}
+    au = {w for w, c in raw.items() if c.startswith(L.LOCALE_DIR.name + "/")}   # the configured site profile
     assert not core & au and {"GP", "UEC", "EUC", "FBC"} <= au
 
 
@@ -4459,14 +4465,14 @@ R12_ORDINARY = dict(question="Please review blood pressure and kidney function."
                     results=("FBC Hb 132 g/L 1937-08-01", "UEC creatinine 90 micromol/L 1937-08-01",
                              "LFT ALT 20 U/L 1937-08-01", "blood pressure 150/90 mmHg 1937-08-01",
                              ),
-                    pending=("TSH, sent 1937-08-01, GP", "CXR, sent 1937-08-01, GP"),
-                    actions=("recheck EUC in 3 months, GP", "MRI brain in 3 months, GP"))
+                    pending=("TSH, sent 1937-08-01, family doctor", "CXR, sent 1937-08-01, family doctor"),
+                    actions=("recheck EUC in 3 months, family doctor", "MRI brain in 3 months, family doctor"))
 
 
 def test_r12_ordinary_clinical_words_can_final(tmp_path):
     """Clinician letter: allowed words carry no flag and the letter finalises."""
     text = tpl(**R12_ORDINARY)
-    r, out = _run_t(tmp_path, text, "--brief", "discharge to GP", "--final")
+    r, out = _run_t(tmp_path, text, "--brief", "discharge to family doctor", "--final")
     assert r.returncode == 0, r.stderr
     assert "abbreviation" not in r.stderr
     md = (out / "letter.md").read_text()
@@ -4485,19 +4491,19 @@ def test_r12_allowed_word_without_plain_words_flagged_in_patient_letter(monkeypa
 
 
 def test_r12_top_still_blocks_final(tmp_path):
-    text = tpl(**{**R12_ORDINARY, "actions": ("recheck EUC in 3 months, GP", "MRI brain in 3 months, GP",
-                                                 "discuss TOP at review, GP")})
-    r, out = _run_t(tmp_path, text, "--brief", "discharge to GP", "--final")
+    text = tpl(**{**R12_ORDINARY, "actions": ("recheck EUC in 3 months, family doctor", "MRI brain in 3 months, family doctor",
+                                                 "discuss TOP at review, family doctor")})
+    r, out = _run_t(tmp_path, text, "--brief", "discharge to family doctor", "--final")
     assert r.returncode == 3 and not (out / "letter.md").exists()
 
 
 # ---------- round 12 ruling 1 (severity 5): a Results line with no value is never dropped silently ----------
 def _r12_res(*results):
     return tpl(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
-               results=results, actions=("review in 2 weeks, GP",))
+               results=results, actions=("review in 2 weeks, family doctor",))
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient"])
 def test_r12_result_without_value_kept_word_for_word_and_cited(tmp_path, brief):
     text = _r12_res("Hb 132 g/L 1937-08-01", "CXR clear 1937-08-01")
     r, out = _run_t(tmp_path, text, "--brief", brief)
@@ -4512,12 +4518,12 @@ def test_r12_result_without_value_kept_word_for_word_and_cited(tmp_path, brief):
 def test_r12_sensitive_result_without_value_cut_in_gp_letter(tmp_path, line):
     text = _r12_res("Hb 132 g/L 1937-08-01", line)
     lid = line_of(text, line.split()[0])
-    r, out = _run_t(tmp_path, text, "--brief", "discharge to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "discharge to family doctor")
     assert r.returncode == 0, r.stderr
     md = (out / "letter.md").read_text()
     assert line.split()[0] not in md and lid not in md               # nothing in letter.md
     assert L.SENS_RESULT_NOTICE.format(lid=lid) in r.stderr           # sensitive flag, screen only
-    r, out2 = _run_t(tmp_path / "f", text, "--brief", "discharge to GP", "--final")
+    r, out2 = _run_t(tmp_path / "f", text, "--brief", "discharge to family doctor", "--final")
     assert r.returncode == 3 and not (out2 / "letter.md").exists()   # blocks --final
 
 
@@ -4532,7 +4538,7 @@ def test_r12_sensitive_result_without_value_kept_in_patient_letter(tmp_path, lin
     assert "sensitive" not in r.stderr
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient"])
 def test_r12_unparseable_result_flagged(tmp_path, brief):
     text = _r12_res("Hb 132 g/L 1937-08-01", "1937-08-01")
     lid = next(f"L{n}" for n, l in enumerate(text.splitlines(), 1) if l == "- 1937-08-01")
@@ -4543,7 +4549,7 @@ def test_r12_unparseable_result_flagged(tmp_path, brief):
     assert r.returncode == 3 and not (out2 / "letter.md").exists()
 
 
-# ---------- round 12: signed patient-letter plain words (locale/core + locale/au plain_words.toml) ----------
+# ---------- round 12: signed patient-letter plain words (locale/core + site profile plain_words.toml) ----------
 R12_PW = dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
               results=("TSH 2.1 mU/L 1937-08-01", "CXR clear 1937-08-01", "CXR clear 1937-08-20",
                        "CT clear 1937-08-01", "FBC (full blood count) normal 1937-08-01"),
@@ -4590,7 +4596,7 @@ def test_r12_unlisted_word_and_ct_still_flagged_in_patient_letter(tmp_path):
 
 def test_r12_plain_words_clinician_letter_unchanged(tmp_path):
     text = tpl(**R12_PW)
-    r, out = _run_t(tmp_path, text, "--brief", "discharge to GP")
+    r, out = _run_t(tmp_path, text, "--brief", "discharge to family doctor")
     md = (out / "letter.md").read_text()
     for w, plain in L.PLAIN_WORDS.items():
         assert f"{w} ({plain})" not in md
@@ -4600,7 +4606,7 @@ def test_r12_plain_words_clinician_letter_unchanged(tmp_path):
 # ---------- round 13 item 1: units (locale/core/units.toml) ----------
 def _r13(results=(), meds=("empagliflozin 10 mg daily",)):
     return tpl(question="Please review.", problems=("review",), meds=meds, results=results,
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
 
 
 def _r13_run(tmp_path, text, brief, *extra):
@@ -4621,12 +4627,12 @@ def test_r13_each_word_has_exactly_one_entry():
         assert w in L.UNIT_WORDING and w not in L.PLAIN_WORDS and w not in L.ALLOWED_SHORTHAND
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient"])
 def test_r13_alt_u_per_litre_passes(tmp_path, brief):
     r, md = _r13_run(tmp_path, _r13(("ALT 40 U/L 1937-08-01",)), brief)
     assert r.returncode == 0, r.stderr
     assert "40 U/L" in md and f"U/L {L.FLAG}" not in md
-    assert ("40 U/L (units per litre)" in md) == (brief != "discharge to GP")
+    assert ("40 U/L (units per litre)" in md) == (brief != "discharge to family doctor")
 
 
 @pytest.mark.parametrize("s", ["dose 10 U", "dose 10 IU", "IU", "10 cc", "ug", "mU"])
@@ -4656,7 +4662,7 @@ def test_r13_patient_results_wording_no_double_and_no_brackets_for_percent_and_c
     assert "(grams per litre) (grams per litre)" not in md and "% (" not in md and "°C (" not in md
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient"])
 def test_r13_insulin_units_in_full_no_brackets(tmp_path, brief):
     r, md = _r13_run(tmp_path, _r13(meds=("insulin glargine 10 units nocte",)), brief)
     assert r.returncode == 0, r.stderr
@@ -4669,7 +4675,7 @@ def test_r13_medicine_lines_get_no_unit_wording_and_same_dose_check(tmp_path):
     med = "paracetamol 1 g qid max 4 g in 24 hours"
     text = _r13(meds=(med,))
     rp, mdp = _r13_run(tmp_path / "p", text, "letter to the patient")
-    rg, mdg = _r13_run(tmp_path / "g", text, "discharge to GP")
+    rg, mdg = _r13_run(tmp_path / "g", text, "discharge to family doctor")
     assert rp.returncode == rg.returncode == 0, rp.stderr + rg.stderr
     assert "(grams)" not in mdp
     notes = L.from_template(text)
@@ -4680,7 +4686,7 @@ def test_r13_medicine_lines_get_no_unit_wording_and_same_dose_check(tmp_path):
             L.verify_letter(bad, notes, aud)
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient"])
 def test_r13_blood_pressure_kept_together_as_written(tmp_path, brief):
     r, md = _r13_run(tmp_path, _r13(("blood pressure 150/90 mmHg 1937-08-01",)), brief, "--privacy",
                      "true" if "patient" in brief else "false", "--final")   # check 19: explicit privacy field
@@ -4691,12 +4697,12 @@ def test_r13_blood_pressure_kept_together_as_written(tmp_path, brief):
 
 # ---------- round 13 item 2: micro sign U+00B5 and Greek mu U+03BC are the same ----------
 @pytest.mark.parametrize("mu", ["\u00b5", "\u03bc"])
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient"])
 def test_r13_mu_per_litre_allowed_both_characters(tmp_path, mu, brief):
     r, md = _r13_run(tmp_path, _r13((f"vitamin B12 300 {mu}g/L 1937-08-01",)), brief)
     assert r.returncode == 0, r.stderr
     assert f"300 {mu}g/L" in md and f"{mu}g/L {L.FLAG}" not in md
-    assert (f"300 {mu}g/L (micrograms per litre)" in md) == (brief != "discharge to GP")
+    assert (f"300 {mu}g/L (micrograms per litre)" in md) == (brief != "discharge to family doctor")
 
 
 @pytest.mark.parametrize("dose", ["50 \u00b5g", "50 \u03bcg", "50\u00b5g", "50\u03bcg"])
@@ -4723,7 +4729,7 @@ def test_r13_test_names_file_clean_and_one_entry_each():
 
 
 def test_r13_test_names_clear_flag_in_clinician_letter(tmp_path):
-    r, md = _r13_run(tmp_path, _r13(R13_TN), "discharge to GP", "--final")
+    r, md = _r13_run(tmp_path, _r13(R13_TN), "discharge to family doctor", "--final")
     assert r.returncode == 0, r.stderr
     for w in ("Na", "K", "Cr", "urea", "LDL", "ferritin"):
         assert re.search(rf"\b{w}\b", md) and f"{w} (" not in md
@@ -4739,7 +4745,7 @@ def test_r13_test_names_patient_wording_every_use(tmp_path):
 
 
 def test_r13_ca_not_treated_as_calcium_in_gp_letter(tmp_path):
-    r, md = _r13_run(tmp_path, _r13(("Ca 2.4 mmol/L 1937-08-01",)), "discharge to GP")
+    r, md = _r13_run(tmp_path, _r13(("Ca 2.4 mmol/L 1937-08-01",)), "discharge to family doctor")
     assert r.returncode == 0, r.stderr
     assert f"Ca {L.FLAG}" in md and "calcium" not in md.lower()
 
@@ -4755,7 +4761,7 @@ def test_r13_audit_dose_check_same_with_and_without_plain_words():
                 meds=("paracetamol 1 g qid max 4 g in 24 hours",))
     notes = L.from_template(text)
     out = {}
-    for aud, to in (("patient", "Patient"), (None, "GP")):
+    for aud, to in (("patient", "Patient"), (None, "family doctor")):
         md = L.build_from_template(text, "discharge", to, audience=aud).md
         ok = L.verify_letter(md, notes, aud or "gp")
         bad = re.sub(r"no more than 4 g in 24 hours|max 4 g in 24 hours", "", md)
@@ -4771,7 +4777,7 @@ R13_HIV = _r13(meds=("empagliflozin 10 mg daily",)).replace("- review\n", "- HIV
 
 def test_r13_audit_leak_check_source_side():
     flags = []
-    md = L.build_from_template(R13_HIV, "discharge", "GP", flags=flags).md
+    md = L.build_from_template(R13_HIV, "discharge", "family doctor", flags=flags).md
     assert "HIV" not in md and any("L6" in f for f in flags)
 
 
@@ -4781,13 +4787,13 @@ def test_r13_audit_leak_check_output_side_introduced_leak(monkeypatch):
         return real(*a, **k).replace("## Problems\n\n", f"## Problems\n\n- HIV {L.FLAG} [L6]\n", 1)
     monkeypatch.setattr(L, "render", inject)
     flags = []
-    md = L.build_from_template(R13_HIV, "discharge", "GP", flags=flags).md
+    md = L.build_from_template(R13_HIV, "discharge", "family doctor", flags=flags).md
     assert "HIV" not in md and any("L6" in f for f in flags)
 
 
 def test_r13_audit_leak_refusal_on_finished_letter():
     notes = L.from_template(R13_HIV)
-    md = L.build_from_template(R13_HIV, "discharge", "GP").md
+    md = L.build_from_template(R13_HIV, "discharge", "family doctor").md
     leaked = md.replace("## Problems\n\n", "## Problems\n\n- HIV [L6]\n", 1)
     with pytest.raises(L.Refused):
         L.verify_letter(leaked, notes, "gp")
@@ -4800,7 +4806,7 @@ R13_PA = dict(question="Please review.", problems=("review",), meds=("empagliflo
                        "discuss TOP in 2 weeks, GP"))
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient"])
 def test_r13_pending_action_lines_keep_shorthand_check(tmp_path, brief):
     """Ruling: the shorthand check stays on pending and action lines in every letter, clinician letters included."""
     text = tpl(**R13_PA)
@@ -4839,25 +4845,25 @@ def test_r13_pending_action_patient_needs_signed_plain_words(tmp_path):
 # ---------- round 13 stability: no per-letter state outlives an in-process CLI call ----------
 def test_r13_main_leaves_no_template_state(tmp_path):
     n = tmp_path / "n.txt"; n.write_text(tpl(question="Please review."))
-    assert L.main([str(n), "--brief", "update to GP", "--out", str(tmp_path / "o")]) == 0
+    assert L.main([str(n), "--brief", "update to family doctor", "--out", str(tmp_path / "o")]) == 0
     assert not L._TEMPLATE and not L._EMPTY_FIELDS and not L._ROUTES and not L._PATIENT_LETTER
     md = make_letter("Patient: SYNTH-7401\n1937-04-05 Clinic.\nProblem: tiredness\nPlan: review in 4 weeks\n",
-                     "gp-update", "GP")
+                     "gp-update", "family doctor")
     assert "5 Apr 1937" in md
 
 
 # ---------- check 19: privacy line, explicit privacy field (wording reviewed by Patient, signed by Physician) ----------
 R19 = dict(question="Please review.", problems=("review",), meds=("empagliflozin 10 mg daily",),
-           actions=("review in 2 weeks, GP",))
+           actions=("review in 2 weeks, family doctor",))
 
 
 def test_c19_privacy_true_line_missing_blocks_final(tmp_path):
-    r, out = _run_t(tmp_path, tpl(**R19), "--brief", "discharge to GP", "--privacy", "true", "--final")
+    r, out = _run_t(tmp_path, tpl(**R19), "--brief", "discharge to family doctor", "--privacy", "true", "--final")
     assert r.returncode == 3 and not (out / "letter.md").exists()
     assert r.stderr.strip().splitlines()[-1] == L.PRIVACY_BLOCKED["missing"]
 
 
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient"])
 def test_c19_privacy_false_passes_unblocked(tmp_path, brief):
     r, out = _run_t(tmp_path, tpl(**R19), "--brief", brief, "--privacy", "false", "--final")
     assert r.returncode == 0, r.stderr
@@ -4897,11 +4903,11 @@ def test_rulecheck_fails_on_row_with_missing_test(tmp_path):
 
 
 # ---------- replay: same input twice gives byte-identical output and screen messages ----------
-@pytest.mark.parametrize("brief", ["discharge to GP", "letter to the patient", "referral to cardiology"])
+@pytest.mark.parametrize("brief", ["discharge to family doctor", "letter to the patient", "referral to cardiology"])
 def test_replay_same_input_byte_identical(tmp_path, brief):
     text = tpl(question="Please review.", problems=("review", "HIV"), meds=("empagliflozin 10 mg daily",),
                results=("Hb 132 g/L 1937-08-01", "CXR clear 1937-08-01", "Hb 120", "XYZ 5 mmol/L 1937-08-01"),
-               pending=("FBC, sent 1937-08-01, GP",), actions=("review in 2 weeks, GP",))
+               pending=("FBC, sent 1937-08-01, family doctor",), actions=("review in 2 weeks, family doctor",))
     runs = []
     for i in range(2):
         r, out = _run_t(tmp_path / f"run{i}", text, "--brief", brief)
@@ -4939,7 +4945,7 @@ def test_c14_med_line_keeps_plain_parts_drops_linked_part_and_names_the_medicine
 
 
 def test_c14_longest_detection_word_is_removed_whole():
-    out, flags = _c14("- dolutegravir 50 mg daily HIV-positive [L3, L6]", ["L99: HIV status linked words, not relevant to GP"])
+    out, flags = _c14("- dolutegravir 50 mg daily HIV-positive [L3, L6]", ["L99: HIV status linked words, not relevant to family doctor"])
     assert out == "- dolutegravir 50 mg daily [flag: part of medicine entry left out] [L3, L6]"
     assert flags == [C14_PART.format("L6"), C14_MED.format("L6")]
 
@@ -4991,11 +4997,11 @@ def test_c14_flag_cuts_result_line_gets_its_own_flag_and_keep_out_clears_it(monk
     monkeypatch.setattr(L, "_SENS_CUTS", [])
     monkeypatch.setattr(L, "_KEPT_OUT", [])
     flags = []
-    L.flag_cuts("x", ["L3: HIV status result, not relevant to GP", "L4: HIV status linked words"], flags, "Update", note)
+    L.flag_cuts("x", ["L3: HIV status result, not relevant to family doctor", "L4: HIV status linked words"], flags, "Update", note)
     assert flags == [L.SENS_RESULT_NOTICE.format(lid="L3"), L.CUT_NOTICE.format(lid="L4")] and L._SENS_CUTS == ["L3"]
     monkeypatch.setattr(L, "_KEEP_OUT", ["L3"])
     flags = []
-    L.flag_cuts("x", ["L3: HIV status result, not relevant to GP"], flags, "Update", note)
+    L.flag_cuts("x", ["L3: HIV status result, not relevant to family doctor"], flags, "Update", note)
     assert flags == [] and L._KEPT_OUT == ["L3"]
 
 
@@ -5005,13 +5011,13 @@ C6_NOTE = "Patient: SYNTH-9003\n1937-08-02 Clinic review.\nResult: chest X-ray c
 
 def _c6(dropped, include=(), keep=False, monkeypatch=None):
     monkeypatch.setattr(L, "_INCLUDE", set(include))
-    st = cumsum(parse(C6_NOTE)[0], "GP", dropped, keep_indications=keep)
+    st = cumsum(parse(C6_NOTE)[0], "family doctor", dropped, keep_indications=keep)
     return [r[1] for r in st["results_text"]], dropped
 
 
 def test_c6_line_already_cut_as_sensitive_is_not_kept_again(monkeypatch):
     kept, dropped = _c6(["L3: HIV status cut (earlier)"], monkeypatch=monkeypatch)
-    assert ["L3"] not in kept and dropped == ["L3: HIV status cut (earlier)", "L4: HIV status result, not relevant to GP"]
+    assert ["L3"] not in kept and dropped == ["L3: HIV status cut (earlier)", "L4: HIV status result, not relevant to family doctor"]
 
 
 def test_c6_a_cut_on_another_line_does_not_hide_this_line(monkeypatch):
@@ -5021,7 +5027,7 @@ def test_c6_a_cut_on_another_line_does_not_hide_this_line(monkeypatch):
 
 def test_c6_linked_word_result_cut_unless_included(monkeypatch):
     kept, dropped = _c6([], monkeypatch=monkeypatch)
-    assert kept == [["L3"]] and dropped == ["L4: HIV status result, not relevant to GP"]
+    assert kept == [["L3"]] and dropped == ["L4: HIV status result, not relevant to family doctor"]
     kept, dropped = _c6([], include=["hiv status"], monkeypatch=monkeypatch)
     assert kept == [["L3"], ["L4"]] and dropped == []
     kept, dropped = _c6([], keep=True, monkeypatch=monkeypatch)     # patient letter: kept word for word
@@ -5039,13 +5045,13 @@ def test_c2_combination_refusal_names_the_parsed_line_not_a_comment():
 def test_c3_copy_refusal_defaults_to_clinician_wording():
     for fn in (L.refuse_copies, L.pre_template_checks):
         with pytest.raises(Refused) as e:
-            fn("Patient: SYNTH-9008\n", brief="copy to GP")
+            fn("Patient: SYNTH-9008\n", brief="copy to family doctor")
         assert str(e.value) == L.copy_refusal("in the brief", False)
 
 
 def test_c3_recipients_line_with_two_readers_refused_before_template_check():
     with pytest.raises(Refused) as e:
-        L.pre_template_checks("Patient: SYNTH-9008\nRecipients: GP, Cardiology\n")
+        L.pre_template_checks("Patient: SYNTH-9008\nRecipients: family doctor, Cardiology\n")
     assert str(e.value) == L.RECIPIENTS_REFUSED.format(n=2)
     assert L.pre_template_checks("Patient: SYNTH-9008\nRecipients: Cardiology clinic\n") is not False
 
@@ -5055,7 +5061,7 @@ C4_TPL = (HERE / "fixtures" / "template" / "chest_pain.txt").read_text()
 
 def test_c4_template_recipients_two_readers_refused():
     with pytest.raises(Refused) as e:
-        L.from_template(C4_TPL.replace("Recipients: Cardiology clinic", "Recipients: Cardiology clinic, GP"))
+        L.from_template(C4_TPL.replace("Recipients: Cardiology clinic", "Recipients: Cardiology clinic, family doctor"))
     assert str(e.value) == L.RECIPIENTS_REFUSED.format(n=3)
 
 
@@ -5158,7 +5164,7 @@ def test_c1_event_id_never_hides_a_second_patient_or_a_missing_one():
 @pytest.mark.parametrize("aud", ["gp", "patient"])
 def test_c1_no_abbreviation_flag_inside_event_id(aud):
     flags = []
-    md = build(EV_NOTE, "gp-update", "GP" if aud == "gp" else "patient", audience=aud, flags=flags, privacy=True)[0]
+    md = build(EV_NOTE, "gp-update", "family doctor" if aud == "gp" else "patient", audience=aud, flags=flags, privacy=True)[0]
     assert "Event SYNTH-EP-1002#7 noted." in md and "review event SYNTH-EP-1002#7 in 2 weeks" in md
     assert not any("SYNTH" in f or f.startswith("EP") for f in flags)
 
@@ -5178,7 +5184,7 @@ def test_template_four_times_a_day_is_signed_frequency():
     assert L.med_item("paracetamol 1 g four times a day oral for 5 days")["freq"] == "four times a day"
     t = C4_TPL.replace("- aspirin 100 mg daily", "- paracetamol 1 g four times a day oral for 5 days")
     pmd = L.build_from_template(t, "discharge", "patient", audience="patient", privacy=True, flags=[])[0]
-    gmd = L.build_from_template(t, "discharge", "GP", audience="gp", flags=[])[0]
+    gmd = L.build_from_template(t, "discharge", "family doctor", audience="gp", flags=[])[0]
     assert "paracetamol 1 g four times a day oral (by mouth) for 5 days" in pmd
     assert "paracetamol 1 g four times a day oral for 5 days" in gmd
 
@@ -5236,7 +5242,7 @@ def test_vocabulary_is_data_not_code():
 # ---------- check 2: combination list in the locale pack; refusal and written-by-hand (Physician and Director) ----------
 def test_c2_all_current_combination_brands_in_locale_pack():
     assert L.load_combination() == ("biktarvy", "triumeq", "dovato", "genvoya", "truvada", "descovy", "entresto")
-    assert L.COMBINATION_FILE == HERE / "locale" / L.LOCALE / "combination.toml"
+    assert L.COMBINATION_FILE == L.LOCALE_DIR / "combination.toml"
     assert set(L.COMBO_BRANDS) <= {t.lower() for t in domainscan.TERMS["drug"]}       # can't come back into code
 
 
@@ -5261,20 +5267,20 @@ def test_c2_letters_refuses_to_run_without_a_signed_combination_list(tmp_path, m
         p.write_text(pack)
     monkeypatch.setattr(L, "COMBINATION_FILE", p)
     with pytest.raises(Refused) as e:
-        make_letter(COMBO_NOTES.format(line="Med: aspirin 100 mg daily"), "gp-update", "GP")
+        make_letter(COMBO_NOTES.format(line="Med: aspirin 100 mg daily"), "gp-update", "family doctor")
     assert str(e.value) == L.COMBO_PACK_REFUSED
 
 
 def test_c2_complete_pack_runs(tmp_path, monkeypatch):
     p = tmp_path / "combination.toml"; p.write_text(C2_PACK)
     monkeypatch.setattr(L, "COMBINATION_FILE", p)
-    assert "aspirin" in make_letter(COMBO_NOTES.format(line="Med: aspirin 100 mg daily"), "gp-update", "GP")
+    assert "aspirin" in make_letter(COMBO_NOTES.format(line="Med: aspirin 100 mg daily"), "gp-update", "family doctor")
     with pytest.raises(Refused):
-        make_letter(COMBO_NOTES.format(line="Med: Truvada 1 tablet daily"), "gp-update", "GP")
+        make_letter(COMBO_NOTES.format(line="Med: Truvada 1 tablet daily"), "gp-update", "family doctor")
 
 
 @pytest.mark.parametrize("brand", ["Truvada", "Descovy"])
-@pytest.mark.parametrize("aud,to", [("gp", "GP"), ("patient", "patient")])
+@pytest.mark.parametrize("aud,to", [("gp", "family doctor"), ("patient", "patient")])
 def test_c2_truvada_descovy_refused_written_by_hand(tmp_path, brand, aud, to):
     notes = tmp_path / "n.txt"; out = tmp_path / "out"
     notes.write_text(tpl(question="Why is she tired?", problems=["tiredness"], meds=[f"{brand} 1 tablet daily"]))
@@ -5393,13 +5399,13 @@ def test_wl_question_flag_sits_on_the_letter_line():
 def test_wl_build_rejects_unknown_type():
     import pytest
     with pytest.raises(ValueError, match="unknown type"):
-        L.build(_WL_PSY, "no-such-type", "GP")
+        L.build(_WL_PSY, "no-such-type", "family doctor")
 
 
 def test_wl_allowed_word_stays_flagged_in_patient_letter_only(monkeypatch):
     monkeypatch.setattr(L, "ALLOWED_SHORTHAND", frozenset(L.ALLOWED_SHORTHAND) | {"ZQX"})
-    t = "Patient: SYNTH-5401\n1937-06-03 Clinic review.\nProblem: ingrown toenail\nFollow-up: ZQX in 2 weeks, GP\n"
-    for aud, to, want in (("gp", "GP", []), ("patient", "Patient", ["ZQX [L4]"])):
+    t = "Patient: SYNTH-5401\n1937-06-03 Clinic review.\nProblem: ingrown toenail\nFollow-up: ZQX in 2 weeks, family doctor\n"
+    for aud, to, want in (("gp", "family doctor", []), ("patient", "Patient", ["ZQX [L4]"])):
         f = []
         L.build(t, "gp-update", to, audience=aud, flags=f)
         assert [x for x in f if "ZQX" in x] == want
@@ -5621,7 +5627,7 @@ def test_refusal_check_numbers_resolve_for_every_code():
 # item 2: one test per line no test reached before
 def test_unreached_check_shorthand_line():
     text = "Patient: SYNTH-4701\n1937-06-03 Clinic review.\nProblem: knee pain\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     with pytest.raises(Refused) as e:
         check(md.replace("knee pain", "?knee pain"), parse(text)[1], "gp-update")
     assert L.CHECK_SHORTHAND.format(at="line L3") in str(e.value).splitlines()
@@ -5629,7 +5635,7 @@ def test_unreached_check_shorthand_line():
 
 def test_unreached_check_sentence_limit_line():
     text = "Patient: SYNTH-4701\n1937-06-03 Clinic review.\nProblem: knee pain\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     long = " ".join(["knee pain"] * (L.SENTENCE_LIMIT // 2 + 1))
     with pytest.raises(Refused) as e:
         check(md.replace("- knee pain", "- " + long, 1), parse(text)[1], "gp-update")
@@ -5654,7 +5660,7 @@ def test_unreached_keep_out_arg_line_both_sites(tmp_path, prog):
 
 
 def test_unreached_action_missing_line():
-    t = "SYNTH-9921 :: F :: 81\n1937-05-14 falls review.\nPlan: review in 2 weeks || GP\n"
+    t = "SYNTH-9921 :: F :: 81\n1937-05-14 falls review.\nPlan: review in 2 weeks || family doctor\n"
     md = _letter([("Background", ["falls review [L2]"])])
     assert _ck(t, md) == [L.ACTION_MISSING.format(lid="L3")]
 
@@ -5687,19 +5693,19 @@ def _hostile_messages(tmp_path):
     grab(L.check_safe, "Patient: Zebedee Quillfeather\n1937-06-03 zorvadol 77.7 mg Snarkle syndrome\n")
     grab(L.check_safe, "Patient: SYNTH-1\n1937-06-03 Zebedee Quillfeather 0412345678 zorvadol\n")
     grab(L.build, "Patient: SYNTH-1\n1937-06-03 Clinic review.\nStopped: zorvadol 77.7 mg reason: Snarkle syndrome, "
-                  "Zebedee Quillfeather\n", "gp-update", "GP")
+                  "Zebedee Quillfeather\n", "gp-update", "family doctor")
     grab(L.refuse_copies, "Patient: SYNTH-1\n1937-06-03 Clinic review.\nCopy to: Zebedee Quillfeather (zorvadol)\n")
-    grab(L.refuse_copies, "x", None, "update to GP, cc Zebedee Quillfeather", True)
+    grab(L.refuse_copies, "x", None, "update to family doctor, cc Zebedee Quillfeather", True)
     grab(L.read_brief, "Zebedee Quillfeather zorvadol 77.7 Snarkle")
-    grab(L.read_brief, "update to GP, include Snarkle syndrome and Quixomab")
+    grab(L.read_brief, "update to family doctor, include Snarkle syndrome and Quixomab")
     grab(L.from_template, "Patient: SYNTH-1\nDate: 1937-06-03\nZebedee Quillfeather: zorvadol 77.7 mg Snarkle\n")
     text = "Patient: SYNTH-4701\n1937-06-03 Clinic review.\nProblem: knee pain\nFollow-up: review in 2 weeks\n"
-    md, _ = build(text, "gp-update", "GP")
+    md, _ = build(text, "gp-update", "family doctor")
     bad = md.replace("knee pain", "?Snarkle syndrome Zebedee Quillfeather zorvadol 77.7 mg Quixomab "
                      + "knee " * L.SENTENCE_LIMIT)
     grab(check, bad, parse(text)[1], "gp-update")
     notes = ("SYNTH-9921 :: F :: 81\nAllergy: Quixomab - Snarkle rash\n1937-05-14 Zebedee Quillfeather review.\n"
-             "Med: zorvadol 77.7 mg daily\nPlan: Zebedee Quillfeather to review || GP\n")
+             "Med: zorvadol 77.7 mg daily\nPlan: Zebedee Quillfeather to review || family doctor\n")
     msgs += _ck(notes, _letter([("Background", ["Zebedee Quillfeather review [L3]"])]))
     msgs += _ck(notes, _letter([("Current medicines", ["Current medicines not documented."]),
                                 ("Allergies", ["Allergies not documented."])]))
@@ -5729,7 +5735,7 @@ REFUSING_RUNS = [  # (notes edit, extra args): each refuses on the CLI
     (lambda t: t + "Copy to: Dr A. Synth\n", []),
     (lambda t: t, ["--keep-out", "results"]),
     (lambda t: t, ["--not-copy", "History"]),
-    (lambda t: t, ["--brief", "update to patient, cc GP"]),
+    (lambda t: t, ["--brief", "update to patient, cc family doctor"]),
 ]
 
 
@@ -5755,7 +5761,7 @@ def test_no_refusal_text_reaches_letter_queue_or_log(tmp_path, edit, extra, pati
 def test_built_letters_never_hold_refusal_text():
     stems = [_norm(c["text"]).split("{")[0][:25] for c in _refusal_registry().values()]
     for f in sorted(TPL.glob("*.txt")):
-        for to, aud in (("GP", None), ("Patient", "patient")):
+        for to, aud in (("family doctor", None), ("Patient", "patient")):
             md, _ = L.build_from_template(f.read_text(), "gp-update", to, audience=aud)
             assert "Refused" not in md and not any(s in md for s in stems if len(s) > 12), f
 
@@ -5786,7 +5792,7 @@ def test_copy_refusal_endings_listed_and_never_reach_a_patient(tmp_path):
                            "so nobody assumes someone was copied in when they weren't.")
     assert L.PATIENT_COPY_TAIL == ("A letter to the patient can't be copied to anyone else. "
                                    "Write a separate letter for each other reader.")
-    for brief, patient in (("update to patient, cc GP", True), ("update to GP, cc cardiology", False)):
+    for brief, patient in (("update to patient, cc family doctor", True), ("update to family doctor, cc cardiology", False)):
         out = tmp_path / brief.replace(" ", "_").replace(",", "")
         r = subprocess.run(CLI + [str(TPL / "chest_pain.txt"), "--brief", brief, *READER2, "--out", str(out)],
                            capture_output=True, text=True)
@@ -5841,12 +5847,12 @@ def _fc(tmp_path, *args):
 
 
 @pytest.mark.parametrize("args", [["--type", "gp-update", "--to", "Patient"],
-                                  ["--type", "gp-update", "--to", "GP", "--audience", "patient"]])
+                                  ["--type", "gp-update", "--to", "family doctor", "--audience", "patient"]])
 def test_fail_closed_to_or_audience_names_the_patient(tmp_path, args):
     _fc(tmp_path, *args)
 
 
-@pytest.mark.parametrize("brief", ["update to GP; copied to patient", "update to GP, cc the patient",
+@pytest.mark.parametrize("brief", ["update to family doctor; copied to patient", "update to family doctor, cc the patient",
                                    "referral to cardiology, copy to patient"])
 def test_fail_closed_copy_recipient_without_id(tmp_path, brief):
     _fc(tmp_path, "--brief", brief, "--reader-id", "SYNTH-REG-0007")        # the copy recipient has no id
@@ -5854,7 +5860,7 @@ def test_fail_closed_copy_recipient_without_id(tmp_path, brief):
 
 @pytest.mark.parametrize("brief", ["zzz qqq", "to whom it may concern"])
 def test_fail_closed_brief_cannot_be_read(tmp_path, brief):
-    _fc(tmp_path, "--brief", brief, "--to", "GP", "--type", "gp-update")
+    _fc(tmp_path, "--brief", brief, "--to", "family doctor", "--type", "gp-update")
 
 
 def test_pre_push_blocks_on_the_signed_test():
@@ -5876,7 +5882,7 @@ def _rd(tmp_path, notes_extra, *args):
     n = tmp_path / "n.txt"
     n.write_text((TPL / "chest_pain.txt").read_text() + notes_extra)
     out = tmp_path / "o"
-    r = subprocess.run(CLI + [str(n), "--type", "gp-update", "--to", "GP", *args, "--out", str(out)],
+    r = subprocess.run(CLI + [str(n), "--type", "gp-update", "--to", "family doctor", *args, "--out", str(out)],
                        capture_output=True, text=True)
     return r, out
 
@@ -5917,17 +5923,17 @@ def test_gp_letter_saying_the_patient_presented_goes_through(tmp_path):
     n.write_text((TPL / "chest_pain.txt").read_text().replace(
         "History: hypertension,", "History: the patient presented with hypertension,"))
     out = tmp_path / "o"
-    r = subprocess.run(CLI + [str(n), "--brief", "update to GP", "--reader-id", GP_ID, "--out", str(out)],
+    r = subprocess.run(CLI + [str(n), "--brief", "update to family doctor", "--reader-id", GP_ID, "--out", str(out)],
                        capture_output=True, text=True)
     assert r.returncode == 0 and (out / "letter.md").exists() and r.stdout == "", r.stderr
     n.write_text(n.read_text() + "Copy to: Dr A. Synth\n")
-    r = subprocess.run(CLI + [str(n), "--brief", "update to GP", "--reader-id", GP_ID], capture_output=True, text=True)
+    r = subprocess.run(CLI + [str(n), "--brief", "update to family doctor", "--reader-id", GP_ID], capture_output=True, text=True)
     assert r.returncode == 2 and r.stdout == ""                             # refused, but not the by-hand route
 
 
 def test_needs_hand_reasons():
     t, card = (TPL / "chest_pain.txt").read_text(), L.load_patient_card(CARD)
-    nh = lambda ids, **k: L.needs_hand(k.get("to", "GP"), k.get("aud"), k.get("ok", True), k.get("n", 1), ids, t,
+    nh = lambda ids, **k: L.needs_hand(k.get("to", "family doctor"), k.get("aud"), k.get("ok", True), k.get("n", 1), ids, t,
                                        k.get("card", card))
     assert nh([GP_ID]) is None
     assert nh([GP_ID], to="Patient") == "patient named" and nh([GP_ID], aud="patient") == "patient named"
@@ -5939,7 +5945,7 @@ def test_needs_hand_reasons():
     assert nh(["SYNTH-AG-0001"]) == "acts for patient" and nh(["SYNTH-AG-0003"], card=None) == "not a reader id"
     assert nh(["SYNTH-2002"]) == "not a reader id"
     assert nh([GP_ID, "SYNTH-AG-0003"], n=2) == "acts for patient" and nh([GP_ID, "SYNTH-REG-0008"], n=2) is None
-    assert L.brief_readers("update to GP") == 1 and L.brief_readers("update to GP, cc renal") == 2
+    assert L.brief_readers("update to family doctor") == 1 and L.brief_readers("update to family doctor, cc renal") == 2
     assert L.brief_readers(None) == 1
 
 
@@ -6059,7 +6065,7 @@ def test_reader_grants_reasons():
     assert rg(["SYNTH-AG-0003", "SYNTH-AG-0001"], ["SYNTH-GR-0003"]) == ("no grant id", ())
     assert rg(["SYNTH-AG-0003", "SYNTH-AG-0001"], ["SYNTH-GR-0003", "SYNTH-GR-0001"])[0] == "current"
     assert rg([" SYNTH-AG-0003 "], [" SYNTH-GR-0003 "])[0] == "current"
-    assert L.needs_hand("GP", None, True, 1, ["SYNTH-AG-0003"], "", card, ("SYNTH-AG-0003",)) is None
+    assert L.needs_hand("family doctor", None, True, 1, ["SYNTH-AG-0003"], "", card, ("SYNTH-AG-0003",)) is None
 
 
 # ---------------------------------------------------------------- traces setting (room rulings 08:07-08:09)
@@ -6369,9 +6375,9 @@ def _declined_run(tmp_path, decl, audience, allergies=()):
     d = tmp_path / "declined.toml"
     d.write_text(decl)
     text = tpl(question="Please review.", problems=("cough",), meds=("paracetamol 1 g four times a day",),
-               allergies=allergies, actions=("review in 2 weeks, GP",))
+               allergies=allergies, actions=("review in 2 weeks, family doctor",))
     args = ["--type", "discharge", "--declined", str(d)] + (
-        ["--to", "Patient", "--audience", "patient"] if audience == "patient" else ["--to", "GP"])
+        ["--to", "Patient", "--audience", "patient"] if audience == "patient" else ["--to", "family doctor"])
     r, out = _run_t(tmp_path / "run", text, *args)
     return r, out, (out / "letter.md").read_text() if (out / "letter.md").exists() else ""
 
@@ -6421,8 +6427,8 @@ def test_tamper_any_absence_line_for_a_declined_item_fails(tmp_path, audience, l
 def test_absence_line_from_the_builder_is_never_written(tmp_path, monkeypatch):
     monkeypatch.setattr(L, "_decline_lines", lambda name, audience: ["- none recorded."])
     with pytest.raises(L.Refused, match="says something is absent"):
-        L.build(tpl(question="Please review.", problems=("cough",), allergies=(), actions=("review in 2 weeks, GP",)),
-                "discharge", "GP", declined=L.load_declined(DECLINED_ALLERGY))
+        L.build(tpl(question="Please review.", problems=("cough",), allergies=(), actions=("review in 2 weeks, family doctor",)),
+                "discharge", "family doctor", declined=L.load_declined(DECLINED_ALLERGY))
 
 
 @pytest.mark.parametrize("bad", ['[[declined]]\nitem = "allergy_any"\n', DECLINED_ALLERGY.replace('"allergies"', '"spleen"'),
@@ -6443,13 +6449,13 @@ MOOD_TOPIC = ("mh_q2", "mood", "interest", "down", "mental", "depress", "two wee
 
 def _mood_run(tmp_path, audience, tamper=None, monkeypatch=None):
     text = tpl(question="Please review.", problems=("cough", "low mood"), meds=("paracetamol 1 g four times a day",),
-               actions=("review in 2 weeks, GP",))
+               actions=("review in 2 weeks, family doctor",))
     n = next(i for i, l in enumerate(text.splitlines(), 1) if "low mood" in l)
     d = tmp_path / "declined.toml"
     tmp_path.mkdir(parents=True, exist_ok=True)
     d.write_text(DECLINED_MOOD.replace("{n}", str(n)))
     args = ["--type", "discharge", "--declined", str(d)] + (
-        ["--to", "Patient", "--audience", "patient"] if audience == "patient" else ["--to", "GP"])
+        ["--to", "Patient", "--audience", "patient"] if audience == "patient" else ["--to", "family doctor"])
     r, out = _run_t(tmp_path / "run", text, *args)
     return r, out, n
 
@@ -6572,7 +6578,7 @@ def test_to_unknown_person_id_by_hand_never_name_matched(tmp_path):
 
 
 def test_to_name_still_normal_route(tmp_path):
-    r, out = _to(tmp_path, "GP")
+    r, out = _to(tmp_path, "family doctor")
     assert r.returncode == 0, r.stderr
 
 
@@ -6607,10 +6613,10 @@ def test_no_guardian_branch_in_code():
 
 
 def test_patient_letters_never_say_no_medicine_changes_documented():
-    """Physician 15 Oct 16:00: patient letters only; the GP letter keeps the line."""
+    """Physician 15 Oct 16:00: patient letters only; the family doctor letter keeps the line."""
     t = "SYNTH-9\n1937-01-01 Seen today."
     assert "No medicine changes documented." not in make_letter(t, "discharge", "Patient", audience="patient")
-    assert "No medicine changes documented." in make_letter(t, "gp-update", "GP")
+    assert "No medicine changes documented." in make_letter(t, "gp-update", "family doctor")
 
 
 def test_guardian_view_shows_pv_ans_sdm():

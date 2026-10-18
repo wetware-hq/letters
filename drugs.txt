@@ -99,18 +99,10 @@ valproate
 venlafaxine
 verapamil
 warfarin
-Lasix=furosemide
-Panadol=paracetamol
-Lipitor=atorvastatin
-Nexium=esomeprazole
-Ventolin=salbutamol
-Zoloft=sertraline
 esomeprazole
-Augmentin=amoxicillin/clavulanate
-# Round 11 follow-up (13 Oct 2026): Physician's queued generics. frusemide and glyceryl trinitrate are kept as written
-# (no swap to furosemide; GTN is a signed single-meaning entry). sacubitril/valsartan is one combination item.
+# Round 11 follow-up (13 Oct 2026): Physician's queued generics. glyceryl trinitrate is kept as written
+# (frusemide moved to the locale pack alias list: Physician override, 2026-10-16; GTN is a signed single-meaning entry). sacubitril/valsartan is one combination item.
 prednisone
-frusemide
 glyceryl trinitrate
 dabigatran
 ticagrelor

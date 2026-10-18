@@ -16,6 +16,6 @@ Med: amoxicillin 1 g PO tds for 4 more days
 Result: CRP 40 mg/L
 Resolved: CAP
 Pending: sputum culture
-Follow-up: GP review in 1 week; restart metformin if eating normally
+Follow-up: family doctor review in 1 week; restart metformin if eating normally
 Follow-up: repeat chest X-ray in 6 weeks
 Question: Is she safe to drive?

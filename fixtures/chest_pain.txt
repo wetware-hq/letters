@@ -1,7 +1,7 @@
 Patient: SYNTH-1001
 PMHx: hypertension, ex-smoker
 Allergy: penicillin (rash)
-1937-03-02 GP review. Three weeks of exertional chest tightness, settles with rest.
+1937-03-02 family doctor review. Three weeks of exertional chest tightness, settles with rest.
 Problem: exertional chest pain
 Med: aspirin 100 mg daily
 Med: ramipril 2.5 mg daily
